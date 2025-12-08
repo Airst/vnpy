@@ -3,6 +3,8 @@
 *.pyo
 *.pyd
 *.egg-info/
+.venv/
+alpha_db/
 
 # Jupyter
 .ipynb_checkpoints
