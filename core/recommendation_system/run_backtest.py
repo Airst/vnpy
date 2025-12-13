@@ -80,11 +80,11 @@ def run_backtest():
         )
         
         # Add processors
-        dataset.add_processor("learn", process_drop_na)
-        dataset.add_processor("learn", process_robust_zscore_norm)
+        dataset.add_processor("learn", process_drop_na)  # type: ignore
+        dataset.add_processor("learn", process_robust_zscore_norm) # type: ignore
         
-        dataset.add_processor("infer", process_robust_zscore_norm)
-        dataset.add_processor("infer", partial(process_fill_na, fill_value=0)) # Fill NaNs with 0 (mean) after norm
+        dataset.add_processor("infer", process_robust_zscore_norm) # type: ignore
+        dataset.add_processor("infer", partial(process_fill_na, fill_value=0)) # type: ignore Fill NaNs with 0 (mean) after norm for inference
         
         dataset.prepare_data()
         dataset.process_data()

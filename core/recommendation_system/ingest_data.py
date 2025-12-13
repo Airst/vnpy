@@ -66,7 +66,7 @@ def ingest_data(
         )
         
         print(f"Querying {req_symbol}.{exchange.value} from DB...")
-        bars = db.load_bar_data(req.symbol, req.exchange, req.interval, req.start, req.end)
+        bars = db.load_bar_data(req.symbol, req.exchange, req.interval, req.start, req.end) #type: ignore
         
         if not bars:
             print(f"  No data found in DB for {req_symbol}.{exchange.value}")
