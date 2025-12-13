@@ -23,7 +23,7 @@ This system uses `vnpy.alpha` to build a stock recommendation model based on his
     ```bash
     python core/recommendation_system/run_backtest.py
     ```
-    This will output performance statistics and open a browser with the equity curve and drawdown charts.
+    This will output performance statistics and open a GUI window with the equity curve and drawdown charts.
 
 ## Configuration
 

@@ -13,18 +13,19 @@ def floor_vol(vol: float) -> float:
 
 class RecStrategy(AlphaStrategy):
     """
-    Stock Recommendation Strategy.
-    Buys top K stocks with highest predicted return.
+    Stock Recommendation Strategy (Daily Decision).
+    
+    Logic:
+    1. Sell: If signal < 0 OR Stop Loss hit -> Sell next day.
+    2. Buy: Top N positive signals (not held) -> Buy next day using available cash.
     """
     
-    top_k: int = 5                  # Hold top 5 stocks
-    cash_ratio: float = 0.95        # Use 95% of capital
+    buy_count: int = 1              # Max stocks to buy per day
+    max_pos: int = 10               # Max total positions
     stop_loss: float = 0.10         # 10% Stop Loss threshold
-    min_holding_days: int = 3       # Minimum holding days before selling
     
     # Backtesting parameters
-    price_add: float = 0.5        # Slippage/Aggressive order
-    fixed_capital: float = 1_000_000 # Use fixed capital for sizing
+    price_add: float = 0.5          # Slippage/Aggressive order
 
     def on_init(self) -> None:
         """Initialize strategy"""
@@ -35,9 +36,10 @@ class RecStrategy(AlphaStrategy):
     def on_bars(self, bars: dict[str, BarData]) -> None:
         """On bar data update callback"""
         # Update holding days for positions
-        for vt_symbol in list(self.pos_data.keys()):
-            if self.pos_data[vt_symbol] > 0:
-                self.holding_days[vt_symbol] += 1
+        current_holdings = [s for s, pos in self.pos_data.items() if pos > 0]
+        
+        for vt_symbol in current_holdings:
+            self.holding_days[vt_symbol] += 1
 
         # 1. Get Prediction Signals
         signal_df = self.get_signal()
@@ -45,58 +47,82 @@ class RecStrategy(AlphaStrategy):
         if signal_df.is_empty():
             return
 
-        # Sort by signal score (descending)
-        signal_df = signal_df.sort("signal", descending=True)
-        
-        # 2. Determine Target Portfolio
-        target_symbols = signal_df["vt_symbol"][:self.top_k].to_list()
-        
-        current_pos_symbols = [s for s, pos in self.pos_data.items() if pos > 0]
-        
-        # 3. Check Stop Loss
-        for vt_symbol in current_pos_symbols:
-            if vt_symbol in bars:
-                bar = bars[vt_symbol]
-                entry_price = self.entry_prices.get(vt_symbol, 0)
-                if entry_price > 0 and bar.close_price < entry_price * (1 - self.stop_loss):
-                    # Trigger Stop Loss (Immediate exit)
-                    self.set_target(vt_symbol, 0)
-                    if vt_symbol in target_symbols:
-                        target_symbols.remove(vt_symbol)
-        
-        # 4. Calculate target position for each stock
-        # Use fixed capital to avoid potential cash tracking issues in alpha engine
-        total_assets = self.fixed_capital
-        
-        target_count = len(target_symbols)
-        
-        if target_count == 0:
-            target_per_stock = 0
-        else:
-            target_per_stock = (total_assets * self.cash_ratio) / target_count
+        # Map signal for easy access
+        signal_map = {
+            row[0]: row[1] 
+            for row in signal_df.select(["vt_symbol", "signal"]).iter_rows()
+        }
 
-        # 5. Rebalance positions
-        
-        # Sell: Stocks not in target list
-        for vt_symbol in current_pos_symbols:
-            if vt_symbol not in target_symbols:
-                # Only sell if held long enough
-                if self.holding_days[vt_symbol] >= self.min_holding_days:
-                    self.set_target(vt_symbol, 0)
-        
-        # Buy/Adjust: Stocks in target list
-        for vt_symbol in target_symbols:
+        # 2. Sell Logic
+        for vt_symbol in current_holdings:
             if vt_symbol not in bars:
                 continue
                 
             bar = bars[vt_symbol]
-            if bar.close_price <= 0:
-                continue
+            entry_price = self.entry_prices.get(vt_symbol, 0)
+            signal = signal_map.get(vt_symbol, 0)
+            
+            should_sell = False
+            
+            # Condition A: Stop Loss
+            if entry_price > 0 and bar.close_price < entry_price * (1 - self.stop_loss):
+                should_sell = True
+            
+            # Condition B: Negative Signal
+            if signal < 0:
+                should_sell = True
                 
-            target_vol = floor_vol(target_per_stock / bar.close_price)
-            self.set_target(vt_symbol, target_vol)
+            if should_sell:
+                self.set_target(vt_symbol, 0)
 
-        # 6. Execute trading
+        # 3. Buy Logic
+        # Select candidates: Positive signal, Not held
+        candidates = []
+        for vt_symbol, signal in signal_map.items():
+            if vt_symbol not in current_holdings and signal > 0:
+                candidates.append((vt_symbol, signal))
+        
+        # Sort by signal strength
+        candidates.sort(key=lambda x: x[1], reverse=True)
+        
+        # Take top N
+        target_buys = candidates[:self.buy_count]
+        
+        # Check Max Position Limit
+        current_holding_count = len(current_holdings)
+        
+        if current_holding_count < self.max_pos:
+            slots_available = self.max_pos - current_holding_count
+            actual_buys = target_buys[:slots_available]
+            
+            if actual_buys:
+                # Dynamic Position Sizing (Full Position)
+                available_cash = self.get_cash_available()
+                
+                # Distribute cash equally among actual buys
+                capital_per_trade = available_cash / len(actual_buys)
+                
+                self.write_log(f"Buy Decision: Cash={available_cash:.2f}, Targets={len(actual_buys)}, PerTrade={capital_per_trade:.2f}")
+
+                # Minimum trade capital check (prevent dust trading)
+                MIN_TRADE_CAPITAL = 5000
+                if capital_per_trade < MIN_TRADE_CAPITAL:
+                    self.write_log(f"Skipping buys: Capital per trade {capital_per_trade:.2f} < Min {MIN_TRADE_CAPITAL}")
+                else:
+                    for vt_symbol, _ in actual_buys:
+                        if vt_symbol not in bars:
+                            continue
+                        bar = bars[vt_symbol]
+                        if bar.close_price <= 0:
+                            continue
+                        
+                        # Calculate volume
+                        vol = floor_vol(capital_per_trade / bar.close_price)
+                        if vol > 0:
+                            self.set_target(vt_symbol, vol)
+                            self.write_log(f"Set Target {vt_symbol}: Vol={vol}, Price={bar.close_price}, Est.Amt={vol*bar.close_price:.2f}")
+
+        # 4. Execute trading
         self.execute_trading(bars, self.price_add)
 
     def on_trade(self, trade: TradeData) -> None:
