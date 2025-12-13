@@ -84,7 +84,7 @@ def ingest_data(
             vt_symbol=f"{req_symbol}.{exchange.value}",
             long_rate=0.0003,   # Est. commission
             short_rate=0.0013,  # Est. commission + tax
-            size=100,           # 1 lot = 100 shares
+            size=1,             # 1 share per unit of volume
             pricetick=0.01
         )
 

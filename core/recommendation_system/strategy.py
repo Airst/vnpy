@@ -2,9 +2,14 @@
 from vnpy.alpha.strategy import AlphaStrategy
 from vnpy.trader.constant import Direction
 from vnpy.trader.object import TradeData, BarData
-from vnpy.trader.utility import round_to
 import polars as pl
 from collections import defaultdict
+
+
+def floor_vol(vol: float) -> float:
+    """Floor to nearest 100 shares"""
+    return int(vol // 100) * 100
+
 
 class RecStrategy(AlphaStrategy):
     """
@@ -12,22 +17,28 @@ class RecStrategy(AlphaStrategy):
     Buys top K stocks with highest predicted return.
     """
     
-    top_k: int = 1                 # Hold top 10
-    cash_ratio: float = 0.95        # Use 95% cash
-    min_volume: int = 100           # 1 Lot
-    stop_loss: float = 0.10         # 10% Stop Loss
+    top_k: int = 5                  # Hold top 5 stocks
+    cash_ratio: float = 0.95        # Use 95% of capital
+    stop_loss: float = 0.10         # 10% Stop Loss threshold
+    min_holding_days: int = 3       # Minimum holding days before selling
     
     # Backtesting parameters
-    open_rate: float = 0.0003
-    close_rate: float = 0.0013
-    price_add: float = 0.02         # Slippage/Aggressive order
+    price_add: float = 0.5        # Slippage/Aggressive order
+    fixed_capital: float = 1_000_000 # Use fixed capital for sizing
 
     def on_init(self) -> None:
+        """Initialize strategy"""
         self.holding_days = defaultdict(int)
         self.entry_prices = defaultdict(float)
         self.write_log("RecStrategy Initialized.")
 
     def on_bars(self, bars: dict[str, BarData]) -> None:
+        """On bar data update callback"""
+        # Update holding days for positions
+        for vt_symbol in list(self.pos_data.keys()):
+            if self.pos_data[vt_symbol] > 0:
+                self.holding_days[vt_symbol] += 1
+
         # 1. Get Prediction Signals
         signal_df = self.get_signal()
         
@@ -38,40 +49,39 @@ class RecStrategy(AlphaStrategy):
         signal_df = signal_df.sort("signal", descending=True)
         
         # 2. Determine Target Portfolio
-        # Select top K candidates
         target_symbols = signal_df["vt_symbol"][:self.top_k].to_list()
         
         current_pos_symbols = [s for s, pos in self.pos_data.items() if pos > 0]
         
-        # Check Stop Loss
+        # 3. Check Stop Loss
         for vt_symbol in current_pos_symbols:
             if vt_symbol in bars:
                 bar = bars[vt_symbol]
                 entry_price = self.entry_prices.get(vt_symbol, 0)
                 if entry_price > 0 and bar.close_price < entry_price * (1 - self.stop_loss):
-                    # Trigger Stop Loss
+                    # Trigger Stop Loss (Immediate exit)
                     self.set_target(vt_symbol, 0)
                     if vt_symbol in target_symbols:
                         target_symbols.remove(vt_symbol)
         
-        # Calculate available cash
-        # Note: get_cash_available returns cash after T+1 settlement logic usually, 
-        # but in simplistic backtest it might be immediate or next day.
-        total_assets = self.get_portfolio_value()
+        # 4. Calculate target position for each stock
+        # Use fixed capital to avoid potential cash tracking issues in alpha engine
+        total_assets = self.fixed_capital
         
-        # Adjust target count if we removed some due to SL
         target_count = len(target_symbols)
+        
         if target_count == 0:
             target_per_stock = 0
         else:
             target_per_stock = (total_assets * self.cash_ratio) / target_count
 
-        # 3. Rebalance
+        # 5. Rebalance positions
         
         # Sell: Stocks not in target list
         for vt_symbol in current_pos_symbols:
             if vt_symbol not in target_symbols:
-                if vt_symbol in bars:
+                # Only sell if held long enough
+                if self.holding_days[vt_symbol] >= self.min_holding_days:
                     self.set_target(vt_symbol, 0)
         
         # Buy/Adjust: Stocks in target list
@@ -84,17 +94,21 @@ class RecStrategy(AlphaStrategy):
                 continue
                 
             target_vol = floor_vol(target_per_stock / bar.close_price)
-            
             self.set_target(vt_symbol, target_vol)
 
-        # Execute
+        # 6. Execute trading
         self.execute_trading(bars, self.price_add)
 
     def on_trade(self, trade: TradeData) -> None:
         """Update entry prices"""
+        super().on_trade(trade)
+        
         if trade.direction == Direction.LONG:
+            # Reset holding days on buy
+            self.holding_days[trade.vt_symbol] = 0
+            
             # Weighted average entry price
-            current_pos = self.pos_data[trade.vt_symbol]
+            current_pos = self.pos_data.get(trade.vt_symbol, 0)
             prev_pos = current_pos - trade.volume
             
             if prev_pos <= 0:
@@ -105,9 +119,6 @@ class RecStrategy(AlphaStrategy):
                 self.entry_prices[trade.vt_symbol] = new_cost / current_pos
                 
         elif trade.direction == Direction.SHORT:
-            if self.pos_data[trade.vt_symbol] <= 0:
+            if self.pos_data.get(trade.vt_symbol, 0) <= 0:
                 self.entry_prices[trade.vt_symbol] = 0.0
-
-def floor_vol(vol: float) -> float:
-    """Floor to nearest 100"""
-    return int(vol // 100) * 100
+                self.holding_days[trade.vt_symbol] = 0

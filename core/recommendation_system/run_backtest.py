@@ -46,41 +46,51 @@ def run_backtest():
         else:
             vt_symbols.append(f"{s}.{e}")
 
-    print(f"Loading data for {len(vt_symbols)} symbols...")
-    
-    # Load bar dataframe
-    # Need to load enough data to cover all periods
-    # Start from train start
-    df = lab.load_bar_df(
-        vt_symbols=vt_symbols,
-        interval=Interval.DAILY,
-        start=train_period[0],
-        end=test_period[1],
-        extended_days=60 # For calculation window
-    )
-    
-    if df is None or df.is_empty():
-        print("No data loaded. Please run ingest_data.py first.")
-        return
+    dataset_name = "rec_dataset"
+    dataset = lab.load_dataset(dataset_name)
 
-    # 3. Prepare Dataset
-    print("Preparing dataset...")
-    dataset = RecommendationDataset(
-        df=df,
-        train_period=train_period,
-        valid_period=valid_period,
-        test_period=test_period
-    )
-    
-    # Add processors
-    dataset.add_processor("learn", process_drop_na)
-    dataset.add_processor("learn", process_robust_zscore_norm)
-    
-    dataset.add_processor("infer", process_robust_zscore_norm)
-    dataset.add_processor("infer", partial(process_fill_na, fill_value=0)) # Fill NaNs with 0 (mean) after norm
-    
-    dataset.prepare_data()
-    dataset.process_data()
+    if dataset:
+        print(f"Loaded cached dataset: {dataset_name}")
+        print("To force refresh, delete the cache file in core/alpha_db/dataset/")
+    else:
+        print(f"Loading data for {len(vt_symbols)} symbols...")
+        
+        # Load bar dataframe
+        # Need to load enough data to cover all periods
+        # Start from train start
+        df = lab.load_bar_df(
+            vt_symbols=vt_symbols,
+            interval=Interval.DAILY,
+            start=train_period[0],
+            end=test_period[1],
+            extended_days=60 # For calculation window
+        )
+        
+        if df is None or df.is_empty():
+            print("No data loaded. Please run ingest_data.py first.")
+            return
+
+        # 3. Prepare Dataset
+        print("Preparing dataset...")
+        dataset = RecommendationDataset(
+            df=df,
+            train_period=train_period,
+            valid_period=valid_period,
+            test_period=test_period
+        )
+        
+        # Add processors
+        dataset.add_processor("learn", process_drop_na)
+        dataset.add_processor("learn", process_robust_zscore_norm)
+        
+        dataset.add_processor("infer", process_robust_zscore_norm)
+        dataset.add_processor("infer", partial(process_fill_na, fill_value=0)) # Fill NaNs with 0 (mean) after norm
+        
+        dataset.prepare_data()
+        dataset.process_data()
+        
+        print(f"Saving dataset to cache: {dataset_name}")
+        lab.save_dataset(dataset_name, dataset)
     
     # 4. Train Model
     print(f"Training MLP Model on {device}...")
@@ -93,7 +103,7 @@ def run_backtest():
         input_size=feature_count,
         hidden_sizes=(265,),
         lr=0.001,
-        n_epochs=500,
+        n_epochs=50,
         batch_size=4096,
         device=device,
         seed=42 # For reproducibility
@@ -135,12 +145,59 @@ def run_backtest():
     
     engine.load_data()
     engine.run_backtesting()
+    
+    # Ensure capital is set for statistics
+    engine.capital = 1_000_000
+    
     engine.calculate_result()
     engine.calculate_statistics()
     
     # 7. Visualization
     print("Displaying Chart...")
-    engine.show_chart()
+    # engine.show_chart() # Replaced with save to html
+    
+    if engine.daily_df is not None:
+        import plotly.graph_objects as go
+        from plotly.subplots import make_subplots
+        
+        df = engine.daily_df
+        fig = make_subplots(
+            rows=4,
+            cols=1,
+            subplot_titles=["Balance", "Drawdown", "Daily Pnl", "Pnl Distribution"],
+            vertical_spacing=0.06
+        )
+
+        balance_line = go.Scatter(
+            x=df["date"],
+            y=df["balance"],
+            mode="lines",
+            name="Balance"
+        )
+        drawdown_scatter = go.Scatter(
+            x=df["date"],
+            y=df["drawdown"],
+            fillcolor="red",
+            fill='tozeroy',
+            mode="lines",
+            name="Drawdown"
+        )
+        pnl_bar = go.Bar(y=df["net_pnl"], name="Daily Pnl")
+        pnl_histogram = go.Histogram(x=df["net_pnl"], nbinsx=100, name="Days")
+
+        fig.add_trace(balance_line, row=1, col=1)
+        fig.add_trace(drawdown_scatter, row=2, col=1)
+        fig.add_trace(pnl_bar, row=3, col=1)
+        fig.add_trace(pnl_histogram, row=4, col=1)
+
+        fig.update_layout(height=1000, width=1000)
+        
+        filename = "backtest_chart.html"
+        fig.write_html(filename)
+        print(f"Chart saved to {filename}")
+    else:
+        print("No daily result to show.")
 
 if __name__ == "__main__":
     run_backtest()
+    
