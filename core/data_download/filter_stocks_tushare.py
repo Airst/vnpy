@@ -138,7 +138,7 @@ def filter_stocks(config_path: str = "core/download_config.json"):
     new_downloads = []
     # Default range: last 1 year from today
     start_date = (today - timedelta(days=365)).strftime("%Y%m%d")
-    end_date = (today + timedelta(days=1)).strftime("%Y%m%d") # Include today
+    end_date = "latest"
     
     for ts_code in target_stocks:
         code, suffix = ts_code.split(".")

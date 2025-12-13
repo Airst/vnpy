@@ -48,7 +48,10 @@ def ingest_data(
             exchange = Exchange(exchange_str)
             interval = Interval(interval_str)
             start = datetime.strptime(start_str, "%Y%m%d")
-            end = datetime.strptime(end_str, "%Y%m%d")
+            if end_str == "latest":
+                end = datetime.now()
+            else:
+                end = datetime.strptime(end_str, "%Y%m%d")
         except Exception as e:
             print(f"Skipping {symbol_str}: Invalid config format ({e})")
             continue

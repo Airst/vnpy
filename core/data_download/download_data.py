@@ -7,7 +7,7 @@ from vnpy.trader.database import get_database
 from vnpy.trader.object import HistoryRequest
 
 
-def download_data(config_path: str = "core/download_config.json"):
+def download_data(config_path: str = "core/data_download/download_config.json"):
     """
     下载历史数据并存入数据库
     """
@@ -27,7 +27,10 @@ def download_data(config_path: str = "core/download_config.json"):
         exchange: Exchange = Exchange(task["exchange"])
         interval: Interval = Interval(task["interval"])
         start: datetime = datetime.strptime(task["start_date"], "%Y%m%d")
-        end: datetime = datetime.strptime(task["end_date"], "%Y%m%d")
+        if task["end_date"] == "latest":
+            end = datetime.now()
+        else:
+            end: datetime = datetime.strptime(task["end_date"], "%Y%m%d")
 
         # 为了兼容交易所代码后缀（如SH、SZ），统一从配置中读取并拆分
         req_symbol: str = symbol.split(".")[0]

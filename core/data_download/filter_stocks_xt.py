@@ -128,7 +128,7 @@ def filter_stocks(config_path: str = "core/download_config.json"):
     
     # Download range: last 1 year from today (standard)
     dl_start_date = (today - timedelta(days=365)).strftime("%Y%m%d")
-    dl_end_date = (today + timedelta(days=1)).strftime("%Y%m%d")
+    dl_end_date = "latest"
     
     for code in final_stocks:
         # xtquant code: "000001.SZ"

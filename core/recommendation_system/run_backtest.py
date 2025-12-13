@@ -1,10 +1,12 @@
 
 import json
 from datetime import datetime
+from functools import partial
 import polars as pl
+import torch
 from vnpy.alpha.lab import AlphaLab
-from vnpy.alpha.model.models.lasso_model import LassoModel
-from vnpy.alpha.dataset.processor import process_drop_na, process_robust_zscore_norm
+from vnpy.alpha.model.models.mlp_model import MlpModel
+from vnpy.alpha.dataset.processor import process_drop_na, process_robust_zscore_norm, process_fill_na
 from vnpy.alpha.dataset import Segment
 from vnpy.alpha.strategy import BacktestingEngine
 from vnpy.trader.constant import Interval
@@ -20,7 +22,11 @@ def run_backtest():
     # Define periods
     train_period = ("2022-12-07", "2023-12-31")
     valid_period = ("2024-01-01", "2024-06-30")
-    test_period  = ("2024-07-01", "2025-12-08") # Adjust end date as needed
+    test_period  = ("2024-07-01", "2025-12-12") # Adjust end date as needed
+
+    # Check GPU availability
+    device = "cuda" if torch.cuda.is_available() else "cpu"
+    print(f"Using device: {device}")
 
     lab = AlphaLab(lab_path)
     
@@ -69,14 +75,30 @@ def run_backtest():
     # Add processors
     dataset.add_processor("learn", process_drop_na)
     dataset.add_processor("learn", process_robust_zscore_norm)
+    
     dataset.add_processor("infer", process_robust_zscore_norm)
+    dataset.add_processor("infer", partial(process_fill_na, fill_value=0)) # Fill NaNs with 0 (mean) after norm
     
     dataset.prepare_data()
     dataset.process_data()
     
     # 4. Train Model
-    print("Training Lasso Model...")
-    model = LassoModel(alpha=0.0001)
+    print(f"Training MLP Model on {device}...")
+    
+    # learn_df columns: datetime, vt_symbol, feature1, feature2, ..., label
+    feature_count = len(dataset.learn_df.columns) - 3 # datetime, vt_symbol, label
+    print(f"Feature count: {feature_count}")
+
+    model = MlpModel(
+        input_size=feature_count,
+        hidden_sizes=(265,),
+        lr=0.001,
+        n_epochs=500,
+        batch_size=4096,
+        device=device,
+        seed=42 # For reproducibility
+    )
+    
     model.fit(dataset)
     model.detail()
     
@@ -107,7 +129,7 @@ def run_backtest():
     
     engine.add_strategy(
         strategy_class=RecStrategy,
-        setting={"top_k": 1},
+        setting={"top_k": 5, "stop_loss": 0.10},
         signal_df=signal_df
     )
     
