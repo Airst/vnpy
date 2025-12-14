@@ -5,9 +5,9 @@ from vnpy.alpha.model.models.mlp_model import MlpModel
 from vnpy.alpha.dataset import AlphaDataset
 
 from experiment_config import CONFIGS
-from data_loader import get_vt_symbols, load_raw_data, create_dataset
+from data_loader import get_vt_symbols, get_dataset
 
-def train_model(config_name: str = "default_mlp") -> tuple[MlpModel, AlphaDataset]:
+def train_model(config_name: str = "default_mlp", force_reload: bool = False) -> tuple[MlpModel, AlphaDataset]:
     if config_name not in CONFIGS:
         raise ValueError(f"Config '{config_name}' not found available configs: {list(CONFIGS.keys())}")
 
@@ -34,22 +34,16 @@ def train_model(config_name: str = "default_mlp") -> tuple[MlpModel, AlphaDatase
     vt_symbols = get_vt_symbols(config_path)
 
     dataset_name = dataset_cfg.get("name", "rec_dataset")
-    dataset = lab.load_dataset(dataset_name)
-
-    if dataset:
-        print(f"Loaded cached dataset: {dataset_name}")
-        print("To force refresh, delete the cache file in core/alpha_db/dataset/")
-    else:
-        df = load_raw_data(lab, vt_symbols, train_period[0], test_period[1])
-        
-        if df is None or df.is_empty():
-            raise RuntimeError("No data loaded. Please run ingest_data.py first.")
-
-        # 3. Prepare Dataset
-        dataset = create_dataset(df, train_period, valid_period, test_period)
-        
-        print(f"Saving dataset to cache: {dataset_name}")
-        lab.save_dataset(dataset_name, dataset)
+    
+    dataset = get_dataset(
+        lab,
+        dataset_name,
+        vt_symbols,
+        train_period,
+        valid_period,
+        test_period,
+        force_reload=force_reload
+    )
     
     # 4. Train Model
     model_cfg = cfg["model"]

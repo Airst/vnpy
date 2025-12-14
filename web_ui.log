@@ -1,0 +1,550 @@
+INFO:     Will watch for changes in these directories: ['/home/airst/Workspace/vnpy']
+INFO:     Uvicorn running on http://0.0.0.0:8000 (Press CTRL+C to quit)
+INFO:     Started reloader process [73061] using StatReload
+INFO:     Started server process [73064]
+INFO:     Waiting for application startup.
+INFO:     Application startup complete.
+INFO:     127.0.0.1:49286 - "GET / HTTP/1.1" 200 OK
+Running Experiment: default_mlp
+Description: Default MLP Model (Trend Following) - Baseline
+Using device: cuda
+Required Data Range: 2022-12-07 to 2025-12-12
+Loaded cached dataset: rec_dataset
+Cached Data Range: 2022-12-08 to 2025-12-12
+Cache covers the requested period.
+Applying processors and splitting data...
+Saving dataset to cache: rec_dataset
+Training mlp Model on cuda...
+Feature count: 15
+[32m2025-12-14 15:06:25[0m [1m[Step 20]: train_loss 9.797575, valid_loss 0.935911[0m
+[32m2025-12-14 15:06:25[0m [1m	验证集损失从 inf 降低到 0.935911[0m
+/home/airst/Workspace/vnpy/.venv/lib/python3.12/site-packages/torch/optim/lr_scheduler.py:1347: UserWarning: The epoch parameter in `scheduler.step()` was not necessary and is being deprecated where possible. Please use `scheduler.step()` to step the scheduler. During the deprecation, if epoch is different from None, the closed form is used instead of the new chainable form, where available. Please open an issue if you are unable to replicate your use case: https://github.com/pytorch/pytorch/issues/new/choose.
+  warnings.warn(EPOCH_DEPRECATION_WARNING, UserWarning)
+[32m2025-12-14 15:06:25[0m [1m[Step 40]: train_loss 0.252883, valid_loss 0.126456[0m
+[32m2025-12-14 15:06:25[0m [1m	验证集损失从 0.935911 降低到 0.126456[0m
+[32m2025-12-14 15:06:25[0m [1m[Step 50]: train_loss 0.031079, valid_loss 0.052459[0m
+[32m2025-12-14 15:06:25[0m [1m	验证集损失从 0.126456 降低到 0.052459[0m
+[32m2025-12-14 15:06:25[0m [1m输入特征维度: 15[0m
+[32m2025-12-14 15:06:25[0m [1m隐藏层大小: (256,)[0m
+[32m2025-12-14 15:06:25[0m [1m模型总参数量: 4,865[0m
+[32m2025-12-14 15:06:25[0m [1m训练设备: cuda[0m
+[32m2025-12-14 15:06:25[0m [1m当前学习率: 0.1[0m
+[32m2025-12-14 15:06:25[0m [1m批次大小: 4096[0m
+Saving model to default_mlp_model...
+Generating Signals...
+Running Backtest...
+[32m2025-12-14 15:06:25[0m [1m开始加载历史数据[0m
+  0%|          | 0/1976 [00:00<?, ?it/s]  1%|▏         | 27/1976 [00:00<00:07, 263.31it/s]  3%|▎         | 58/1976 [00:00<00:06, 284.85it/s]  4%|▍         | 87/1976 [00:00<00:06, 280.01it/s]  6%|▌         | 117/1976 [00:00<00:06, 286.94it/s]  7%|▋         | 146/1976 [00:00<00:06, 282.71it/s]  9%|▉         | 178/1976 [00:00<00:06, 292.81it/s] 11%|█         | 210/1976 [00:00<00:05, 299.09it/s] 12%|█▏        | 240/1976 [00:00<00:05, 298.96it/s] 14%|█▎        | 270/1976 [00:01<00:07, 225.93it/s] 15%|█▌        | 300/1976 [00:01<00:06, 243.47it/s] 17%|█▋        | 330/1976 [00:01<00:06, 257.38it/s] 18%|█▊        | 360/1976 [00:01<00:06, 267.91it/s] 20%|█▉        | 391/1976 [00:01<00:05, 276.71it/s] 21%|██▏       | 421/1976 [00:01<00:05, 282.76it/s] 23%|██▎       | 450/1976 [00:01<00:05, 281.40it/s] 24%|██▍       | 480/1976 [00:01<00:05, 286.18it/s] 26%|██▌       | 509/1976 [00:01<00:05, 279.78it/s] 27%|██▋       | 538/1976 [00:01<00:05, 281.66it/s] 29%|██▊       | 567/1976 [00:02<00:05, 279.91it/s] 30%|███       | 596/1976 [00:02<00:04, 282.19it/s] 32%|███▏      | 625/1976 [00:02<00:04, 284.15it/s] 33%|███▎      | 655/1976 [00:02<00:04, 286.55it/s] 35%|███▍      | 684/1976 [00:02<00:06, 213.39it/s] 36%|███▌      | 713/1976 [00:02<00:05, 231.29it/s] 38%|███▊      | 743/1976 [00:02<00:04, 248.57it/s] 39%|███▉      | 773/1976 [00:02<00:04, 260.65it/s] 41%|████      | 803/1976 [00:02<00:04, 269.36it/s] 42%|████▏     | 832/1976 [00:03<00:04, 274.74it/s] 44%|████▎     | 861/1976 [00:03<00:04, 276.27it/s] 45%|████▌     | 890/1976 [00:03<00:03, 275.86it/s] 47%|████▋     | 919/1976 [00:03<00:03, 279.35it/s] 48%|████▊     | 948/1976 [00:03<00:03, 282.34it/s] 50%|████▉     | 979/1976 [00:03<00:03, 289.62it/s] 51%|█████     | 1009/1976 [00:03<00:03, 268.29it/s] 52%|█████▏    | 1037/1976 [00:03<00:03, 269.07it/s] 54%|█████▍    | 1066/1976 [00:03<00:03, 274.05it/s] 55%|█████▌    | 1096/1976 [00:04<00:03, 278.96it/s] 57%|█████▋    | 1125/1976 [00:04<00:03, 281.80it/s] 59%|█████▊    | 1156/1976 [00:04<00:02, 287.52it/s] 60%|█████▉    | 1185/1976 [00:04<00:03, 206.45it/s] 61%|██████▏   | 1214/1976 [00:04<00:03, 224.70it/s] 63%|██████▎   | 1243/1976 [00:04<00:03, 240.70it/s] 64%|██████▍   | 1274/1976 [00:04<00:02, 257.95it/s] 66%|██████▌   | 1303/1976 [00:04<00:02, 264.36it/s] 67%|██████▋   | 1332/1976 [00:04<00:02, 269.75it/s] 69%|██████▉   | 1361/1976 [00:05<00:02, 274.52it/s] 70%|███████   | 1391/1976 [00:05<00:02, 279.63it/s] 72%|███████▏  | 1420/1976 [00:05<00:01, 282.16it/s] 73%|███████▎  | 1449/1976 [00:05<00:01, 283.45it/s] 75%|███████▍  | 1478/1976 [00:05<00:01, 284.24it/s] 76%|███████▋  | 1507/1976 [00:05<00:01, 282.16it/s] 78%|███████▊  | 1536/1976 [00:05<00:01, 279.90it/s] 79%|███████▉  | 1565/1976 [00:05<00:01, 279.83it/s] 81%|████████  | 1594/1976 [00:05<00:01, 276.56it/s] 82%|████████▏ | 1622/1976 [00:06<00:01, 276.42it/s] 84%|████████▎ | 1650/1976 [00:06<00:01, 273.83it/s] 85%|████████▍ | 1679/1976 [00:06<00:01, 276.88it/s] 86%|████████▋ | 1708/1976 [00:06<00:00, 278.40it/s] 88%|████████▊ | 1736/1976 [00:06<00:00, 277.69it/s] 89%|████████▉ | 1765/1976 [00:06<00:00, 278.92it/s] 91%|█████████ | 1794/1976 [00:06<00:00, 191.28it/s] 92%|█████████▏| 1822/1976 [00:06<00:00, 210.44it/s] 94%|█████████▎| 1850/1976 [00:06<00:00, 226.82it/s] 95%|█████████▌| 1878/1976 [00:07<00:00, 239.17it/s] 96%|█████████▋| 1906/1976 [00:07<00:00, 247.60it/s] 98%|█████████▊| 1934/1976 [00:07<00:00, 254.41it/s] 99%|█████████▉| 1963/1976 [00:07<00:00, 262.53it/s]100%|██████████| 1976/1976 [00:07<00:00, 263.94it/s]
+[32m2025-12-14 15:06:33[0m [1m所有历史数据加载完成[0m
+[32m2025-12-14 15:06:33[0m [1m策略初始化完成[0m
+[32m2025-12-14 15:06:33[0m [1m开始回放历史数据[0m
+[32m2025-12-14 15:06:35[0m [1m历史数据回放结束[0m
+[32m2025-12-14 15:06:35[0m [1m开始计算逐日盯市盈亏[0m
+[32m2025-12-14 15:06:35[0m [1m逐日盯市盈亏计算完成[0m
+[32m2025-12-14 15:06:35[0m [1m开始计算策略统计指标[0m
+[32m2025-12-14 15:06:35[0m [1m------------------------------[0m
+[32m2025-12-14 15:06:35[0m [1m首个交易日：  2024-07-01[0m
+[32m2025-12-14 15:06:35[0m [1m最后交易日：  2025-12-12[0m
+[32m2025-12-14 15:06:35[0m [1m总交易日：  355[0m
+[32m2025-12-14 15:06:35[0m [1m盈利交易日：  188[0m
+[32m2025-12-14 15:06:35[0m [1m亏损交易日：  166[0m
+[32m2025-12-14 15:06:35[0m [1m起始资金：  1,000,000.00[0m
+[32m2025-12-14 15:06:35[0m [1m结束资金：  2,994,412.62[0m
+[32m2025-12-14 15:06:35[0m [1m总收益率：  199.44%[0m
+[32m2025-12-14 15:06:35[0m [1m年化收益：  134.83%[0m
+[32m2025-12-14 15:06:35[0m [1m最大回撤:   -937,255.59[0m
+[32m2025-12-14 15:06:35[0m [1m百分比最大回撤: -29.77%[0m
+[32m2025-12-14 15:06:35[0m [1m最长回撤天数:   22[0m
+[32m2025-12-14 15:06:35[0m [1m总盈亏：  1,994,412.62[0m
+[32m2025-12-14 15:06:35[0m [1m总手续费：  271,247.38[0m
+[32m2025-12-14 15:06:35[0m [1m总成交金额：  339,489,950.00[0m
+[32m2025-12-14 15:06:35[0m [1m总成交笔数：  278[0m
+[32m2025-12-14 15:06:35[0m [1m日均盈亏：  5,618.06[0m
+[32m2025-12-14 15:06:35[0m [1m日均手续费：  764.08[0m
+[32m2025-12-14 15:06:35[0m [1m日均成交金额：  956,309.72[0m
+[32m2025-12-14 15:06:35[0m [1m日均成交笔数：  0.7830985915492957[0m
+[32m2025-12-14 15:06:35[0m [1m日均收益率：  0.35%[0m
+[32m2025-12-14 15:06:35[0m [1m收益标准差：  2.89%[0m
+[32m2025-12-14 15:06:35[0m [1mSharpe Ratio：  1.87[0m
+[32m2025-12-14 15:06:35[0m [1m收益回撤比：  2.13[0m
+[32m2025-12-14 15:06:35[0m [1m策略统计指标计算完成[0m
+[32m2025-12-14 15:06:35[0m [1m开始计算策略统计指标[0m
+[32m2025-12-14 15:06:35[0m [1m------------------------------[0m
+[32m2025-12-14 15:06:35[0m [1m首个交易日：  2024-07-01[0m
+[32m2025-12-14 15:06:35[0m [1m最后交易日：  2025-12-12[0m
+[32m2025-12-14 15:06:35[0m [1m总交易日：  355[0m
+[32m2025-12-14 15:06:35[0m [1m盈利交易日：  188[0m
+[32m2025-12-14 15:06:35[0m [1m亏损交易日：  166[0m
+[32m2025-12-14 15:06:35[0m [1m起始资金：  1,000,000.00[0m
+[32m2025-12-14 15:06:35[0m [1m结束资金：  2,994,412.62[0m
+[32m2025-12-14 15:06:35[0m [1m总收益率：  199.44%[0m
+[32m2025-12-14 15:06:35[0m [1m年化收益：  134.83%[0m
+[32m2025-12-14 15:06:35[0m [1m最大回撤:   -937,255.59[0m
+[32m2025-12-14 15:06:35[0m [1m百分比最大回撤: -29.77%[0m
+[32m2025-12-14 15:06:35[0m [1m最长回撤天数:   22[0m
+[32m2025-12-14 15:06:35[0m [1m总盈亏：  1,994,412.62[0m
+[32m2025-12-14 15:06:35[0m [1m总手续费：  271,247.38[0m
+[32m2025-12-14 15:06:35[0m [1m总成交金额：  339,489,950.00[0m
+[32m2025-12-14 15:06:35[0m [1m总成交笔数：  278[0m
+[32m2025-12-14 15:06:35[0m [1m日均盈亏：  5,618.06[0m
+[32m2025-12-14 15:06:35[0m [1m日均手续费：  764.08[0m
+[32m2025-12-14 15:06:35[0m [1m日均成交金额：  956,309.72[0m
+[32m2025-12-14 15:06:35[0m [1m日均成交笔数：  0.7830985915492957[0m
+[32m2025-12-14 15:06:35[0m [1m日均收益率：  0.35%[0m
+[32m2025-12-14 15:06:35[0m [1m收益标准差：  2.89%[0m
+[32m2025-12-14 15:06:35[0m [1mSharpe Ratio：  1.87[0m
+[32m2025-12-14 15:06:35[0m [1m收益回撤比：  2.13[0m
+[32m2025-12-14 15:06:35[0m [1m策略统计指标计算完成[0m
+INFO:     127.0.0.1:49298 - "POST /api/run_backtest HTTP/1.1" 200 OK
+INFO:     127.0.0.1:49306 - "GET / HTTP/1.1" 200 OK
+Running Experiment: default_mlp
+Description: Default MLP Model (Trend Following) - Baseline
+Using device: cuda
+Required Data Range: 2022-12-07 to 2025-12-12
+Loaded cached dataset: rec_dataset
+Cached Data Range: 2022-12-08 to 2025-12-12
+Cache covers the requested period.
+Applying processors and splitting data...
+Saving dataset to cache: rec_dataset
+Training mlp Model on cuda...
+Feature count: 15
+[32m2025-12-14 15:07:12[0m [1m[Step 20]: train_loss 9.797575, valid_loss 0.935911[0m
+[32m2025-12-14 15:07:12[0m [1m	验证集损失从 inf 降低到 0.935911[0m
+[32m2025-12-14 15:07:12[0m [1m[Step 40]: train_loss 0.252883, valid_loss 0.126456[0m
+[32m2025-12-14 15:07:12[0m [1m	验证集损失从 0.935911 降低到 0.126456[0m
+[32m2025-12-14 15:07:13[0m [1m[Step 50]: train_loss 0.031079, valid_loss 0.052459[0m
+[32m2025-12-14 15:07:13[0m [1m	验证集损失从 0.126456 降低到 0.052459[0m
+[32m2025-12-14 15:07:13[0m [1m输入特征维度: 15[0m
+[32m2025-12-14 15:07:13[0m [1m隐藏层大小: (256,)[0m
+[32m2025-12-14 15:07:13[0m [1m模型总参数量: 4,865[0m
+[32m2025-12-14 15:07:13[0m [1m训练设备: cuda[0m
+[32m2025-12-14 15:07:13[0m [1m当前学习率: 0.1[0m
+[32m2025-12-14 15:07:13[0m [1m批次大小: 4096[0m
+Saving model to default_mlp_model...
+Generating Signals...
+Running Backtest...
+[32m2025-12-14 15:07:13[0m [1m开始加载历史数据[0m
+  0%|          | 0/1976 [00:00<?, ?it/s]  1%|▏         | 27/1976 [00:00<00:07, 269.15it/s]  3%|▎         | 58/1976 [00:00<00:06, 291.69it/s]  5%|▍         | 91/1976 [00:00<00:06, 307.36it/s]  6%|▋         | 124/1976 [00:00<00:05, 313.95it/s]  8%|▊         | 158/1976 [00:00<00:05, 322.18it/s] 10%|▉         | 192/1976 [00:00<00:05, 325.83it/s] 11%|█▏        | 225/1976 [00:00<00:05, 326.16it/s] 13%|█▎        | 258/1976 [00:00<00:05, 323.25it/s] 15%|█▍        | 291/1976 [00:00<00:05, 318.09it/s] 16%|█▋        | 323/1976 [00:01<00:05, 316.45it/s] 18%|█▊        | 355/1976 [00:01<00:05, 311.33it/s] 20%|█▉        | 387/1976 [00:01<00:05, 305.14it/s] 21%|██        | 418/1976 [00:01<00:13, 115.41it/s] 23%|██▎       | 450/1976 [00:02<00:10, 142.74it/s] 25%|██▍       | 485/1976 [00:02<00:08, 175.98it/s] 26%|██▌       | 518/1976 [00:02<00:07, 204.58it/s] 28%|██▊       | 550/1976 [00:02<00:06, 228.75it/s] 30%|██▉       | 583/1976 [00:02<00:05, 251.83it/s] 31%|███▏      | 618/1976 [00:02<00:04, 274.70it/s] 33%|███▎      | 652/1976 [00:02<00:04, 291.56it/s] 35%|███▍      | 688/1976 [00:02<00:04, 309.31it/s] 37%|███▋      | 722/1976 [00:02<00:03, 316.80it/s] 38%|███▊      | 757/1976 [00:02<00:03, 324.47it/s] 40%|████      | 791/1976 [00:03<00:03, 325.62it/s] 42%|████▏     | 826/1976 [00:03<00:03, 331.10it/s] 44%|████▎     | 860/1976 [00:03<00:04, 236.37it/s] 45%|████▌     | 894/1976 [00:03<00:04, 259.76it/s] 47%|████▋     | 929/1976 [00:03<00:03, 279.75it/s] 49%|████▊     | 963/1976 [00:03<00:03, 294.66it/s] 51%|█████     | 998/1976 [00:03<00:03, 308.49it/s] 52%|█████▏    | 1032/1976 [00:03<00:02, 316.43it/s] 54%|█████▍    | 1067/1976 [00:03<00:02, 325.18it/s] 56%|█████▌    | 1102/1976 [00:04<00:02, 329.60it/s] 58%|█████▊    | 1137/1976 [00:04<00:02, 331.91it/s] 59%|█████▉    | 1173/1976 [00:04<00:02, 339.52it/s] 61%|██████    | 1208/1976 [00:04<00:02, 338.95it/s] 63%|██████▎   | 1243/1976 [00:04<00:02, 337.96it/s] 65%|██████▍   | 1277/1976 [00:04<00:02, 335.49it/s] 66%|██████▋   | 1311/1976 [00:04<00:01, 333.97it/s] 68%|██████▊   | 1346/1976 [00:04<00:01, 337.51it/s] 70%|██████▉   | 1380/1976 [00:04<00:01, 335.65it/s] 72%|███████▏  | 1414/1976 [00:05<00:02, 233.72it/s] 73%|███████▎  | 1448/1976 [00:05<00:02, 256.70it/s] 75%|███████▌  | 1483/1976 [00:05<00:01, 279.12it/s] 77%|███████▋  | 1517/1976 [00:05<00:01, 294.16it/s] 79%|███████▊  | 1553/1976 [00:05<00:01, 309.56it/s] 80%|████████  | 1587/1976 [00:05<00:01, 317.83it/s] 82%|████████▏ | 1622/1976 [00:05<00:01, 326.32it/s] 84%|████████▍ | 1656/1976 [00:05<00:00, 326.67it/s] 86%|████████▌ | 1690/1976 [00:05<00:00, 326.83it/s] 87%|████████▋ | 1724/1976 [00:06<00:00, 329.35it/s] 89%|████████▉ | 1759/1976 [00:06<00:00, 332.67it/s] 91%|█████████ | 1794/1976 [00:06<00:00, 336.55it/s] 93%|█████████▎| 1829/1976 [00:06<00:00, 339.39it/s] 94%|█████████▍| 1864/1976 [00:06<00:00, 341.16it/s] 96%|█████████▌| 1899/1976 [00:06<00:00, 341.58it/s] 98%|█████████▊| 1934/1976 [00:06<00:00, 340.82it/s]100%|█████████▉| 1970/1976 [00:06<00:00, 344.69it/s]100%|██████████| 1976/1976 [00:06<00:00, 289.39it/s]
+[32m2025-12-14 15:07:20[0m [1m所有历史数据加载完成[0m
+[32m2025-12-14 15:07:20[0m [1m策略初始化完成[0m
+[32m2025-12-14 15:07:20[0m [1m开始回放历史数据[0m
+[32m2025-12-14 15:07:22[0m [1m历史数据回放结束[0m
+[32m2025-12-14 15:07:22[0m [1m开始计算逐日盯市盈亏[0m
+[32m2025-12-14 15:07:22[0m [1m逐日盯市盈亏计算完成[0m
+[32m2025-12-14 15:07:22[0m [1m开始计算策略统计指标[0m
+[32m2025-12-14 15:07:22[0m [1m------------------------------[0m
+[32m2025-12-14 15:07:22[0m [1m首个交易日：  2024-07-01[0m
+[32m2025-12-14 15:07:22[0m [1m最后交易日：  2025-12-12[0m
+[32m2025-12-14 15:07:22[0m [1m总交易日：  355[0m
+[32m2025-12-14 15:07:22[0m [1m盈利交易日：  188[0m
+[32m2025-12-14 15:07:22[0m [1m亏损交易日：  166[0m
+[32m2025-12-14 15:07:22[0m [1m起始资金：  1,000,000.00[0m
+[32m2025-12-14 15:07:22[0m [1m结束资金：  2,994,412.62[0m
+[32m2025-12-14 15:07:22[0m [1m总收益率：  199.44%[0m
+[32m2025-12-14 15:07:22[0m [1m年化收益：  134.83%[0m
+[32m2025-12-14 15:07:22[0m [1m最大回撤:   -937,255.59[0m
+[32m2025-12-14 15:07:22[0m [1m百分比最大回撤: -29.77%[0m
+[32m2025-12-14 15:07:22[0m [1m最长回撤天数:   22[0m
+[32m2025-12-14 15:07:22[0m [1m总盈亏：  1,994,412.62[0m
+[32m2025-12-14 15:07:22[0m [1m总手续费：  271,247.38[0m
+[32m2025-12-14 15:07:22[0m [1m总成交金额：  339,489,950.00[0m
+[32m2025-12-14 15:07:22[0m [1m总成交笔数：  278[0m
+[32m2025-12-14 15:07:22[0m [1m日均盈亏：  5,618.06[0m
+[32m2025-12-14 15:07:22[0m [1m日均手续费：  764.08[0m
+[32m2025-12-14 15:07:22[0m [1m日均成交金额：  956,309.72[0m
+[32m2025-12-14 15:07:22[0m [1m日均成交笔数：  0.7830985915492957[0m
+[32m2025-12-14 15:07:22[0m [1m日均收益率：  0.35%[0m
+[32m2025-12-14 15:07:22[0m [1m收益标准差：  2.89%[0m
+[32m2025-12-14 15:07:22[0m [1mSharpe Ratio：  1.87[0m
+[32m2025-12-14 15:07:22[0m [1m收益回撤比：  2.13[0m
+[32m2025-12-14 15:07:22[0m [1m策略统计指标计算完成[0m
+[32m2025-12-14 15:07:22[0m [1m开始计算策略统计指标[0m
+[32m2025-12-14 15:07:22[0m [1m------------------------------[0m
+[32m2025-12-14 15:07:22[0m [1m首个交易日：  2024-07-01[0m
+[32m2025-12-14 15:07:22[0m [1m最后交易日：  2025-12-12[0m
+[32m2025-12-14 15:07:22[0m [1m总交易日：  355[0m
+[32m2025-12-14 15:07:22[0m [1m盈利交易日：  188[0m
+[32m2025-12-14 15:07:22[0m [1m亏损交易日：  166[0m
+[32m2025-12-14 15:07:22[0m [1m起始资金：  1,000,000.00[0m
+[32m2025-12-14 15:07:22[0m [1m结束资金：  2,994,412.62[0m
+[32m2025-12-14 15:07:22[0m [1m总收益率：  199.44%[0m
+[32m2025-12-14 15:07:22[0m [1m年化收益：  134.83%[0m
+[32m2025-12-14 15:07:22[0m [1m最大回撤:   -937,255.59[0m
+[32m2025-12-14 15:07:22[0m [1m百分比最大回撤: -29.77%[0m
+[32m2025-12-14 15:07:22[0m [1m最长回撤天数:   22[0m
+[32m2025-12-14 15:07:22[0m [1m总盈亏：  1,994,412.62[0m
+[32m2025-12-14 15:07:22[0m [1m总手续费：  271,247.38[0m
+[32m2025-12-14 15:07:22[0m [1m总成交金额：  339,489,950.00[0m
+[32m2025-12-14 15:07:22[0m [1m总成交笔数：  278[0m
+[32m2025-12-14 15:07:22[0m [1m日均盈亏：  5,618.06[0m
+[32m2025-12-14 15:07:22[0m [1m日均手续费：  764.08[0m
+[32m2025-12-14 15:07:22[0m [1m日均成交金额：  956,309.72[0m
+[32m2025-12-14 15:07:22[0m [1m日均成交笔数：  0.7830985915492957[0m
+[32m2025-12-14 15:07:22[0m [1m日均收益率：  0.35%[0m
+[32m2025-12-14 15:07:22[0m [1m收益标准差：  2.89%[0m
+[32m2025-12-14 15:07:22[0m [1mSharpe Ratio：  1.87[0m
+[32m2025-12-14 15:07:22[0m [1m收益回撤比：  2.13[0m
+[32m2025-12-14 15:07:22[0m [1m策略统计指标计算完成[0m
+INFO:     127.0.0.1:49306 - "POST /api/run_backtest HTTP/1.1" 200 OK
+Loading model: default_mlp_model...
+Loading history data to ensure consistent normalization...
+Required Data Range: 2022-12-07 to 2025-12-14
+Loaded cached dataset: rec_dataset
+Cached Data Range: 2022-12-08 to 2025-12-12
+Cache covers the requested period.
+Applying processors and splitting data...
+Saving dataset to cache: rec_dataset
+Predicting...
+INFO:     127.0.0.1:55670 - "POST /api/run_prediction HTTP/1.1" 200 OK
+WARNING:  StatReload detected changes in 'core/web_ui/main.py'. Reloading...
+INFO:     Shutting down
+INFO:     Waiting for application shutdown.
+INFO:     Application shutdown complete.
+INFO:     Finished server process [73064]
+INFO:     Started server process [76962]
+INFO:     Waiting for application startup.
+INFO:     Application startup complete.
+INFO:     127.0.0.1:45958 - "GET / HTTP/1.1" 200 OK
+Loading model: default_mlp_model...
+Loading history data to ensure consistent normalization...
+Required Data Range: 2022-12-07 to 2025-12-14
+Loaded cached dataset: rec_dataset
+Cached Data Range: 2022-12-08 to 2025-12-12
+Cache covers the requested period.
+Applying processors and splitting data...
+Saving dataset to cache: rec_dataset
+Predicting...
+INFO:     127.0.0.1:45958 - "POST /api/run_prediction HTTP/1.1" 200 OK
+WARNING:  StatReload detected changes in 'core/web_ui/main.py'. Reloading...
+INFO:     Shutting down
+INFO:     Waiting for application shutdown.
+INFO:     Application shutdown complete.
+INFO:     Finished server process [76962]
+INFO:     Started server process [80051]
+INFO:     Waiting for application startup.
+INFO:     Application startup complete.
+INFO:     127.0.0.1:36518 - "GET / HTTP/1.1" 200 OK
+WARNING:  Unsupported upgrade request.
+WARNING:  No supported WebSocket library detected. Please use "pip install 'uvicorn[standard]'", or install 'websockets' or 'wsproto' manually.
+INFO:     127.0.0.1:36534 - "GET /ws/logs HTTP/1.1" 404 Not Found
+Running Prediction for default_mlp...
+Loading model: default_mlp_model...
+WARNING:  Unsupported upgrade request.
+WARNING:  No supported WebSocket library detected. Please use "pip install 'uvicorn[standard]'", or install 'websockets' or 'wsproto' manually.
+INFO:     127.0.0.1:36548 - "GET /ws/logs HTTP/1.1" 404 Not Found
+Loading history data to ensure consistent normalization...
+Required Data Range: 2022-12-07 to 2025-12-14
+Loaded cached dataset: rec_dataset
+Cached Data Range: 2022-12-08 to 2025-12-12
+Cache covers the requested period.
+Applying processors and splitting data...
+WARNING:  Unsupported upgrade request.
+WARNING:  No supported WebSocket library detected. Please use "pip install 'uvicorn[standard]'", or install 'websockets' or 'wsproto' manually.
+INFO:     127.0.0.1:36556 - "GET /ws/logs HTTP/1.1" 404 Not Found
+WARNING:  Unsupported upgrade request.
+WARNING:  No supported WebSocket library detected. Please use "pip install 'uvicorn[standard]'", or install 'websockets' or 'wsproto' manually.
+INFO:     127.0.0.1:54720 - "GET /ws/logs HTTP/1.1" 404 Not Found
+WARNING:  Unsupported upgrade request.
+WARNING:  No supported WebSocket library detected. Please use "pip install 'uvicorn[standard]'", or install 'websockets' or 'wsproto' manually.
+INFO:     127.0.0.1:54732 - "GET /ws/logs HTTP/1.1" 404 Not Found
+WARNING:  Unsupported upgrade request.
+WARNING:  No supported WebSocket library detected. Please use "pip install 'uvicorn[standard]'", or install 'websockets' or 'wsproto' manually.
+INFO:     127.0.0.1:54736 - "GET /ws/logs HTTP/1.1" 404 Not Found
+WARNING:  Unsupported upgrade request.
+WARNING:  No supported WebSocket library detected. Please use "pip install 'uvicorn[standard]'", or install 'websockets' or 'wsproto' manually.
+INFO:     127.0.0.1:54750 - "GET /ws/logs HTTP/1.1" 404 Not Found
+WARNING:  Unsupported upgrade request.
+WARNING:  No supported WebSocket library detected. Please use "pip install 'uvicorn[standard]'", or install 'websockets' or 'wsproto' manually.
+INFO:     127.0.0.1:54762 - "GET /ws/logs HTTP/1.1" 404 Not Found
+WARNING:  Unsupported upgrade request.
+WARNING:  No supported WebSocket library detected. Please use "pip install 'uvicorn[standard]'", or install 'websockets' or 'wsproto' manually.
+INFO:     127.0.0.1:51262 - "GET /ws/logs HTTP/1.1" 404 Not Found
+Saving dataset to cache: rec_dataset
+WARNING:  Unsupported upgrade request.
+WARNING:  No supported WebSocket library detected. Please use "pip install 'uvicorn[standard]'", or install 'websockets' or 'wsproto' manually.
+INFO:     127.0.0.1:51264 - "GET /ws/logs HTTP/1.1" 404 Not Found
+Predicting...
+INFO:     127.0.0.1:36518 - "POST /api/run_prediction HTTP/1.1" 200 OK
+WARNING:  Unsupported upgrade request.
+WARNING:  No supported WebSocket library detected. Please use "pip install 'uvicorn[standard]'", or install 'websockets' or 'wsproto' manually.
+INFO:     127.0.0.1:51266 - "GET /ws/logs HTTP/1.1" 404 Not Found
+WARNING:  Unsupported upgrade request.
+WARNING:  No supported WebSocket library detected. Please use "pip install 'uvicorn[standard]'", or install 'websockets' or 'wsproto' manually.
+INFO:     127.0.0.1:51274 - "GET /ws/logs HTTP/1.1" 404 Not Found
+Starting Training for default_mlp...
+Running Experiment: default_mlp
+Description: Default MLP Model (Trend Following) - Baseline
+Using device: cuda
+Required Data Range: 2022-12-07 to 2025-12-12
+WARNING:  Unsupported upgrade request.
+WARNING:  No supported WebSocket library detected. Please use "pip install 'uvicorn[standard]'", or install 'websockets' or 'wsproto' manually.
+INFO:     127.0.0.1:35800 - "GET /ws/logs HTTP/1.1" 404 Not Found
+Loaded cached dataset: rec_dataset
+Cached Data Range: 2022-12-08 to 2025-12-12
+Cache covers the requested period.
+Applying processors and splitting data...
+WARNING:  Unsupported upgrade request.
+WARNING:  No supported WebSocket library detected. Please use "pip install 'uvicorn[standard]'", or install 'websockets' or 'wsproto' manually.
+INFO:     127.0.0.1:35816 - "GET /ws/logs HTTP/1.1" 404 Not Found
+WARNING:  Unsupported upgrade request.
+WARNING:  No supported WebSocket library detected. Please use "pip install 'uvicorn[standard]'", or install 'websockets' or 'wsproto' manually.
+INFO:     127.0.0.1:35832 - "GET /ws/logs HTTP/1.1" 404 Not Found
+WARNING:  Unsupported upgrade request.
+WARNING:  No supported WebSocket library detected. Please use "pip install 'uvicorn[standard]'", or install 'websockets' or 'wsproto' manually.
+INFO:     127.0.0.1:59680 - "GET /ws/logs HTTP/1.1" 404 Not Found
+WARNING:  Unsupported upgrade request.
+WARNING:  No supported WebSocket library detected. Please use "pip install 'uvicorn[standard]'", or install 'websockets' or 'wsproto' manually.
+INFO:     127.0.0.1:59684 - "GET /ws/logs HTTP/1.1" 404 Not Found
+Saving dataset to cache: rec_dataset
+WARNING:  Unsupported upgrade request.
+WARNING:  No supported WebSocket library detected. Please use "pip install 'uvicorn[standard]'", or install 'websockets' or 'wsproto' manually.
+INFO:     127.0.0.1:52192 - "GET /ws/logs HTTP/1.1" 404 Not Found
+Training mlp Model on cuda...
+Feature count: 15
+[32m2025-12-14 15:34:47[0m [1m[Step 20]: train_loss 9.797575, valid_loss 0.935911[0m
+[32m2025-12-14 15:34:47[0m [1m	验证集损失从 inf 降低到 0.935911[0m
+/home/airst/Workspace/vnpy/.venv/lib/python3.12/site-packages/torch/optim/lr_scheduler.py:1347: UserWarning: The epoch parameter in `scheduler.step()` was not necessary and is being deprecated where possible. Please use `scheduler.step()` to step the scheduler. During the deprecation, if epoch is different from None, the closed form is used instead of the new chainable form, where available. Please open an issue if you are unable to replicate your use case: https://github.com/pytorch/pytorch/issues/new/choose.
+  warnings.warn(EPOCH_DEPRECATION_WARNING, UserWarning)
+[32m2025-12-14 15:34:48[0m [1m[Step 40]: train_loss 0.252883, valid_loss 0.126456[0m
+[32m2025-12-14 15:34:48[0m [1m	验证集损失从 0.935911 降低到 0.126456[0m
+[32m2025-12-14 15:34:48[0m [1m[Step 50]: train_loss 0.031079, valid_loss 0.052459[0m
+[32m2025-12-14 15:34:48[0m [1m	验证集损失从 0.126456 降低到 0.052459[0m
+[32m2025-12-14 15:34:48[0m [1m输入特征维度: 15[0m
+[32m2025-12-14 15:34:48[0m [1m隐藏层大小: (256,)[0m
+[32m2025-12-14 15:34:48[0m [1m模型总参数量: 4,865[0m
+[32m2025-12-14 15:34:48[0m [1m训练设备: cuda[0m
+[32m2025-12-14 15:34:48[0m [1m当前学习率: 0.1[0m
+[32m2025-12-14 15:34:48[0m [1m批次大小: 4096[0m
+Saving model to default_mlp_model...
+Starting Backtest for default_mlp...
+Generating Signals...
+Running Backtest...
+[32m2025-12-14 15:34:48[0m [1m开始加载历史数据[0m
+  0%|          | 0/1976 [00:00<?, ?it/s]  2%|1         | 33/1976 [00:00<00:05, 325.32it/s]  3%|3         | 66/1976 [00:00<00:06, 300.58it/s]  5%|5         | 100/1976 [00:00<00:05, 316.82it/s]  7%|6         | 133/1976 [00:00<00:05, 320.71it/s]  8%|8         | 166/1976 [00:00<00:05, 317.61it/s] 10%|#         | 198/1976 [00:00<00:05, 315.84it/s] 12%|#1        | 230/1976 [00:00<00:05, 316.31it/s] 13%|#3        | 262/1976 [00:00<00:07, 228.07it/s] 15%|#4        | 292/1976 [00:01<00:06, 243.99it/s] 16%|#6        | 323/1976 [00:01<00:06, 259.84it/s] 18%|#7        | 354/1976 [00:01<00:05, 272.57it/s] 20%|#9        | 388/1976 [00:01<00:05, 288.65it/s] 21%|##1       | 419/1976 [00:01<00:05, 293.25it/s] 23%|##2       | 451/1976 [00:01<00:05, 298.19it/s] 24%|##4       | 483/1976 [00:01<00:04, 303.30it/s] 26%|##6       | 514/1976 [00:01<00:04, 296.04it/s] 28%|##7       | 545/1976 [00:01<00:04, 297.17it/s] 29%|##9       | 576/1976 [00:01<00:04, 298.76it/s] 31%|###       | 608/1976 [00:02<00:04, 303.66it/s] 32%|###2      | 639/1976 [00:02<00:04, 300.55it/s] 34%|###3      | 670/1976 [00:02<00:05, 218.65it/s] 35%|###5      | 701/1976 [00:02<00:05, 239.02it/s] 37%|###7      | 732/1976 [00:02<00:04, 254.84it/s] 39%|###8      | 762/1976 [00:02<00:04, 265.96it/s]WARNING:  Unsupported upgrade request.
+WARNING:  No supported WebSocket library detected. Please use "pip install 'uvicorn[standard]'", or install 'websockets' or 'wsproto' manually.
+INFO:     127.0.0.1:52204 - "GET /ws/logs HTTP/1.1" 404 Not Found
+ 40%|####      | 792/1976 [00:02<00:04, 272.87it/s] 42%|####1     | 825/1976 [00:02<00:04, 286.58it/s] 43%|####3     | 858/1976 [00:03<00:03, 297.23it/s] 45%|####5     | 890/1976 [00:03<00:03, 302.25it/s] 47%|####6     | 922/1976 [00:03<00:03, 305.30it/s] 48%|####8     | 953/1976 [00:03<00:03, 306.60it/s] 50%|####9     | 986/1976 [00:03<00:03, 311.54it/s] 52%|#####1    | 1018/1976 [00:03<00:03, 297.10it/s] 53%|#####3    | 1049/1976 [00:03<00:03, 299.13it/s] 55%|#####4    | 1081/1976 [00:03<00:02, 303.06it/s] 56%|#####6    | 1112/1976 [00:03<00:02, 304.87it/s] 58%|#####7    | 1143/1976 [00:03<00:02, 305.84it/s] 59%|#####9    | 1174/1976 [00:04<00:03, 209.71it/s] 61%|######1   | 1206/1976 [00:04<00:03, 233.23it/s] 63%|######2   | 1237/1976 [00:04<00:02, 250.00it/s] 64%|######4   | 1268/1976 [00:04<00:02, 263.73it/s] 66%|######5   | 1300/1976 [00:04<00:02, 277.62it/s] 67%|######7   | 1332/1976 [00:04<00:02, 288.62it/s] 69%|######9   | 1364/1976 [00:04<00:02, 294.70it/s] 71%|#######   | 1395/1976 [00:04<00:01, 298.35it/s] 72%|#######2  | 1427/1976 [00:05<00:01, 302.59it/s] 74%|#######3  | 1458/1976 [00:05<00:01, 302.35it/s] 75%|#######5  | 1489/1976 [00:05<00:01, 299.28it/s] 77%|#######6  | 1520/1976 [00:05<00:01, 298.65it/s] 79%|#######8  | 1552/1976 [00:05<00:01, 301.92it/s] 80%|########  | 1584/1976 [00:05<00:01, 304.99it/s] 82%|########1 | 1616/1976 [00:05<00:01, 308.07it/s] 83%|########3 | 1647/1976 [00:05<00:01, 307.13it/s] 85%|########4 | 1679/1976 [00:05<00:00, 307.96it/s] 87%|########6 | 1711/1976 [00:05<00:00, 309.67it/s] 88%|########8 | 1742/1976 [00:06<00:00, 309.06it/s] 90%|########9 | 1773/1976 [00:06<00:00, 309.19it/s] 91%|#########1| 1804/1976 [00:06<00:00, 201.56it/s] 93%|#########2| 1835/1976 [00:06<00:00, 224.34it/s] 94%|#########4| 1866/1976 [00:06<00:00, 243.43it/s] 96%|#########5| 1896/1976 [00:06<00:00, 255.28it/s] 98%|#########7| 1929/1976 [00:06<00:00, 273.08it/s] 99%|#########9| 1961/1976 [00:06<00:00, 283.94it/s]100%|##########| 1976/1976 [00:07<00:00, 280.17it/s]
+[32m2025-12-14 15:34:55[0m [1m所有历史数据加载完成[0m
+[32m2025-12-14 15:34:55[0m [1m策略初始化完成[0m
+[32m2025-12-14 15:34:55[0m [1m开始回放历史数据[0m
+WARNING:  Unsupported upgrade request.
+WARNING:  No supported WebSocket library detected. Please use "pip install 'uvicorn[standard]'", or install 'websockets' or 'wsproto' manually.
+INFO:     127.0.0.1:37458 - "GET /ws/logs HTTP/1.1" 404 Not Found
+[32m2025-12-14 15:34:57[0m [1m历史数据回放结束[0m
+[32m2025-12-14 15:34:57[0m [1m开始计算逐日盯市盈亏[0m
+[32m2025-12-14 15:34:58[0m [1m逐日盯市盈亏计算完成[0m
+[32m2025-12-14 15:34:58[0m [1m开始计算策略统计指标[0m
+[32m2025-12-14 15:34:58[0m [1m------------------------------[0m
+[32m2025-12-14 15:34:58[0m [1m首个交易日：  2024-07-01[0m
+[32m2025-12-14 15:34:58[0m [1m最后交易日：  2025-12-12[0m
+[32m2025-12-14 15:34:58[0m [1m总交易日：  355[0m
+[32m2025-12-14 15:34:58[0m [1m盈利交易日：  188[0m
+[32m2025-12-14 15:34:58[0m [1m亏损交易日：  166[0m
+[32m2025-12-14 15:34:58[0m [1m起始资金：  1,000,000.00[0m
+[32m2025-12-14 15:34:58[0m [1m结束资金：  2,994,412.62[0m
+[32m2025-12-14 15:34:58[0m [1m总收益率：  199.44%[0m
+[32m2025-12-14 15:34:58[0m [1m年化收益：  134.83%[0m
+[32m2025-12-14 15:34:58[0m [1m最大回撤:   -937,255.59[0m
+[32m2025-12-14 15:34:58[0m [1m百分比最大回撤: -29.77%[0m
+[32m2025-12-14 15:34:58[0m [1m最长回撤天数:   22[0m
+[32m2025-12-14 15:34:58[0m [1m总盈亏：  1,994,412.62[0m
+[32m2025-12-14 15:34:58[0m [1m总手续费：  271,247.38[0m
+[32m2025-12-14 15:34:58[0m [1m总成交金额：  339,489,950.00[0m
+[32m2025-12-14 15:34:58[0m [1m总成交笔数：  278[0m
+[32m2025-12-14 15:34:58[0m [1m日均盈亏：  5,618.06[0m
+[32m2025-12-14 15:34:58[0m [1m日均手续费：  764.08[0m
+[32m2025-12-14 15:34:58[0m [1m日均成交金额：  956,309.72[0m
+[32m2025-12-14 15:34:58[0m [1m日均成交笔数：  0.7830985915492957[0m
+[32m2025-12-14 15:34:58[0m [1m日均收益率：  0.35%[0m
+[32m2025-12-14 15:34:58[0m [1m收益标准差：  2.89%[0m
+[32m2025-12-14 15:34:58[0m [1mSharpe Ratio：  1.87[0m
+[32m2025-12-14 15:34:58[0m [1m收益回撤比：  2.13[0m
+[32m2025-12-14 15:34:58[0m [1m策略统计指标计算完成[0m
+[32m2025-12-14 15:34:58[0m [1m开始计算策略统计指标[0m
+[32m2025-12-14 15:34:58[0m [1m------------------------------[0m
+[32m2025-12-14 15:34:58[0m [1m首个交易日：  2024-07-01[0m
+[32m2025-12-14 15:34:58[0m [1m最后交易日：  2025-12-12[0m
+[32m2025-12-14 15:34:58[0m [1m总交易日：  355[0m
+[32m2025-12-14 15:34:58[0m [1m盈利交易日：  188[0m
+[32m2025-12-14 15:34:58[0m [1m亏损交易日：  166[0m
+[32m2025-12-14 15:34:58[0m [1m起始资金：  1,000,000.00[0m
+[32m2025-12-14 15:34:58[0m [1m结束资金：  2,994,412.62[0m
+[32m2025-12-14 15:34:58[0m [1m总收益率：  199.44%[0m
+[32m2025-12-14 15:34:58[0m [1m年化收益：  134.83%[0m
+[32m2025-12-14 15:34:58[0m [1m最大回撤:   -937,255.59[0m
+[32m2025-12-14 15:34:58[0m [1m百分比最大回撤: -29.77%[0m
+[32m2025-12-14 15:34:58[0m [1m最长回撤天数:   22[0m
+[32m2025-12-14 15:34:58[0m [1m总盈亏：  1,994,412.62[0m
+[32m2025-12-14 15:34:58[0m [1m总手续费：  271,247.38[0m
+[32m2025-12-14 15:34:58[0m [1m总成交金额：  339,489,950.00[0m
+[32m2025-12-14 15:34:58[0m [1m总成交笔数：  278[0m
+[32m2025-12-14 15:34:58[0m [1m日均盈亏：  5,618.06[0m
+[32m2025-12-14 15:34:58[0m [1m日均手续费：  764.08[0m
+[32m2025-12-14 15:34:58[0m [1m日均成交金额：  956,309.72[0m
+[32m2025-12-14 15:34:58[0m [1m日均成交笔数：  0.7830985915492957[0m
+[32m2025-12-14 15:34:58[0m [1m日均收益率：  0.35%[0m
+[32m2025-12-14 15:34:58[0m [1m收益标准差：  2.89%[0m
+[32m2025-12-14 15:34:58[0m [1mSharpe Ratio：  1.87[0m
+[32m2025-12-14 15:34:58[0m [1m收益回撤比：  2.13[0m
+[32m2025-12-14 15:34:58[0m [1m策略统计指标计算完成[0m
+INFO:     127.0.0.1:36522 - "POST /api/run_backtest HTTP/1.1" 200 OK
+WARNING:  Unsupported upgrade request.
+WARNING:  No supported WebSocket library detected. Please use "pip install 'uvicorn[standard]'", or install 'websockets' or 'wsproto' manually.
+INFO:     127.0.0.1:37472 - "GET /ws/logs HTTP/1.1" 404 Not Found
+WARNING:  Unsupported upgrade request.
+WARNING:  No supported WebSocket library detected. Please use "pip install 'uvicorn[standard]'", or install 'websockets' or 'wsproto' manually.
+INFO:     127.0.0.1:33360 - "GET /ws/logs HTTP/1.1" 404 Not Found
+WARNING:  Unsupported upgrade request.
+WARNING:  No supported WebSocket library detected. Please use "pip install 'uvicorn[standard]'", or install 'websockets' or 'wsproto' manually.
+INFO:     127.0.0.1:33376 - "GET /ws/logs HTTP/1.1" 404 Not Found
+WARNING:  Unsupported upgrade request.
+WARNING:  No supported WebSocket library detected. Please use "pip install 'uvicorn[standard]'", or install 'websockets' or 'wsproto' manually.
+INFO:     127.0.0.1:48284 - "GET /ws/logs HTTP/1.1" 404 Not Found
+WARNING:  Unsupported upgrade request.
+WARNING:  No supported WebSocket library detected. Please use "pip install 'uvicorn[standard]'", or install 'websockets' or 'wsproto' manually.
+INFO:     127.0.0.1:48292 - "GET /ws/logs HTTP/1.1" 404 Not Found
+WARNING:  Unsupported upgrade request.
+WARNING:  No supported WebSocket library detected. Please use "pip install 'uvicorn[standard]'", or install 'websockets' or 'wsproto' manually.
+INFO:     127.0.0.1:48764 - "GET /ws/logs HTTP/1.1" 404 Not Found
+WARNING:  Unsupported upgrade request.
+WARNING:  No supported WebSocket library detected. Please use "pip install 'uvicorn[standard]'", or install 'websockets' or 'wsproto' manually.
+INFO:     127.0.0.1:48772 - "GET /ws/logs HTTP/1.1" 404 Not Found
+WARNING:  Unsupported upgrade request.
+WARNING:  No supported WebSocket library detected. Please use "pip install 'uvicorn[standard]'", or install 'websockets' or 'wsproto' manually.
+INFO:     127.0.0.1:34612 - "GET /ws/logs HTTP/1.1" 404 Not Found
+WARNING:  Unsupported upgrade request.
+WARNING:  No supported WebSocket library detected. Please use "pip install 'uvicorn[standard]'", or install 'websockets' or 'wsproto' manually.
+INFO:     127.0.0.1:40148 - "GET /ws/logs HTTP/1.1" 404 Not Found
+WARNING:  Unsupported upgrade request.
+WARNING:  No supported WebSocket library detected. Please use "pip install 'uvicorn[standard]'", or install 'websockets' or 'wsproto' manually.
+INFO:     127.0.0.1:40158 - "GET /ws/logs HTTP/1.1" 404 Not Found
+WARNING:  Unsupported upgrade request.
+WARNING:  No supported WebSocket library detected. Please use "pip install 'uvicorn[standard]'", or install 'websockets' or 'wsproto' manually.
+INFO:     127.0.0.1:57424 - "GET /ws/logs HTTP/1.1" 404 Not Found
+WARNING:  Unsupported upgrade request.
+WARNING:  No supported WebSocket library detected. Please use "pip install 'uvicorn[standard]'", or install 'websockets' or 'wsproto' manually.
+INFO:     127.0.0.1:36192 - "GET /ws/logs HTTP/1.1" 404 Not Found
+WARNING:  Unsupported upgrade request.
+WARNING:  No supported WebSocket library detected. Please use "pip install 'uvicorn[standard]'", or install 'websockets' or 'wsproto' manually.
+INFO:     127.0.0.1:36202 - "GET /ws/logs HTTP/1.1" 404 Not Found
+WARNING:  Unsupported upgrade request.
+WARNING:  No supported WebSocket library detected. Please use "pip install 'uvicorn[standard]'", or install 'websockets' or 'wsproto' manually.
+INFO:     127.0.0.1:56426 - "GET /ws/logs HTTP/1.1" 404 Not Found
+WARNING:  StatReload detected changes in 'core/web_ui/main.py'. Reloading...
+INFO:     Shutting down
+INFO:     Waiting for application shutdown.
+INFO:     Application shutdown complete.
+INFO:     Finished server process [80051]
+INFO:     Started server process [81742]
+INFO:     Waiting for application startup.
+INFO:     Application startup complete.
+WARNING:  Unsupported upgrade request.
+WARNING:  No supported WebSocket library detected. Please use "pip install 'uvicorn[standard]'", or install 'websockets' or 'wsproto' manually.
+INFO:     127.0.0.1:56922 - "GET /ws/logs HTTP/1.1" 404 Not Found
+WARNING:  Unsupported upgrade request.
+WARNING:  No supported WebSocket library detected. Please use "pip install 'uvicorn[standard]'", or install 'websockets' or 'wsproto' manually.
+INFO:     127.0.0.1:56934 - "GET /ws/logs HTTP/1.1" 404 Not Found
+WARNING:  Unsupported upgrade request.
+WARNING:  No supported WebSocket library detected. Please use "pip install 'uvicorn[standard]'", or install 'websockets' or 'wsproto' manually.
+INFO:     127.0.0.1:35620 - "GET /ws/logs HTTP/1.1" 404 Not Found
+WARNING:  Unsupported upgrade request.
+WARNING:  No supported WebSocket library detected. Please use "pip install 'uvicorn[standard]'", or install 'websockets' or 'wsproto' manually.
+INFO:     127.0.0.1:39204 - "GET /ws/logs HTTP/1.1" 404 Not Found
+WARNING:  Unsupported upgrade request.
+WARNING:  No supported WebSocket library detected. Please use "pip install 'uvicorn[standard]'", or install 'websockets' or 'wsproto' manually.
+INFO:     127.0.0.1:54910 - "GET /ws/logs HTTP/1.1" 404 Not Found
+WARNING:  Unsupported upgrade request.
+WARNING:  No supported WebSocket library detected. Please use "pip install 'uvicorn[standard]'", or install 'websockets' or 'wsproto' manually.
+INFO:     127.0.0.1:54924 - "GET /ws/logs HTTP/1.1" 404 Not Found
+INFO:     127.0.0.1:43916 - "GET / HTTP/1.1" 200 OK
+Running Experiment: default_mlp
+Description: Default MLP Model (Trend Following) - Baseline
+Using device: cuda
+Required Data Range: 2022-12-07 to 2025-12-12
+Loaded cached dataset: rec_dataset
+Cached Data Range: 2022-12-08 to 2025-12-12
+Cache covers the requested period.
+Applying processors and splitting data...
+Saving dataset to cache: rec_dataset
+Training mlp Model on cuda...
+Feature count: 15
+[32m2025-12-14 15:37:28[0m [1m[Step 20]: train_loss 9.797575, valid_loss 0.935911[0m
+[32m2025-12-14 15:37:28[0m [1m	验证集损失从 inf 降低到 0.935911[0m
+/home/airst/Workspace/vnpy/.venv/lib/python3.12/site-packages/torch/optim/lr_scheduler.py:1347: UserWarning: The epoch parameter in `scheduler.step()` was not necessary and is being deprecated where possible. Please use `scheduler.step()` to step the scheduler. During the deprecation, if epoch is different from None, the closed form is used instead of the new chainable form, where available. Please open an issue if you are unable to replicate your use case: https://github.com/pytorch/pytorch/issues/new/choose.
+  warnings.warn(EPOCH_DEPRECATION_WARNING, UserWarning)
+[32m2025-12-14 15:37:28[0m [1m[Step 40]: train_loss 0.252883, valid_loss 0.126456[0m
+[32m2025-12-14 15:37:28[0m [1m	验证集损失从 0.935911 降低到 0.126456[0m
+[32m2025-12-14 15:37:28[0m [1m[Step 50]: train_loss 0.031079, valid_loss 0.052459[0m
+[32m2025-12-14 15:37:28[0m [1m	验证集损失从 0.126456 降低到 0.052459[0m
+[32m2025-12-14 15:37:28[0m [1m输入特征维度: 15[0m
+[32m2025-12-14 15:37:28[0m [1m隐藏层大小: (256,)[0m
+[32m2025-12-14 15:37:28[0m [1m模型总参数量: 4,865[0m
+[32m2025-12-14 15:37:28[0m [1m训练设备: cuda[0m
+[32m2025-12-14 15:37:28[0m [1m当前学习率: 0.1[0m
+[32m2025-12-14 15:37:28[0m [1m批次大小: 4096[0m
+Saving model to default_mlp_model...
+Generating Signals...
+Running Backtest...
+[32m2025-12-14 15:37:28[0m [1m开始加载历史数据[0m
+  0%|          | 0/1976 [00:00<?, ?it/s]  1%|          | 24/1976 [00:00<00:08, 234.00it/s]  3%|▎         | 56/1976 [00:00<00:06, 280.17it/s]  5%|▍         | 89/1976 [00:00<00:06, 299.92it/s]  6%|▌         | 122/1976 [00:00<00:06, 308.42it/s]  8%|▊         | 154/1976 [00:00<00:05, 309.92it/s]  9%|▉         | 187/1976 [00:00<00:05, 313.96it/s] 11%|█         | 219/1976 [00:00<00:05, 315.78it/s] 13%|█▎        | 251/1976 [00:00<00:05, 306.43it/s] 14%|█▍        | 282/1976 [00:01<00:07, 230.80it/s] 16%|█▌        | 313/1976 [00:01<00:06, 249.11it/s] 17%|█▋        | 344/1976 [00:01<00:06, 263.47it/s] 19%|█▉        | 375/1976 [00:01<00:05, 274.60it/s] 21%|██        | 406/1976 [00:01<00:05, 283.45it/s] 22%|██▏       | 437/1976 [00:01<00:05, 290.33it/s] 24%|██▎       | 467/1976 [00:01<00:05, 292.31it/s] 25%|██▌       | 497/1976 [00:01<00:05, 287.34it/s] 27%|██▋       | 529/1976 [00:01<00:04, 294.37it/s] 28%|██▊       | 560/1976 [00:01<00:04, 298.77it/s] 30%|██▉       | 592/1976 [00:02<00:04, 303.46it/s] 32%|███▏      | 623/1976 [00:02<00:04, 304.91it/s] 33%|███▎      | 654/1976 [00:02<00:04, 301.66it/s] 35%|███▍      | 685/1976 [00:02<00:05, 223.91it/s] 36%|███▌      | 716/1976 [00:02<00:05, 243.61it/s] 38%|███▊      | 748/1976 [00:02<00:04, 260.26it/s] 39%|███▉      | 780/1976 [00:02<00:04, 274.36it/s] 41%|████      | 812/1976 [00:02<00:04, 285.87it/s] 43%|████▎     | 843/1976 [00:02<00:03, 290.10it/s] 44%|████▍     | 874/1976 [00:03<00:03, 294.77it/s] 46%|████▌     | 905/1976 [00:03<00:03, 295.81it/s] 47%|████▋     | 938/1976 [00:03<00:03, 302.75it/s] 49%|████▉     | 969/1976 [00:03<00:03, 302.45it/s] 51%|█████     | 1000/1976 [00:03<00:03, 282.34it/s] 52%|█████▏    | 1030/1976 [00:03<00:03, 285.50it/s] 54%|█████▎    | 1061/1976 [00:03<00:03, 290.98it/s] 55%|█████▌    | 1093/1976 [00:03<00:02, 297.35it/s] 57%|█████▋    | 1124/1976 [00:03<00:02, 299.51it/s] 58%|█████▊    | 1155/1976 [00:04<00:02, 299.19it/s] 60%|██████    | 1186/1976 [00:04<00:03, 213.64it/s] 62%|██████▏   | 1218/1976 [00:04<00:03, 235.89it/s] 63%|██████▎   | 1248/1976 [00:04<00:02, 250.98it/s] 65%|██████▍   | 1279/1976 [00:04<00:02, 266.07it/s] 66%|██████▋   | 1310/1976 [00:04<00:02, 275.98it/s] 68%|██████▊   | 1340/1976 [00:04<00:02, 281.87it/s] 69%|██████▉   | 1372/1976 [00:04<00:02, 289.94it/s] 71%|███████   | 1403/1976 [00:05<00:01, 294.05it/s] 73%|███████▎  | 1434/1976 [00:05<00:01, 297.69it/s] 74%|███████▍  | 1465/1976 [00:05<00:01, 301.00it/s] 76%|███████▌  | 1496/1976 [00:05<00:01, 300.13it/s] 77%|███████▋  | 1527/1976 [00:05<00:01, 301.99it/s] 79%|███████▉  | 1558/1976 [00:05<00:01, 303.69it/s] 80%|████████  | 1590/1976 [00:05<00:01, 307.06it/s] 82%|████████▏ | 1622/1976 [00:05<00:01, 309.48it/s] 84%|████████▎ | 1654/1976 [00:05<00:01, 311.08it/s] 85%|████████▌ | 1686/1976 [00:05<00:00, 308.26it/s] 87%|████████▋ | 1717/1976 [00:06<00:00, 305.62it/s] 89%|████████▊ | 1749/1976 [00:06<00:00, 308.45it/s] 90%|█████████ | 1784/1976 [00:06<00:00, 317.99it/s] 92%|█████████▏| 1816/1976 [00:06<00:00, 218.60it/s] 93%|█████████▎| 1847/1976 [00:06<00:00, 239.00it/s] 95%|█████████▌| 1879/1976 [00:06<00:00, 258.49it/s] 97%|█████████▋| 1911/1976 [00:06<00:00, 273.69it/s] 98%|█████████▊| 1942/1976 [00:06<00:00, 282.35it/s]100%|█████████▉| 1973/1976 [00:07<00:00, 262.08it/s]100%|██████████| 1976/1976 [00:07<00:00, 280.85it/s]
+[32m2025-12-14 15:37:35[0m [1m所有历史数据加载完成[0m
+[32m2025-12-14 15:37:35[0m [1m策略初始化完成[0m
+[32m2025-12-14 15:37:35[0m [1m开始回放历史数据[0m
+[32m2025-12-14 15:37:37[0m [1m历史数据回放结束[0m
+[32m2025-12-14 15:37:37[0m [1m开始计算逐日盯市盈亏[0m
+[32m2025-12-14 15:37:38[0m [1m逐日盯市盈亏计算完成[0m
+[32m2025-12-14 15:37:38[0m [1m开始计算策略统计指标[0m
+[32m2025-12-14 15:37:38[0m [1m------------------------------[0m
+[32m2025-12-14 15:37:38[0m [1m首个交易日：  2024-07-01[0m
+[32m2025-12-14 15:37:38[0m [1m最后交易日：  2025-12-12[0m
+[32m2025-12-14 15:37:38[0m [1m总交易日：  355[0m
+[32m2025-12-14 15:37:38[0m [1m盈利交易日：  188[0m
+[32m2025-12-14 15:37:38[0m [1m亏损交易日：  166[0m
+[32m2025-12-14 15:37:38[0m [1m起始资金：  1,000,000.00[0m
+[32m2025-12-14 15:37:38[0m [1m结束资金：  2,994,412.62[0m
+[32m2025-12-14 15:37:38[0m [1m总收益率：  199.44%[0m
+[32m2025-12-14 15:37:38[0m [1m年化收益：  134.83%[0m
+[32m2025-12-14 15:37:38[0m [1m最大回撤:   -937,255.59[0m
+[32m2025-12-14 15:37:38[0m [1m百分比最大回撤: -29.77%[0m
+[32m2025-12-14 15:37:38[0m [1m最长回撤天数:   22[0m
+[32m2025-12-14 15:37:38[0m [1m总盈亏：  1,994,412.62[0m
+[32m2025-12-14 15:37:38[0m [1m总手续费：  271,247.38[0m
+[32m2025-12-14 15:37:38[0m [1m总成交金额：  339,489,950.00[0m
+[32m2025-12-14 15:37:38[0m [1m总成交笔数：  278[0m
+[32m2025-12-14 15:37:38[0m [1m日均盈亏：  5,618.06[0m
+[32m2025-12-14 15:37:38[0m [1m日均手续费：  764.08[0m
+[32m2025-12-14 15:37:38[0m [1m日均成交金额：  956,309.72[0m
+[32m2025-12-14 15:37:38[0m [1m日均成交笔数：  0.7830985915492957[0m
+[32m2025-12-14 15:37:38[0m [1m日均收益率：  0.35%[0m
+[32m2025-12-14 15:37:38[0m [1m收益标准差：  2.89%[0m
+[32m2025-12-14 15:37:38[0m [1mSharpe Ratio：  1.87[0m
+[32m2025-12-14 15:37:38[0m [1m收益回撤比：  2.13[0m
+[32m2025-12-14 15:37:38[0m [1m策略统计指标计算完成[0m
+[32m2025-12-14 15:37:38[0m [1m开始计算策略统计指标[0m
+[32m2025-12-14 15:37:38[0m [1m------------------------------[0m
+[32m2025-12-14 15:37:38[0m [1m首个交易日：  2024-07-01[0m
+[32m2025-12-14 15:37:38[0m [1m最后交易日：  2025-12-12[0m
+[32m2025-12-14 15:37:38[0m [1m总交易日：  355[0m
+[32m2025-12-14 15:37:38[0m [1m盈利交易日：  188[0m
+[32m2025-12-14 15:37:38[0m [1m亏损交易日：  166[0m
+[32m2025-12-14 15:37:38[0m [1m起始资金：  1,000,000.00[0m
+[32m2025-12-14 15:37:38[0m [1m结束资金：  2,994,412.62[0m
+[32m2025-12-14 15:37:38[0m [1m总收益率：  199.44%[0m
+[32m2025-12-14 15:37:38[0m [1m年化收益：  134.83%[0m
+[32m2025-12-14 15:37:38[0m [1m最大回撤:   -937,255.59[0m
+[32m2025-12-14 15:37:38[0m [1m百分比最大回撤: -29.77%[0m
+[32m2025-12-14 15:37:38[0m [1m最长回撤天数:   22[0m
+[32m2025-12-14 15:37:38[0m [1m总盈亏：  1,994,412.62[0m
+[32m2025-12-14 15:37:38[0m [1m总手续费：  271,247.38[0m
+[32m2025-12-14 15:37:38[0m [1m总成交金额：  339,489,950.00[0m
+[32m2025-12-14 15:37:38[0m [1m总成交笔数：  278[0m
+[32m2025-12-14 15:37:38[0m [1m日均盈亏：  5,618.06[0m
+[32m2025-12-14 15:37:38[0m [1m日均手续费：  764.08[0m
+[32m2025-12-14 15:37:38[0m [1m日均成交金额：  956,309.72[0m
+[32m2025-12-14 15:37:38[0m [1m日均成交笔数：  0.7830985915492957[0m
+[32m2025-12-14 15:37:38[0m [1m日均收益率：  0.35%[0m
+[32m2025-12-14 15:37:38[0m [1m收益标准差：  2.89%[0m
+[32m2025-12-14 15:37:38[0m [1mSharpe Ratio：  1.87[0m
+[32m2025-12-14 15:37:38[0m [1m收益回撤比：  2.13[0m
+[32m2025-12-14 15:37:38[0m [1m策略统计指标计算完成[0m
+INFO:     127.0.0.1:43916 - "POST /api/run_backtest HTTP/1.1" 200 OK

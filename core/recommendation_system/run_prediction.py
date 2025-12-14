@@ -2,13 +2,22 @@ import argparse
 from vnpy.trader.ui import create_qapp
 
 from ui import RecommendationDialog
+import argparse
+from vnpy.trader.ui import create_qapp
+
+from ui import RecommendationDialog
 from predictor import predict_daily
+from data_manager import DataManager
 
 
-def run_prediction(config_name: str = "default_mlp"):
+def run_prediction(config_name: str = "default_mlp", force_reload: bool = False):
+    # 0. Check & Update Data
+    dm = DataManager()
+    dm.check_and_update_all(force=force_reload)
+
     # 1. Predict
     try:
-        final_df = predict_daily(config_name)
+        final_df = predict_daily(config_name, force_reload=force_reload)
     except Exception as e:
         print(f"Prediction failed: {e}")
         return
@@ -27,6 +36,7 @@ def run_prediction(config_name: str = "default_mlp"):
 if __name__ == "__main__":
     parser = argparse.ArgumentParser()
     parser.add_argument("-c", "--config", type=str, default="default_mlp")
+    parser.add_argument("--force", action="store_true", help="Force reload raw data from DB")
     args = parser.parse_args()
     
-    run_prediction(args.config)
+    run_prediction(args.config, force_reload=args.force)

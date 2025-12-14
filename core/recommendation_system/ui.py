@@ -12,7 +12,7 @@ class BacktestResultDialog(QtWidgets.QDialog):
     def __init__(self, daily_df: pl.DataFrame, trades: list, parent=None):
         super().__init__(parent)
         self.setWindowTitle("Backtest Results")
-        self.resize(1400, 900)
+        self.resize(1200, 800)
         
         # Create Layout
         layout = QtWidgets.QVBoxLayout()
@@ -23,8 +23,10 @@ class BacktestResultDialog(QtWidgets.QDialog):
         layout.addWidget(tab_widget)
         
         # Tab 1: Chart
-        self.figure = Figure(figsize=(10, 16))
+        self.figure = Figure(figsize=(10, 10))
         self.canvas = FigureCanvasQTAgg(self.figure)
+        self.canvas.setSizePolicy(QtWidgets.QSizePolicy.Policy.Expanding, QtWidgets.QSizePolicy.Policy.Expanding)
+        self.canvas.updateGeometry()
         tab_widget.addTab(self.canvas, "Chart")
         self.plot_chart(daily_df)
         
@@ -39,6 +41,9 @@ class BacktestResultDialog(QtWidgets.QDialog):
         self.load_trades(trades)
 
     def plot_chart(self, df: pl.DataFrame):
+        # Fill NaNs to avoid plotting errors
+        df = df.fill_nan(0).fill_null(0)
+        
         dates = df["date"].to_numpy()
         balance = df["balance"].to_numpy()
         drawdown = df["drawdown"].to_numpy()
@@ -49,6 +54,8 @@ class BacktestResultDialog(QtWidgets.QDialog):
         ax1.plot(dates, balance)
         ax1.set_title("Balance")
         ax1.grid(True)
+        # Hide x labels for ax1 (shared)
+        ax1.tick_params(labelbottom=False)
         
         # Drawdown
         ax2 = self.figure.add_subplot(412, sharex=ax1)
@@ -56,12 +63,15 @@ class BacktestResultDialog(QtWidgets.QDialog):
         ax2.plot(dates, drawdown, color="red")
         ax2.set_title("Drawdown")
         ax2.grid(True)
+        ax2.tick_params(labelbottom=False)
         
         # Daily PnL
         ax3 = self.figure.add_subplot(413, sharex=ax1)
         ax3.bar(dates, net_pnl)
         ax3.set_title("Daily PnL")
         ax3.grid(True)
+        # Rotate dates on the last shared axis
+        ax3.tick_params(axis='x', rotation=30)
         
         # PnL Distribution
         ax4 = self.figure.add_subplot(414)
