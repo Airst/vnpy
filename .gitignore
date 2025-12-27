@@ -4,7 +4,6 @@
 *.pyd
 *.egg-info/
 .venv/
-alpha_db/
 
 # Jupyter
 .ipynb_checkpoints
@@ -44,6 +43,10 @@ _templates
 # Alpha
 lab/
 /.mypy_cache
+alpha_db/
 
-# node
+# Node
 node_modules/
+
+# Logs
+*.log
