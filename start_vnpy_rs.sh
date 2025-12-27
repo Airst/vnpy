@@ -39,4 +39,4 @@ echo "Starting vn.py application..."
 
 cat /dev/null > web_ui.log
 
-/home/airst/Workspace/vnpy/.venv/bin/python /home/airst/Workspace/vnpy/core/main.py
+/home/airst/Workspace/.venv/bin/python /home/airst/Workspace/vnpy/core/main.py

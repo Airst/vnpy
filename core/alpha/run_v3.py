@@ -6,7 +6,7 @@ import polars as pl
 
 # Ensure project root is in path
 PROJECT_ROOT = Path(__file__).resolve().parent.parent.parent
-sys.path.append(str(PROJECT_ROOT))
+sys.path.insert(0, str(PROJECT_ROOT))
 
 from core.alpha.engine import AlphaEngine
 from core.alpha.ashare_factors_v3 import AShareFactorCalculatorV3
@@ -20,10 +20,11 @@ def run():
     
     # Calculate Factors & Predict
     # Use a shorter range for testing if needed, or full range
-    start_date = "2025-06-01" 
+    start_date = "2025-09-01" 
     end_date = datetime.now().strftime("%Y-%m-%d")
     
     print(f"Running V3 Calculator from {start_date} to {end_date}...")
+    
     start_time = datetime.now()
     
     signal_df = calculator.calculate_all_factors(
