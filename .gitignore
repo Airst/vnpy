@@ -35,6 +35,7 @@ dist
 _build
 _static
 _templates
+*.csv
 
 # Misc
 .DS_Store
@@ -43,3 +44,6 @@ _templates
 # Alpha
 lab/
 /.mypy_cache
+
+# node
+node_modules/

@@ -548,3 +548,121 @@ Running Backtest...
 [32m2025-12-14 15:37:38[0m [1m收益回撤比：  2.13[0m
 [32m2025-12-14 15:37:38[0m [1m策略统计指标计算完成[0m
 INFO:     127.0.0.1:43916 - "POST /api/run_backtest HTTP/1.1" 200 OK
+[2025-12-27 17:39:11] INFO:     Started server process [25334]
+
+[2025-12-27 17:39:11] INFO:     Waiting for application startup.
+
+[2025-12-27 17:39:11] INFO:     Application startup complete.
+
+[2025-12-27 17:49:25] INFO:     Shutting down
+
+[2025-12-27 17:49:25] INFO:     Waiting for application shutdown.
+
+[2025-12-27 17:49:25] INFO:     Application shutdown complete.
+
+[2025-12-27 17:49:25] INFO:     Finished server process [25334]
+
+[2025-12-27 17:49:26] INFO:     Started server process [29097]
+
+[2025-12-27 17:49:26] INFO:     Waiting for application startup.
+
+[2025-12-27 17:49:26] INFO:     Application startup complete.
+
+[2025-12-27 17:49:34] INFO:     Shutting down
+
+[2025-12-27 17:49:34] INFO:     Waiting for application shutdown.
+
+[2025-12-27 17:49:34] INFO:     Application shutdown complete.
+
+[2025-12-27 17:49:34] INFO:     Finished server process [29097]
+
+[2025-12-27 17:49:35] INFO:     Started server process [29190]
+
+[2025-12-27 17:49:35] INFO:     Waiting for application startup.
+
+[2025-12-27 17:49:35] INFO:     Application startup complete.
+
+[2025-12-27 17:51:19] INFO:     Shutting down
+
+[2025-12-27 17:51:19] INFO:     Waiting for application shutdown.
+
+[2025-12-27 17:51:19] INFO:     Application shutdown complete.
+
+[2025-12-27 17:51:19] INFO:     Finished server process [29190]
+
+[2025-12-27 17:51:20] INFO:     Started server process [29871]
+
+[2025-12-27 17:51:20] INFO:     Waiting for application startup.
+
+[2025-12-27 17:51:20] INFO:     Application startup complete.
+
+[2025-12-27 17:53:20] INFO:     Shutting down
+
+[2025-12-27 17:53:20] INFO:     Waiting for application shutdown.
+
+[2025-12-27 17:53:20] INFO:     Application shutdown complete.
+
+[2025-12-27 17:53:20] INFO:     Finished server process [29871]
+
+[2025-12-27 17:53:22] INFO:     Started server process [30563]
+
+[2025-12-27 17:53:22] INFO:     Waiting for application startup.
+
+[2025-12-27 17:53:22] INFO:     Application startup complete.
+
+[2025-12-27 17:53:32] INFO:     Shutting down
+
+[2025-12-27 17:53:32] INFO:     Waiting for application shutdown.
+
+[2025-12-27 17:53:32] INFO:     Application shutdown complete.
+
+[2025-12-27 17:53:32] INFO:     Finished server process [30563]
+
+[2025-12-27 17:53:34] INFO:     Started server process [30637]
+
+[2025-12-27 17:53:34] INFO:     Waiting for application startup.
+
+[2025-12-27 17:53:34] INFO:     Application startup complete.
+
+[2025-12-27 17:53:54] INFO:     Shutting down
+
+[2025-12-27 17:53:55] INFO:     Waiting for application shutdown.
+
+[2025-12-27 17:53:55] INFO:     Application shutdown complete.
+
+[2025-12-27 17:53:55] INFO:     Finished server process [30637]
+
+[2025-12-27 17:53:56] INFO:     Started server process [30746]
+
+[2025-12-27 17:53:56] INFO:     Waiting for application startup.
+
+[2025-12-27 17:53:56] INFO:     Application startup complete.
+
+[2025-12-27 17:54:25] INFO:     Shutting down
+
+[2025-12-27 17:54:25] INFO:     Waiting for application shutdown.
+
+[2025-12-27 17:54:25] INFO:     Application shutdown complete.
+
+[2025-12-27 17:54:25] INFO:     Finished server process [30746]
+
+[2025-12-27 17:54:26] INFO:     Started server process [31155]
+
+[2025-12-27 17:54:26] INFO:     Waiting for application startup.
+
+[2025-12-27 17:54:26] INFO:     Application startup complete.
+
+[2025-12-27 17:54:30] INFO:     Shutting down
+
+[2025-12-27 17:54:30] INFO:     Waiting for application shutdown.
+
+[2025-12-27 17:54:30] INFO:     Application shutdown complete.
+
+[2025-12-27 17:54:30] INFO:     Finished server process [31155]
+
+[2025-12-27 17:54:31] INFO:     Started server process [31205]
+
+[2025-12-27 17:54:31] INFO:     Waiting for application startup.
+
+[2025-12-27 17:54:31] INFO:     Application startup complete.
+
