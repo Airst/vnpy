@@ -1,12 +1,18 @@
-from core.strategies.base import RecommendationStrategy
+import os
+
+from vnpy_portfoliostrategy import StrategyTemplate
+
+from vnpy.alpha.lab import AlphaLab
 from vnpy.trader.object import TickData, BarData, TradeData, OrderData
 from vnpy.trader.constant import Direction, Offset
 from typing import Dict, List
 import pandas as pd
 import numpy as np
-from core.alpha.engine import AlphaEngine
+from pathlib import Path
 
-class MultiFactorStrategy(RecommendationStrategy):
+ALPHA_DB_PATH = "core/alpha_db"
+
+class MultiFactorStrategy(StrategyTemplate):
     """
     Multi-factor strategy driven by AlphaLab signals.
     """
@@ -22,16 +28,20 @@ class MultiFactorStrategy(RecommendationStrategy):
     
     def __init__(self, portfolio_engine, strategy_name, vt_symbols, setting):
         super().__init__(portfolio_engine, strategy_name, vt_symbols, setting)
+
+        self.project_root = Path(os.getcwd())
+        self.lab_path = self.project_root / ALPHA_DB_PATH
+        self.lab = AlphaLab(str(self.lab_path))
         
         self.signal_name = setting.get("signal_name", "ashare_multi_factor")
         self.max_holdings = setting.get("max_holdings", 5)
         self.capital = setting.get("capital", 1_000_000)
         self.sell_threshold = setting.get("sell_threshold", 0.5)
-        self.buy_threshold = setting.get("buy_threshold", 1)
+        self.buy_threshold = setting.get("buy_threshold", 0)
         self.rates = portfolio_engine.rates
         self.cash = self.capital
         
-        print(f"MultiFactorStrategy initialized with signal: {self.signal_name}, max_holdings: {self.max_holdings}, capital: {self.capital}, sell_threshold: {self.sell_threshold}")
+        print(f"MultiFactorStrategy initialized with lab: {self.lab_path} signal: {self.signal_name}, max_holdings: {self.max_holdings}, capital: {self.capital}, buy_threshold: {self.buy_threshold}, sell_threshold: {self.sell_threshold}")
         # Signals: {date_str: {vt_symbol: score}}
         self.signal_data = {}
         self.last_scores = {}
@@ -70,11 +80,10 @@ class MultiFactorStrategy(RecommendationStrategy):
     def load_signals(self):
         """Load pre-calculated signals from AlphaLab"""
         try:
-            engine = AlphaEngine()
-            df = engine.get_signal_df(self.signal_name)
+            df = self.lab.load_signal(self.signal_name)
             
             if df is None or df.is_empty():
-                self.write_log(f"No signal data found for {self.signal_name}")
+                print(f"No signal data found for {self.signal_name}")
                 return
 
             # Convert to dict for fast lookup
@@ -109,16 +118,16 @@ class MultiFactorStrategy(RecommendationStrategy):
                     
                 self.signal_data[dt_str][symbol] = score
                 
-            self.write_log(f"Loaded signals for {len(self.signal_data)} days")
+            print(f"Loaded signals for {len(self.signal_data)} days")
             
         except Exception as e:
-            self.write_log(f"Error loading signals: {e}")
+            print(f"Error loading signals: {e}")
 
     def on_start(self):
-        self.write_log("MultiFactorStrategy Started")
+        print("MultiFactorStrategy Started")
 
     def on_stop(self):
-        self.write_log("MultiFactorStrategy Stopped")
+        print("MultiFactorStrategy Stopped")
 
     def on_bars(self, bars: Dict[str, BarData]):
         """
@@ -225,24 +234,3 @@ class MultiFactorStrategy(RecommendationStrategy):
                         self.buy(vt_symbol, price * 1.0002, volume)
 
         self.put_event()
-
-    def get_prediction(self, vt_symbol: str):
-        # Use the most recent available scores
-        score = self.last_scores.get(vt_symbol, 0)
-        
-        # Also try to check the very latest date in signal_data if last_scores is stale
-        if not self.last_scores and self.signal_data:
-            latest_date = sorted(self.signal_data.keys())[-1]
-            score = self.signal_data[latest_date].get(vt_symbol, 0)
-
-        if score > 1.0:
-            return "STRONG_BUY"
-        elif score > 0:
-            return "BUY"
-        elif score < -1.0:
-            return "STRONG_SELL"
-        elif score < 0:
-            return "SELL"
-        else:
-            return "HOLD"
-    

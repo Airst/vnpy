@@ -62,10 +62,10 @@ if not hasattr(sys.stdout, 'file') or not isinstance(sys.stdout, LoggerWriter):
 PROJECT_ROOT = Path(__file__).resolve().parent.parent
 sys.path.append(str(PROJECT_ROOT))
 
-from core.engine import RecommendationEngine
+from core.core_service import CoreService
 
 app = FastAPI()
-engine = RecommendationEngine()
+core_service = CoreService()
 
 # API Routes
 class BacktestRequest(BaseModel):
@@ -155,15 +155,15 @@ async def api_calculate_alpha():
 
 @app.get("/strategies")
 def get_strategies():
-    return {"strategies": engine.get_strategies()}
+    return {"strategies": core_service.get_strategies()}
 
 @app.get("/factors")
 def get_factors():
-    return {"factors": ["momentum_alpha", "ashare_multi_factor", "ashare_enhanced_factors", "ashare_mlp_v3"]}
+    return {"factors": core_service.get_signals()}
 
 @app.get("/api/data_range")
 def get_data_range():
-    start, end = engine.get_data_range()
+    start, end = core_service.get_data_range()
     if start and end:
         return {
             "start": start.strftime("%Y%m%d"),
@@ -177,7 +177,7 @@ def run_backtest(req: BacktestRequest):
         start = datetime.strptime(req.start_date, "%Y%m%d")
         end = datetime.strptime(req.end_date, "%Y%m%d")
         
-        result = engine.run_backtest(
+        result = core_service.run_backtest(
             strategy_name=req.strategy_name,
             start=start,
             end=end,
@@ -192,7 +192,7 @@ def run_backtest(req: BacktestRequest):
 @app.post("/api/predict")
 def run_prediction(req: PredictionRequest):
     try:
-        predictions = engine.run_prediction(
+        predictions = core_service.run_prediction(
             strategy_name=req.strategy_name,
             setting=req.setting
         )

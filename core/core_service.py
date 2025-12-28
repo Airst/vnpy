@@ -6,16 +6,16 @@ from typing import List, Dict, Type
 import numpy as np
 import pandas as pd
 
+from vnpy_portfoliostrategy import StrategyTemplate
 from vnpy_portfoliostrategy.backtesting import BacktestingEngine
 from vnpy.trader.constant import Interval
-from core.strategies.base import RecommendationStrategy
 from core.selector import FundamentalSelector
 
 STRATEGY_PATH = "core/strategies"
 
-class RecommendationEngine:
+class CoreService:
     def __init__(self):
-        self.strategies: Dict[str, Type[RecommendationStrategy]] = {}
+        self.strategies: Dict[str, Type[StrategyTemplate]] = {}
         self.selector = FundamentalSelector()
         self.load_strategies()
 
@@ -31,14 +31,26 @@ class RecommendationEngine:
                     module = importlib.import_module(module_name)
                     for name, obj in inspect.getmembers(module):
                         if (inspect.isclass(obj) and 
-                            issubclass(obj, RecommendationStrategy) and 
-                            obj is not RecommendationStrategy):
+                            issubclass(obj, StrategyTemplate) and 
+                            obj is not StrategyTemplate):
                             self.strategies[name] = obj
                 except Exception as e:
                     print(f"Failed to load strategy from {filename}: {e}")
 
     def get_strategies(self) -> List[str]:
         return list(self.strategies.keys())
+
+    def get_signals(self) -> List[str]:
+        """Get list of available signals from core/alpha_db/signal directory."""
+        signal_path = "core/alpha_db/signal"
+        if not os.path.exists(signal_path):
+            return []
+            
+        signals = []
+        for filename in os.listdir(signal_path):
+            if filename.endswith(".parquet"):
+                signals.append(os.path.splitext(filename)[0])
+        return sorted(signals)
 
     def get_candidate_symbols(self) -> List[str]:
         return self.selector.get_candidate_symbols()
@@ -178,62 +190,3 @@ class RecommendationEngine:
             "daily_data": daily_data,
             "trades": trades
         }
-
-    def run_prediction(self, strategy_name: str, setting: dict = {}) -> List[Dict]:
-        """
-        Run strategy on historical data up to today for all candidate symbols and return predictions.
-        """
-        if strategy_name not in self.strategies:
-            raise ValueError(f"Strategy {strategy_name} not found")
-
-        strategy_cls = self.strategies[strategy_name]
-        symbols = self.selector.get_candidate_symbols()
-        
-        # Determine range: we need enough history for indicators (e.g. 60 days)
-        # In production, this should be dynamic or based on strategy requirements
-        end = datetime.now()
-        start = end - pd.Timedelta(days=100) # Buffer for 60-day MA
-        
-        engine = BacktestingEngine()
-        engine.set_parameters(
-            vt_symbols=symbols,
-            interval=Interval.DAILY,
-            start=start,
-            end=end,
-            rates={s: 0 for s in symbols},
-            slippages={s: 0 for s in symbols},
-            sizes={s: 1 for s in symbols},
-            priceticks={s: 0.01 for s in symbols},
-            capital=1_000_000
-        )
-        
-        strategy_setting = setting.copy()
-        strategy_setting["start_date"] = start
-        strategy_setting["end_date"] = end
-        
-        engine.add_strategy(strategy_cls, strategy_setting)
-        
-        engine.load_data()
-        engine.run_backtesting()
-        
-        # Retrieve the strategy instance
-        # In vnpy_portfoliostrategy BacktestingEngine, the strategy is stored in .strategy
-        strategy_instance = engine.strategy
-        
-        results = []
-        if strategy_instance:
-            for vt_symbol in symbols:
-                prediction = strategy_instance.get_prediction(vt_symbol)
-                # Get last price if available
-                last_price = 0
-                if vt_symbol in engine.history_data and engine.history_data[vt_symbol]:
-                    last_price = engine.history_data[vt_symbol][-1].close_price
-                
-                results.append({
-                    "symbol": vt_symbol,
-                    "prediction": prediction,
-                    "last_price": last_price,
-                    "score": getattr(strategy_instance, "scores", {}).get(vt_symbol, 0)
-                })
-                
-        return results
