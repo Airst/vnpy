@@ -20,11 +20,11 @@ def run():
     
     # Calculate Factors & Predict
     # Use a shorter range for testing if needed, or full range
-    start_date = "2025-09-01" 
+    start_date = "2020-12-28" 
     end_date = datetime.now().strftime("%Y-%m-%d")
     
     print(f"Running V3 Calculator from {start_date} to {end_date}...")
-    
+
     start_time = datetime.now()
     
     signal_df = calculator.calculate_all_factors(

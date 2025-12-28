@@ -133,6 +133,46 @@ class RecommendationEngine:
                 "pnl": 0  # Portfolio engine doesn't track individual trade pnl in engine.trades
             })
 
+        # Calculate PnL for trades (FIFO)
+        # Tracks buy positions: {symbol: [{"price": price, "volume": volume}, ...]}
+        position_tracker = {}
+        
+        for trade in trades:
+            symbol = trade["symbol"]
+            direction = trade["direction"]
+            price = trade["price"]
+            volume = trade["volume"]
+            
+            if symbol not in position_tracker:
+                position_tracker[symbol] = []
+            
+            # Assuming "多" is Buy/Long and "空" is Sell/Short/Close
+            if direction == "多":
+                position_tracker[symbol].append({"price": price, "volume": volume})
+            elif direction == "空":
+                realized_pnl = 0.0
+                remaining_sell_volume = volume
+                
+                # Match against buy queue
+                while remaining_sell_volume > 0 and position_tracker[symbol]:
+                    buy_trade = position_tracker[symbol][0]
+                    # Determine volume to match
+                    match_volume = min(remaining_sell_volume, buy_trade["volume"])
+                    
+                    # Calculate PnL for this chunk
+                    pnl_chunk = (price - buy_trade["price"]) * match_volume
+                    realized_pnl += pnl_chunk
+                    
+                    # Update remaining volumes
+                    remaining_sell_volume -= match_volume
+                    buy_trade["volume"] -= match_volume
+                    
+                    # Remove depleted buy trades
+                    if buy_trade["volume"] <= 1e-6:
+                        position_tracker[symbol].pop(0)
+                
+                trade["pnl"] = round(realized_pnl, 2)
+
         return {
             "statistics": sanitized_stats,
             "daily_data": daily_data,

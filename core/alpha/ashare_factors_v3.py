@@ -4,20 +4,24 @@ from datetime import datetime, timedelta
 import polars as pl
 import numpy as np
 from typing import Optional, List, Dict
+from tqdm import tqdm
 
 # Import vnpy alpha components
-from vnpy.alpha.dataset.datasets.alpha_158 import Alpha158
+# from vnpy.alpha.dataset.datasets.alpha_158 import Alpha158
 from vnpy.alpha.model.models.mlp_model import MlpModel
 from vnpy.alpha import Segment, AlphaDataset
 
-class AShareFactorCalculatorV3:
+from core.alpha.features import AshareGPUDataset
+from core.alpha.base_calculator import BaseAShareFactorCalculator
+
+class AShareFactorCalculatorV3(BaseAShareFactorCalculator):
     """
     A-Share Factor Calculator V3
-    Based on vnpy.alpha.lab (Alpha158) and MLP Model.
+    Based on GPU-calculated features and MLP Model.
     """
     
     def __init__(self, engine):
-        self.engine = engine
+        super().__init__(engine)
         self.model_settings = {
             "hidden_sizes": (256, 128, 64),
             "n_epochs": 300,  # Adjustable based on needs
@@ -26,10 +30,10 @@ class AShareFactorCalculatorV3:
             "early_stop_rounds": 20,
             "device": "auto"  # Will detect GPU
         }
-        
-    def calculate_all_factors(self, start_date: str = None, end_date: str = None):
+
+    def calculate_all_factors(self, start_date: str = None, end_date: str = None): # type: ignore
         """
-        Main entry point to calculate factors and predict signals.
+        Main entry point to calculate factors and predict signals using Rolling Window.
         """
         # 1. Configuration & Scope
         if not end_date:
@@ -52,195 +56,212 @@ class AShareFactorCalculatorV3:
         if df.is_empty():
             print("[V3] No data loaded.")
             return None
-            
-        # 4. Construct Dataset (Alpha158)
-        print("[V3] Constructing Alpha158 Dataset...")
-        # Split dates for Train/Valid/Test
-        # Strategy:
-        # Train: 70%
-        # Valid: 20%
-        # Test: Last part (for output signal) - or we can predict on everything.
-        # usually we want the signal for the 'end_date' and recent history.
-        
-        dates = df["datetime"].unique().sort()
-        total_days = len(dates)
-        
-        train_end = int(total_days * 0.6)
-        valid_end = int(total_days * 0.8)
-        
-        train_period = (dates[0].strftime("%Y-%m-%d"), dates[train_end].strftime("%Y-%m-%d"))
-        valid_period = (dates[train_end+1].strftime("%Y-%m-%d"), dates[valid_end].strftime("%Y-%m-%d"))
-        # Test period includes the rest (including today if in data)
-        test_period = (dates[valid_end+1].strftime("%Y-%m-%d"), dates[-1].strftime("%Y-%m-%d"))
-        
-        print(f"[V3] Split: Train={train_period}, Valid={valid_period}, Test={test_period}")
-        
-        dataset = Alpha158(
-            df=df,
-            train_period=train_period,
-            valid_period=valid_period,
-            test_period=test_period
-        )
-        
-        # 5. Define Label (Target)
-        # We override Alpha158's default label with a 5-day future return
-        # Logic: (Close[t+5] / Close[t]) - 1
-        # Note: shift(-5) moves future value to current row.
-        # Using polars expression style string for set_label
-        # "ts_delay(close, -5)" is Close at t+5
-        dataset.set_label("ts_delay(close, -5) / close - 1")
-        
-        # 6. Process Data (Feature Engineering)
-        print("[V3] Processing data (calculating features)...")
-        # Add processors to handle NaNs and Normalization
-        self._add_processors(dataset)
-        
+
+        # 4. Calculate Features (GPU)
+        print("[V3] Calculating Features on GPU...")
         try:
-            # Limit max_workers to 1 to avoid "fork bomb" with Polars and multiprocessing
-            # This prevents CPU spikes and crashes on WSL/Linux
-            dataset.prepare_data(max_workers=6) # Calculates expressions
-            dataset.process_data() # Applies processors (cleaning/norm)
+            calculator = AshareGPUDataset()
+            df_features = calculator.calculate_features(df)
         except Exception as e:
-            print(f"[V3] Data processing error: {e}")
+            print(f"[V3] Feature calculation error: {e}")
             import traceback
             traceback.print_exc()
             return None
             
-        # 7. Train Model
-        print("[V3] Training MLP Model...")
-        model = self._train_model(dataset)
-        if not model:
-            return None
-            
-        # 8. Predict
-        print("[V3] Generating Signals...")
-        # We want signals for the 'Test' period usually (recent).
-        # But user might want signals for specific range.
-        # We'll return signals for the Test segment.
-        
+        # 5. Pre-process Data (Global Normalization)
+        print("[V3] Pre-processing data (Global Cross-Sectional Normalization)...")
         try:
-            # Predict
-            predictions = model.predict(dataset, Segment.TEST)
+            # Identify feature columns
+            exclude_cols = {"datetime", "vt_symbol", "label"}
+            raw_cols = ["open", "high", "low", "close", "volume", "turnover", "open_interest"]
+            existing_raw = [c for c in raw_cols if c in df_features.columns]
             
-            # Get metadata for Test segment
-            result_df = dataset.fetch_infer(Segment.TEST).select(["datetime", "vt_symbol"])
+            # Keep features and label, drop raw columns
+            dataset_df = df_features.drop(existing_raw)
             
-            # Attach predictions
-            # predictions is numpy array
-            if len(predictions) != len(result_df):
-                print(f"[V3] Prediction size mismatch: {len(predictions)} vs {len(result_df)}")
-                # Try to align or abort
-                # Usually matches if fetch_infer(Segment.TEST) matches what predict used.
-                return None
+            if "label" not in dataset_df.columns:
+                 print("[V3] Error: 'label' column missing in features.")
+                 return None
+
+            feature_cols = [c for c in dataset_df.columns if c not in exclude_cols]
+            feature_cols.sort()
+            
+            # Final column order
+            final_cols = ["datetime", "vt_symbol"] + feature_cols + ["label"]
+            dataset_df = dataset_df.select(final_cols)
+            
+            # Apply Normalization Globally
+            dataset_df = self._normalize_data(dataset_df, feature_cols)
+            
+        except Exception as e:
+            print(f"[V3] Data pre-processing error: {e}")
+            import traceback
+            traceback.print_exc()
+            return None
+
+        # 6. Rolling Window Loop
+        print("[V3] Starting Rolling Window Training & Prediction...")
+        
+        dates = dataset_df["datetime"].unique().sort()
+        if len(dates) < 150: # Need at least 120 + some buffer
+             print(f"[V3] Not enough dates for rolling window: {len(dates)}")
+             return None
+             
+        # Determine start index for prediction
+        # We need to align with user requested start_date, but ensure we have 120 days history
+        target_start_dt = datetime.strptime(start_date, "%Y-%m-%d")
+        
+        # Find index of first date >= target_start_dt
+        start_idx = 0
+        for i, d in enumerate(dates):
+            if d >= target_start_dt:
+                start_idx = i
+                break
+        
+        # Ensure we have 120 days before start_idx
+        if start_idx < 120:
+            print(f"[V3] Warning: Not enough history before {start_date} for 120-day training.")
+            print(f"[V3] Adjusting start index to 120 (Date: {dates[120]})")
+            start_idx = 120
+            
+        all_predictions = []
+        
+        # Rolling Loop
+        # Step: 1 month (approx 20 trading days or just calendar month check)
+        # We iterate by index, but we need to jump by month. 
+        # Easier: Iterate current_date from start to end by month, find indices.
+        
+        curr_idx = start_idx
+        total_dates = len(dates)
+        
+        while curr_idx < total_dates:
+            # Define Prediction Window
+            pred_start_date = dates[curr_idx]
+            
+            # Next month date
+            next_month_date = pred_start_date + timedelta(days=30)
+            
+            # Find index for next month (end of this prediction window)
+            next_idx = total_dates # Default to end
+            for i in range(curr_idx, total_dates):
+                if dates[i] >= next_month_date:
+                    next_idx = i
+                    break
+            
+            pred_end_idx = next_idx - 1
+            if pred_end_idx < curr_idx:
+                pred_end_idx = curr_idx # At least one day
                 
-            result_df = result_df.with_columns(
-                pl.Series(predictions).alias("raw_score")
+            pred_end_date = dates[pred_end_idx]
+            
+            print(f"[V3] Window: Train [120 days pre {pred_start_date.date()}] -> Predict [{pred_start_date.date()} to {pred_end_date.date()}]")
+            
+            # Define Training Window (Previous 120 indices)
+            train_end_idx = curr_idx - 1
+            train_start_idx = train_end_idx - 119 # 120 days total (0 to 119)
+            
+            train_period = (dates[train_start_idx].strftime("%Y-%m-%d"), dates[train_end_idx - 20].strftime("%Y-%m-%d"))
+            valid_period = (dates[train_end_idx - 19].strftime("%Y-%m-%d"), dates[train_end_idx].strftime("%Y-%m-%d"))
+            test_period = (dates[curr_idx].strftime("%Y-%m-%d"), dates[pred_end_idx].strftime("%Y-%m-%d"))
+            
+            # Construct Dataset for this window
+            # Note: passing the WHOLE dataset_df is fine, AlphaDataset filters by period
+            dataset = AlphaDataset(
+                df=dataset_df,
+                train_period=train_period,
+                valid_period=valid_period,
+                test_period=test_period
             )
+
+            # Manual initialization since we skip prepare_data()
+            dataset.raw_df = dataset_df
+            dataset.infer_df = dataset_df
             
-            # Post-process Signals (Rank Normalization to -3 to 3)
-            final_df = self._post_process_signals(result_df)
+            # Add label cleaner (only for learning)
+            dataset.add_processor("learn", self._clean_label)
+            dataset.process_data()
             
-            # 9. Save & Return
-            self.save_factors(final_df)
+            # Train Model
+            model = self._train_model(dataset)
             
-            return final_df
+            if model:
+                # Predict
+                try:
+                    preds = model.predict(dataset, Segment.TEST)
+                    meta = dataset.fetch_infer(Segment.TEST).select(["datetime", "vt_symbol"])
+                    
+                    if len(preds) == len(meta):
+                        meta = meta.with_columns(pl.Series(preds).alias("raw_score"))
+                        all_predictions.append(meta)
+                    else:
+                         print(f"[V3] Mismatch in prediction length: {len(preds)} vs {len(meta)}")
+                except Exception as e:
+                    print(f"[V3] Prediction failed for window: {e}")
             
-        except Exception as e:
-            print(f"[V3] Prediction error: {e}")
-            import traceback
-            traceback.print_exc()
+            # Move to next window
+            curr_idx = next_idx
+
+        # 7. Concatenate and Post-process
+        if not all_predictions:
+            print("[V3] No predictions generated.")
             return None
-
-    def get_ashare_symbols(self) -> List[str]:
-        """Get A-Share symbols (filtering indices/others)"""
-        all_symbols = self.engine.selector.get_candidate_symbols()
-        ashare_symbols = []
-        for symbol in all_symbols:
-            if any(symbol.startswith(prefix) for prefix in ['000', '002', '300', '600', '601', '603', '688']):
-                ashare_symbols.append(symbol)
-        return ashare_symbols
-
-    def load_ashare_data(self, symbols, start_date, end_date) -> pl.DataFrame:
-        """Load Daily Bar Data"""
-        extended_days = 250 # For rolling windows
-        print(f"[V3] Loading data (buffer: {extended_days} days)...")
+            
+        print("[V3] Aggregating results...")
+        full_result = pl.concat(all_predictions)
         
-        try:
-            df = self.engine.lab.load_bar_df(
-                vt_symbols=symbols,
-                interval="d",
-                start=start_date,
-                end=end_date,
-                extended_days=extended_days
-            )
-            return df if df is not None else pl.DataFrame()
-        except Exception as e:
-            print(f"[V3] Load error: {e}")
-            return pl.DataFrame()
-
-    def _add_processors(self, dataset: AlphaDataset):
-        """Add data cleaning/normalization processors"""
+        # Sort by date
+        full_result = full_result.sort(["datetime", "vt_symbol"])
         
-        def clean_and_normalize(df: pl.DataFrame) -> pl.DataFrame:
-            # 1. Drop columns with too many NaNs? Or Fill?
-            # Alpha158 produces many features.
-            # Simple strategy: Fill NaN with 0 (neutral for standardized features)
-            # But better: Fill with median?
-            # For simplicity and speed: Fill 0 after standardization?
-            # Or Fill Forward first?
-            # AlphaDataset expressions handle some logic.
-            
-            feature_cols = df.columns[2:-1] # Skip datetime, vt_symbol; Skip label (last)
-            
-            # Optimized: Handle Infs, NaNs and Normalize using LazyFrame for better plan optimization
-            
-            # 1. Replace Inf with 0 and Fill NaN/Null with 0
-            fill_exprs = [
-                pl.when(pl.col(c).is_infinite())
-                .then(0)
-                .otherwise(pl.col(c))
-                .fill_nan(0)
-                .fill_null(0)
-                .alias(c)
-                for c in feature_cols
-            ]
-            
-            # 2. Cross-sectional Standardization (Z-Score)
-            norm_exprs = []
-            for col in feature_cols:
-                mean = pl.col(col).mean().over("datetime")
-                std = pl.col(col).std().over("datetime")
-                expr = ((pl.col(col) - mean) / (std + 1e-8)).clip(-3, 3).fill_nan(0).fill_null(0).alias(col)
-                norm_exprs.append(expr)
-            
-            # Execute with Lazy API for memory efficiency
-            return (
-                df.lazy()
-                .with_columns(fill_exprs)
-                .with_columns(norm_exprs)
-                .collect()
-            )
-
-        def clean_label(df: pl.DataFrame) -> pl.DataFrame:
-            # Drop rows where label is NaN (only for TRAIN/VALID)
-            return df.drop_nulls(subset=["label"])
-            
-        # Add processors
-        # 'learn' phase (Train/Valid): Clean features AND Drop NaN labels
-        # dataset.add_processor("learn", clean_and_normalize)
-        # dataset.add_processor("learn", clean_label)
+        # Post-process
+        final_df = self._post_process_signals(full_result)
         
-        # # 'infer' phase (Test/Predict): Clean features ONLY (keep rows with NaN labels for prediction)
-        # dataset.add_processor("infer", clean_and_normalize)
+        # 8. Analyze (Optional, on the last model or aggregate? Aggregate analysis is better)
+        # We can't easily run the old analyze_factor_performance because it expects a dataset with train data.
+        # We can analyze the IC of the Final Output if we merge labels back.
+        # For now, skip analysis or do a simple IC check if labels align.
+        
+        # 9. Save & Return
+        self.save_factors(final_df)
+        
+        return final_df
+
+    def _normalize_data(self, df: pl.DataFrame, feature_cols: List[str]) -> pl.DataFrame:
+        """Apply Cross-sectional Z-Score Normalization"""
+        # 1. Replace Inf and Fill NaN
+        fill_exprs = [
+            pl.when(pl.col(c).is_infinite())
+            .then(0)
+            .otherwise(pl.col(c))
+            .fill_nan(0)
+            .fill_null(0)
+            .alias(c)
+            for c in feature_cols
+        ]
+        
+        # 2. Cross-sectional Standardization (Z-Score)
+        norm_exprs = []
+        for col in feature_cols:
+            mean = pl.col(col).mean().over("datetime")
+            std = pl.col(col).std().over("datetime")
+            expr = ((pl.col(col) - mean) / (std + 1e-8)).clip(-3, 3).fill_nan(0).fill_null(0).alias(col)
+            norm_exprs.append(expr)
+        
+        return (
+            df.lazy()
+            .with_columns(fill_exprs)
+            .with_columns(norm_exprs)
+            .collect()
+        )
+
+    def _clean_label(self, df: pl.DataFrame) -> pl.DataFrame:
+        return df.drop_nulls(subset=["label"])
+
 
     def _train_model(self, dataset: AlphaDataset) -> Optional[MlpModel]:
         import torch
         device = "cuda" if torch.cuda.is_available() else "cpu"
         print(f"[V3] Device: {device}")
         
-        # Determine input size from dataset
-        # dataset.learn_df is populated after process_data()
-        # Features are cols [2:-1]
         sample_df = dataset.fetch_learn(Segment.TRAIN)
         if sample_df.is_empty():
             print("[V3] Training data empty!")
@@ -270,20 +291,10 @@ class AShareFactorCalculatorV3:
             return None
 
     def _post_process_signals(self, df: pl.DataFrame) -> pl.DataFrame:
-        """Convert raw model scores to Rank-Norm Signals (-3 to 3)"""
-        # Rank per day
         df = df.with_columns([
             pl.col("raw_score").rank(method="average").over("datetime").alias("rank"),
             pl.col("raw_score").count().over("datetime").alias("count")
         ])
-        
-        # Norm to -3, 3
-        # (rank / count - 0.5) * factor
-        # Uniform distribution -0.5 to 0.5. 
-        # We want to approximate N(0,1) or just use uniform mapping.
-        # User v2 used: (rank/count - 0.5) * 3.46  (approx std dev of uniform is 1/sqrt(12)??)
-        # Uniform[-0.5, 0.5] std is sqrt(1/12) = 0.288. 1/0.288 = 3.46. 
-        # So this scales to std=1. Then clip(-3, 3).
         
         df = df.with_columns([
             (((pl.col("rank") / pl.col("count")) - 0.5) * 3.46)
@@ -294,7 +305,6 @@ class AShareFactorCalculatorV3:
         return df.select(["datetime", "vt_symbol", "raw_score", "final_signal"])
 
     def save_factors(self, signal_df):
-        """Save signals"""
         if signal_df is not None:
             print("[V3] Saving signals to 'ashare_mlp_v3'...")
             self.engine.lab.save_signal("ashare_mlp_v3", signal_df)

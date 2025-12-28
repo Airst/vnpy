@@ -27,6 +27,7 @@ class MultiFactorStrategy(RecommendationStrategy):
         self.max_holdings = setting.get("max_holdings", 5)
         self.capital = setting.get("capital", 1_000_000)
         self.sell_threshold = setting.get("sell_threshold", 0.5)
+        self.buy_threshold = setting.get("buy_threshold", 1)
         self.rates = portfolio_engine.rates
         self.cash = self.capital
         
@@ -152,7 +153,7 @@ class MultiFactorStrategy(RecommendationStrategy):
         # 4. Generate Target Portfolio
         target_symbols = []
         for s in sorted_symbols:
-            if scores.get(s, 0) > 0: # Only positive scores
+            if scores.get(s, 0) > self.buy_threshold: # Only positive scores
                 target_symbols.append(s)
             if len(target_symbols) >= self.max_holdings:
                 break
