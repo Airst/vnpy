@@ -64,7 +64,7 @@ if __name__ == "__main__":
     print("Starting backtest manually...")
     run_backtest(BacktestRequest(
         strategy_name="MultiFactorStrategy",
-        start_date="20241209",
+        start_date="20221209",
         end_date="20251219",
         setting={
             "max_holdings": 5,

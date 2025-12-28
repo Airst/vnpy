@@ -314,52 +314,137 @@ def ts_delay(x, d):
     return res
 
 def ts_mean(x, d):
-    # Moving Average
-    # Use conv1d.
-    # x: (Batch, Time) -> (Batch, 1, Time)
+    # Robust Moving Average (ignoring NaNs)
+    # x: (Batch, Time)
     x_u = x.unsqueeze(1)
-    # Filter NaN for conv? Conv with NaN results in NaN, which is correct (if any NaN in window).
-    # But usually we want 'ignore NaN' only if data is missing inside history. 
-    # With padded structure, we have NaNs at end.
-    # Standard conv1d is fine.
-    kernel = torch.ones(1, 1, d, device=device) / d
-    # Pad input to keep size same (aligned to right)
-    # We want result[t] to be mean(t-d+1 ... t)
-    # So we pad left by d-1.
-    x_pad = F.pad(x_u, (d-1, 0), value=float('nan'))
-    res = F.conv1d(x_pad, kernel)
-    return res.squeeze(1)
+    
+    # 1. Mask valid values
+    mask = (~torch.isnan(x_u)).type(x.dtype)
+    x_zero = torch.nan_to_num(x_u, nan=0.0)
+    
+    # 2. Kernel for summation
+    kernel = torch.ones(1, 1, d, device=x.device, dtype=x.dtype)
+    
+    # 3. Pad with 0
+    x_pad = F.pad(x_zero, (d-1, 0), value=0.0)
+    mask_pad = F.pad(mask, (d-1, 0), value=0.0)
+    
+    # 4. Convolve (Sum)
+    sum_res = F.conv1d(x_pad, kernel)
+    count_res = F.conv1d(mask_pad, kernel)
+    
+    # 5. Calculate Mean
+    # Avoid div by zero without epsilon error (which kills precision for large numbers)
+    count_safe = torch.where(count_res == 0, torch.ones_like(count_res), count_res)
+    out = sum_res / count_safe
+    
+    # Restore NaNs where no data was available (count == 0)
+    out[count_res == 0] = float('nan')
+    
+    return out.squeeze(1)
 
 def ts_sum(x, d):
+    # Robust Rolling Sum
     x_u = x.unsqueeze(1)
-    kernel = torch.ones(1, 1, d, device=device)
-    x_pad = F.pad(x_u, (d-1, 0), value=float('nan'))
-    res = F.conv1d(x_pad, kernel)
-    return res.squeeze(1)
+    
+    # Handle NaNs as 0
+    mask = (~torch.isnan(x_u)).type(x.dtype)
+    x_zero = torch.nan_to_num(x_u, nan=0.0)
+    
+    kernel = torch.ones(1, 1, d, device=x.device, dtype=x.dtype)
+    x_pad = F.pad(x_zero, (d-1, 0), value=0.0)
+    mask_pad = F.pad(mask, (d-1, 0), value=0.0)
+    
+    sum_res = F.conv1d(x_pad, kernel)
+    count_res = F.conv1d(mask_pad, kernel)
+    
+    res = sum_res.squeeze(1)
+    
+    # If no valid values in window, return NaN
+    res[count_res.squeeze(1) == 0] = float('nan')
+    return res
 
 def ts_std(x, d):
-    # E[x^2] - (E[x])^2
-    mean_x = ts_mean(x, d)
-    mean_x2 = ts_mean(x**2, d)
-    var = mean_x2 - mean_x**2
-    # Numerical stability clamping
-    var = torch.clamp(var, min=0)
-    return torch.sqrt(var)
+    # Robust Moving Std (Sample Standard Deviation)
+    x_64 = x.double()
+    
+    # We need count for Bessel's correction
+    # Re-implement mean calculation to get counts
+    x_u = x_64.unsqueeze(1)
+    mask = (~torch.isnan(x_u)).type(x_64.dtype)
+    x_zero = torch.nan_to_num(x_u, nan=0.0)
+    
+    # Kernel must match dtype of input (x_64 is double)
+    kernel = torch.ones(1, 1, d, device=x.device, dtype=x_64.dtype)
+    
+    x_pad = F.pad(x_zero, (d-1, 0), value=0.0)
+    mask_pad = F.pad(mask, (d-1, 0), value=0.0)
+    x2_pad = F.pad(x_zero**2, (d-1, 0), value=0.0)
+    
+    sum_x = F.conv1d(x_pad, kernel)
+    sum_x2 = F.conv1d(x2_pad, kernel)
+    count = F.conv1d(mask_pad, kernel)
+    
+    # Avoid division by zero
+    count_safe = torch.where(count == 0, torch.ones_like(count), count)
+    
+    mean_x = sum_x / count_safe
+    mean_x2 = sum_x2 / count_safe
+    
+    # Population Variance = E[x^2] - (E[x])^2
+    var_pop = mean_x2 - mean_x**2
+    var_pop = torch.clamp(var_pop, min=0)
+    
+    # Sample Variance = N / (N-1) * Pop_Var
+    # Only valid if count > 1
+    
+    # Correction factor
+    # If count <= 1, correction is undefined (or inf), we should mask later
+    bessel_correction = count / (count - 1)
+    
+    var_sample = var_pop * bessel_correction
+    
+    std = torch.sqrt(var_sample)
+    
+    # Mask where count < 2
+    std[count < 2] = float('nan')
+    
+    return std.squeeze(1).to(x.dtype)
 
 def ts_max(x, d):
-    # MaxPool1d
+    # Robust Rolling Max (Ignore NaNs)
     x_u = x.unsqueeze(1)
-    # Pad left
-    x_pad = F.pad(x_u, (d-1, 0), value=float('nan')) 
-    # Note: pad with -inf for max
+    
+    # Fill NaN with -inf
+    x_filled = torch.nan_to_num(x_u, nan=-float('inf'))
+    
+    # Pad with -inf
+    x_pad = F.pad(x_filled, (d-1, 0), value=-float('inf')) 
+    
     res = F.max_pool1d(x_pad, kernel_size=d, stride=1)
-    return res.squeeze(1)
+    res = res.squeeze(1)
+    
+    # Restore NaNs if all were -inf (no data)
+    res[res == -float('inf')] = float('nan')
+    return res
 
 def ts_min(x, d):
+    # Robust Rolling Min (Ignore NaNs)
     x_u = x.unsqueeze(1)
-    x_pad = F.pad(x_u, (d-1, 0), value=float('nan'))
+    
+    # Fill NaN with inf
+    x_filled = torch.nan_to_num(x_u, nan=float('inf'))
+    
+    # Pad with inf
+    x_pad = F.pad(x_filled, (d-1, 0), value=float('inf'))
+    
+    # Min pooling = - Max pooling of negative
     res = -F.max_pool1d(-x_pad, kernel_size=d, stride=1)
-    return res.squeeze(1)
+    res = res.squeeze(1)
+    
+    # Restore NaNs if all were inf
+    res[res == float('inf')] = float('nan')
+    return res
     
 def ts_delta(x, d):
     return x - ts_delay(x, d)
@@ -367,23 +452,35 @@ def ts_delta(x, d):
 def ta_atr(h, l, c, d):
     # TR = max(h-l, abs(h-c_prev), abs(l-c_prev))
     c_prev = ts_delay(c, 1)
+    
+    # Handle NaNs in c_prev (first day)
+    # If c_prev is NaN, abs(h-c_prev) is NaN.
+    # We want robust max.
+    # But usually ATR needs previous close.
+    # We can rely on robust ts_mean to handle NaNs in TR stream.
+    
     tr1 = h - l
     tr2 = (h - c_prev).abs()
     tr3 = (l - c_prev).abs()
-    tr = torch.maximum(tr1, torch.maximum(tr2, tr3))
-    # ATR is usually SMA(TR) or RMA(TR). Use SMA for simplicity or match vnpy?
-    # vnpy ta_atr usually uses TA-Lib which is Wilder's. 
-    # Approximating with SMA for now as it's cleaner.
+    
+    # torch.maximum propagates NaN.
+    # We can use nan_to_num or fmax? 
+    # torch.fmax ignores NaN!
+    tr = torch.fmax(tr1, torch.fmax(tr2, tr3))
+    
     return ts_mean(tr, d)
 
 def ta_rsi(c, d):
     delta = ts_delta(c, 1)
+    
+    # delta is NaN for first element
     up = torch.clamp(delta, min=0)
     down = torch.clamp(-delta, min=0)
-    # Use SMA for RS (or use EMA if needed). 
-    # Using SMA matching ts_mean style for speed/simplicity here.
+    
+    # ts_mean handles NaNs in up/down
     avg_up = ts_mean(up, d)
     avg_down = ts_mean(down, d)
+    
     rs = avg_up / (avg_down + 1e-8)
     return 100 - 100 / (1 + rs)
     

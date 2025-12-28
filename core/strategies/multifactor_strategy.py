@@ -25,14 +25,14 @@ class MultiFactorStrategy(StrategyTemplate):
         "rate",
         "sell_threshold"
     ]
-    
+
+    project_root = Path(os.getcwd())
+    lab_path = project_root / ALPHA_DB_PATH
+    lab = AlphaLab(str(lab_path))
+
     def __init__(self, portfolio_engine, strategy_name, vt_symbols, setting):
         super().__init__(portfolio_engine, strategy_name, vt_symbols, setting)
 
-        self.project_root = Path(os.getcwd())
-        self.lab_path = self.project_root / ALPHA_DB_PATH
-        self.lab = AlphaLab(str(self.lab_path))
-        
         self.signal_name = setting.get("signal_name", "ashare_multi_factor")
         self.max_holdings = setting.get("max_holdings", 5)
         self.capital = setting.get("capital", 1_000_000)
@@ -48,7 +48,7 @@ class MultiFactorStrategy(StrategyTemplate):
         self.last_prices = {}
 
     def on_init(self):
-        self.write_log("MultiFactorStrategy Initialized")
+        print("MultiFactorStrategy Initialized")
         self.load_signals()
         # self.load_bars(10)
 
