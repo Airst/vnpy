@@ -23,7 +23,8 @@ class MultiFactorStrategy(StrategyTemplate):
         "max_holdings",
         "capital",
         "rate",
-        "sell_threshold"
+        "sell_threshold",
+        "buy_threshold"
     ]
 
     project_root = Path(os.getcwd())
@@ -37,7 +38,7 @@ class MultiFactorStrategy(StrategyTemplate):
         self.max_holdings = setting.get("max_holdings", 5)
         self.capital = setting.get("capital", 1_000_000)
         self.sell_threshold = setting.get("sell_threshold", 0.5)
-        self.buy_threshold = setting.get("buy_threshold", 0)
+        self.buy_threshold = setting.get("buy_threshold", 1)
         self.rates = portfolio_engine.rates
         self.cash = self.capital
         

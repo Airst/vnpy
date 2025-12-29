@@ -8,7 +8,7 @@ from vnpy.trader.database import get_database
 from vnpy.trader.object import HistoryRequest
 
 
-def download_data(config_path: str = "data_download/download_config.json"):
+def download_data(config_path: str = "data_manager/download_daily_config.json", end_date: str="latest"):
     """
     下载历史数据并存入数据库
     """
@@ -34,12 +34,15 @@ def download_data(config_path: str = "data_download/download_config.json"):
     
     # 确定 'latest' 对应的截止日期
     # 如果当前时间在16点之前，认为当日数据尚未收盘/就绪，取前一日
-    now = datetime.now()
-    if now.hour < 16:
-        latest_date = now - timedelta(days=1)
+    if end_date:
+        latest_date = datetime.strptime(end_date, "%Y%m%d")
     else:
-        latest_date = now
-    latest_date = latest_date.replace(hour=0, minute=0, second=0, microsecond=0)
+        now = datetime.now()
+        if now.hour < 16:
+            latest_date = now - timedelta(days=1)
+        else:
+            latest_date = now
+        latest_date = latest_date.replace(hour=0, minute=0, second=0, microsecond=0)
 
     # 1.1 添加配置文件中的任务
     for task in config.get("downloads", []):
@@ -157,6 +160,3 @@ def download_data(config_path: str = "data_download/download_config.json"):
 
     print("所有数据下载完成！")
 
-
-if __name__ == "__main__":
-    download_data()
