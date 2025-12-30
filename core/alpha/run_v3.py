@@ -15,7 +15,7 @@ PROJECT_ROOT = Path(__file__).resolve().parent.parent.parent
 sys.path.insert(0, str(PROJECT_ROOT))
 
 from core.alpha.engine import AlphaEngine
-from core.alpha.factor_calculator import FactorCalculator
+from core.alpha.v3_factor_calculator import V3FactorCalculator
 from mlp_signals import MLPSignals
 from core.selector.selector import FundamentalSelector
 
@@ -79,7 +79,7 @@ if not hasattr(sys.stdout, 'file') or not isinstance(sys.stdout, LoggerWriter):
 def run(only_factor: bool = False):
     print("Initializing Alpha Engine for V3...")
     engine = AlphaEngine(
-        factor_calculator=FactorCalculator(),
+        factor_calculator=V3FactorCalculator(),
         mlp_signals=MLPSignals(),
         selector=FundamentalSelector(),
         signal_name="ashare_mlp_signal_v3",
