@@ -277,6 +277,11 @@ class AlphaEngine:
                 # 转换为 Polars
                 basic_df = pl.from_pandas(basic_df_pd)
                 
+                # Align datetime precision to microseconds (us) to match price_df
+                # Fix: Explicitly check and cast. Pandas usually results in ns.
+                if "datetime" in basic_df.columns:
+                     basic_df = basic_df.with_columns(pl.col("datetime").cast(pl.Datetime("us")))
+                
                 # 处理列名冲突，移除多余列
                 # basic_df 包含: vt_symbol, datetime, close, turnover_rate...
                 # 移除 close, ts_code, trade_date
