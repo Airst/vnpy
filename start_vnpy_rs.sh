@@ -37,6 +37,6 @@ cd /home/airst/Workspace/vnpy
 
 echo "Starting vn.py application..."
 
-cat /dev/null > web_ui.log
+# cat /dev/null > web_ui.log
 
 /home/airst/Workspace/.venv/bin/python /home/airst/Workspace/vnpy/core/main.py

@@ -64,12 +64,14 @@ class MultiFactorStrategy(StrategyTemplate):
         
         if trade.direction == Direction.LONG:
             self.cash -= trade.price * trade.volume
+            print(f"Buy: {trade.vt_symbol} Price: {trade.price} Volume: {trade.volume} cash after trade: {self.cash:.2f}")
         elif trade.direction == Direction.SHORT:
             # Simulate Stamp Duty for Sells (A-share standard: 0.1%)
             # Even if the engine doesn't charge it, being conservative prevents overspending.
             stamp_duty = trade.price * trade.volume * 0.0005
             commission += stamp_duty
             self.cash += trade.price * trade.volume
+            print(f"Sell: {trade.vt_symbol} Price: {trade.price} Volume: {trade.volume} cash after trade: {self.cash:.2f}")
         else:
             return
             
@@ -143,6 +145,7 @@ class MultiFactorStrategy(StrategyTemplate):
         current_dt = list(bars.values())[0].datetime
         date_str = current_dt.strftime("%Y-%m-%d")
         available_cash = self.cash
+        print(f"{date_str} - Available Cash: {available_cash:.2f}")
 
         # Update last prices
         for vt_symbol, bar in bars.items():
@@ -177,31 +180,8 @@ class MultiFactorStrategy(StrategyTemplate):
                 held_symbols.append(vt_symbol)
         
         held_count = len(held_symbols)
-
-        # 5a. Sell based on explicit sell signal (final_signal < threshold)
-        for vt_symbol in held_symbols:
-            # Check sell signal using relative score
-            score = scores.get(vt_symbol, 0.0)
-            print(f"{date_str} Symbol: {vt_symbol}, Score: {score}, Held: {self.get_pos(vt_symbol)}")
-            
-            # Explicit Sell Condition
-            # e.g., if score < -0.5 (underperforming average)
-            should_sell = score < self.sell_threshold
-            
-            if should_sell:
-                # Need current price. If not in bars (suspended), we can't sell.
-                if vt_symbol not in bars:
-                    continue
-                    
-                price = bars[vt_symbol].close_price
-                if price <= 0:
-                    continue
-
-                pos = self.get_pos(vt_symbol)
-                # Sell at simulated limit price below close (ensure execution)
-                self.sell(vt_symbol, price * 0.998, pos)
         
-        # 5b. Buy (stocks in target but not held)
+        # 5a. Buy (stocks in target but not held)
         # Identify valid buy candidates (in target, not held)
         buy_candidates = [s for s in target_symbols if s not in held_symbols]
         
@@ -234,4 +214,26 @@ class MultiFactorStrategy(StrategyTemplate):
                         # Buy at simulated limit price above close (ensure execution)
                         self.buy(vt_symbol, price * 1.0002, volume)
 
+        # 5b. Sell based on explicit sell signal (final_signal < threshold)
+        for vt_symbol in held_symbols:
+            # Check sell signal using relative score
+            score = scores.get(vt_symbol, 0.0)
+            
+            # Explicit Sell Condition
+            # e.g., if score < -0.5 (underperforming average)
+            should_sell = score < self.sell_threshold
+            
+            if should_sell:
+                # Need current price. If not in bars (suspended), we can't sell.
+                if vt_symbol not in bars:
+                    continue
+                    
+                price = bars[vt_symbol].close_price
+                if price <= 0:
+                    continue
+
+                pos = self.get_pos(vt_symbol)
+                # Sell at simulated limit price below close (ensure execution)
+                self.sell(vt_symbol, price * 0.998, pos)
+        
         self.put_event()

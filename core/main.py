@@ -14,20 +14,23 @@ from pathlib import Path
 
 # --- Logger Redirection ---
 class LoggerWriter:
-    def __init__(self, writer, filepath):
+    def __init__(self, writer, file):
         self.writer = writer
-        self.file = open(filepath, 'a', encoding='utf-8')
+        self.file = file
 
     def write(self, message):
-        if not message or message.strip() == "":
+        if not message:
             return
-            
+        
+        if message == "^" or message == "\n" or message.strip() == "":
+            self.file.write(message)
+            return    
         # If message already starts with a date (e.g. 2025-12-20 or [2025-12-20), don't add timestamp
         if re.search(r'^\s*(\[)?\d{4}-\d{2}-\d{2}', message):
-            self.file.write(message + "\n")
+            self.file.write(message)
         else:
             timestamp = datetime.now().strftime("[%Y-%m-%d %H:%M:%S] ")
-            self.file.write(timestamp + message + "\n")
+            self.file.write(timestamp + message)
         self.file.flush()
 
     def flush(self):
@@ -51,8 +54,9 @@ class LoggerWriter:
 # Check if already redirected to avoid double wrapping on reload
 if not hasattr(sys.stdout, 'file') or not isinstance(sys.stdout, LoggerWriter):
     try:
-        sys.stdout = LoggerWriter(sys.stdout, "web_ui.log")
-        sys.stderr = LoggerWriter(sys.stderr, "web_ui.log")
+        file = open("web_ui.log", "w")
+        sys.stdout = LoggerWriter(sys.stdout, file)
+        sys.stderr = LoggerWriter(sys.stderr, file)
     except Exception as e:
         print(f"Failed to setup logger redirection: {e}")
 # --------------------------

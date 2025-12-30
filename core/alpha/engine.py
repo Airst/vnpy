@@ -91,32 +91,45 @@ class AlphaEngine:
 
         return self.factor_calculator.calculate_features(df)
 
-    def analyze_factor_performance(self, factors_df):
-        """因子绩效分析（简化版）"""
-        print("\n=== 因子绩效分析 ===")
+    def analyze_factor_performance(self, factors_df: pl.DataFrame, threshold: float = 0.02) -> List[str]:
+        """
+        因子绩效分析（简化版）并筛选有效因子
+        
+        Args:
+            factors_df: 包含因子和label的DataFrame
+            threshold: IC绝对值阈值，低于此值的因子将被剔除
+            
+        Returns:
+            List[str]: 筛选后的有效因子名称列表
+        """
+        print("\n=== 因子绩效分析与筛选 ===")
         
         if factors_df.is_empty():
             print("无因子数据可分析")
-            return
+            return []
         
         # 准备数据：计算未来收益率 (5日)
         print("计算未来5日收益率作为基准...")
         if "label" in factors_df.columns:
-            df = factors_df.with_columns(pl.col("label").alias("next_ret"))
+             # Label is already calculated (normalized future return)
+             # Use it directly as proxy for return, or try to reconstruct if close was there?
+             # Since we drop close, we must trust 'label'.
+             # Rename/Copy label for consistency
+             df = factors_df.with_columns(pl.col("label").alias("next_ret"))
         elif "close" in factors_df.columns:
             df = factors_df.with_columns([
                 ((pl.col("close").shift(-5).over("vt_symbol") / pl.col("close")) - 1).alias("next_ret")
             ])
         else:
             print("无法计算未来收益率：缺少 'close' 或 'label' 列")
-            return
+            return []
         
         # 去除无效数据
         df = df.filter(pl.col("next_ret").is_not_null())
         
         if df.is_empty():
             print("有效数据不足")
-            return
+            return []
 
         # 分析各因子的IC（信息系数）
         # 排除非因子列
@@ -128,10 +141,6 @@ class AlphaEngine:
         ic_results = []
         
         # 计算每日截面 Rank IC
-        # Group by datetime once is inefficient for loop, but Polars Lazy API handles it well
-        # Or better: Pivot/Unstack or iterate?
-        # Polars parallelizes column expressions.
-        
         # We can calculate all ICs in one go using expressions list
         ic_exprs = [
             pl.corr(pl.col(f).rank(), pl.col("next_ret").rank()).alias(f) 
@@ -143,10 +152,11 @@ class AlphaEngine:
             daily_ics = df.group_by("datetime").agg(ic_exprs)
             
             # 2. Aggregate Results (Mean, Std -> IR)
+            # Use fill_nan(None) to treat NaNs as Nulls (which are ignored by mean/std)
             stats = daily_ics.select([
-                pl.col(f).mean().alias(f"{f}_mean") for f in factor_cols
+                pl.col(f).fill_nan(pl.lit(None)).mean().alias(f"{f}_mean") for f in factor_cols
             ] + [
-                pl.col(f).std().alias(f"{f}_std") for f in factor_cols
+                pl.col(f).fill_nan(pl.lit(None)).std().alias(f"{f}_std") for f in factor_cols
             ])
             
             stats_row = stats.row(0)
@@ -163,32 +173,34 @@ class AlphaEngine:
                 icir = mean_ic / (std_ic + 1e-9)
                 
                 ic_results.append({"factor": f, "ic": mean_ic, "icir": icir})
-                print(f"  - {f}: IC = {mean_ic:.4f}, ICIR = {icir:.4f}")
+                # print(f"  - {f}: IC = {mean_ic:.4f}, ICIR = {icir:.4f}") # 减少刷屏
 
         except Exception as e:
             print(f"IC Analysis Failed: {e}")
             import traceback
             traceback.print_exc()
+            return factor_cols # Fallback to all
         
-        # 简单总结
+        # 筛选和总结
+        selected_factors = []
         if ic_results:
-            valid_results = [r for r in ic_results if r["ic"] is not None]
-            avg_ic = sum(r["ic"] for r in valid_results) / len(valid_results)
-            print(f"\n平均 IC: {avg_ic:.4f}")
-
-            # Sort by IC descending
-            valid_results.sort(key=lambda x: x["ic"], reverse=True)
+            # Sort by abs(IC) descending to show most important first
+            ic_results.sort(key=lambda x: abs(x["ic"]), reverse=True)
             
-            print("\nTop 5 正向因子:")
-            for r in valid_results[:5]:
-                print(f"  {r['factor']}: IC {r['ic']:.4f}, ICIR {r['icir']:.4f}")
-                
-            print("\nTop 5 负向因子:")
-            # Last 5, reversed to show most negative first
-            for r in reversed(valid_results[-5:]):
-                print(f"  {r['factor']}: IC {r['ic']:.4f}, ICIR {r['icir']:.4f}")
-        
-        print("分析完成")
+            print(f"\n因子筛选 (阈值 |IC| >= {threshold}):")
+            for r in ic_results:
+                is_selected = abs(r["ic"]) >= threshold
+                status = "[V]" if is_selected else "[ ]"
+                if is_selected:
+                    selected_factors.append(r["factor"])
+                print(f"  {status} {r['factor']}: IC {r['ic']:.4f}, ICIR {r['icir']:.4f}")
+            
+            print(f"\n筛选结果: {len(selected_factors)} / {len(factor_cols)} 个因子被选中。")
+        else:
+             print("无有效IC结果。")
+             return factor_cols
+
+        return selected_factors
 
     def calculate_signals(self, factor_df: pl.DataFrame) -> pl.DataFrame:
         """
