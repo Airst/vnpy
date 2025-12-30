@@ -1,25 +1,65 @@
 import json
+import time
 from datetime import datetime, timedelta
-from concurrent.futures import ThreadPoolExecutor, as_completed
+from collections import defaultdict
+from typing import Tuple, Optional
+
+import pandas as pd
+import tushare as ts
 
 from vnpy.trader.constant import Exchange, Interval
-from vnpy.trader.datafeed import get_datafeed
 from vnpy.trader.database import get_database
-from vnpy.trader.object import HistoryRequest
+from vnpy.trader.object import BarData
+from vnpy.trader.utility import round_to
 
 
-def download_data(config_path: str = "data_manager/download_daily_config.json", end_date: str="latest"):
+def to_tushare_code(symbol: str, exchange: Exchange) -> Optional[str]:
     """
-    下载历史数据并存入数据库
+    Convert vnpy symbol and exchange to tushare code.
     """
-    # 初始化数据服务和数据库接口
-    datafeed = get_datafeed()
+    if exchange == Exchange.SZSE:
+        return f"{symbol}.SZ"
+    elif exchange == Exchange.SSE:
+        return f"{symbol}.SH"
+    elif exchange == Exchange.BSE:
+        return f"{symbol}.BJ"
+    return None
+
+
+def from_tushare_code(ts_code: str) -> Tuple[str, Exchange]:
+    """
+    Convert tushare code to vnpy symbol and exchange.
+    """
+    symbol, suffix = ts_code.split(".")
+    if suffix == "SZ":
+        return symbol, Exchange.SZSE
+    elif suffix == "SH":
+        return symbol, Exchange.SSE
+    elif suffix == "BJ":
+        return symbol, Exchange.BSE
+    return symbol, Exchange.LOCAL
+
+
+def download_data(config_path: str = "data_manager/download_daily_config.json", end_date: str = "latest"):
+    """
+    下载历史数据并存入数据库 (使用 Tushare 批量接口)
+    """
     database = get_database()
     print("数据库连接成功")
 
-    # 从json文件加载下载任务配置
+    # 从json文件加载配置
     with open(config_path, "r", encoding="utf-8") as f:
         config = json.load(f)
+
+    # 初始化 Tushare
+    token = config.get("tushare_token", "")
+    if not token:
+        print("Error: tushare_token not found in config.")
+        return
+    
+    ts.set_token(token)
+    pro = ts.pro_api()
+    print("Tushare 初始化成功")
 
     # 1. 整理下载任务
     # Key: (req_symbol, exchange, interval)
@@ -33,8 +73,7 @@ def download_data(config_path: str = "data_manager/download_daily_config.json", 
     }
     
     # 确定 'latest' 对应的截止日期
-    # 如果当前时间在16点之前，认为当日数据尚未收盘/就绪，取前一日
-    if end_date:
+    if end_date and end_date != "latest":
         latest_date = datetime.strptime(end_date, "%Y%m%d")
     else:
         now = datetime.now()
@@ -51,6 +90,11 @@ def download_data(config_path: str = "data_manager/download_daily_config.json", 
         interval = Interval(task["interval"])
         req_symbol = symbol.split(".")[0]
         
+        # 只处理日线数据
+        if interval != Interval.DAILY:
+            print(f"跳过非日线任务: {symbol} {interval}")
+            continue
+
         start = datetime.strptime(task["start_date"], "%Y%m%d")
         if task["end_date"] == "latest":
             end = latest_date
@@ -66,97 +110,135 @@ def download_data(config_path: str = "data_manager/download_daily_config.json", 
                 if db_end.tzinfo:
                     db_end = db_end.replace(tzinfo=None)
                 
-                # 如果数据库已有数据覆盖了当前start，则从db_end开始（增量）
-                # 除非配置的start明显晚于db_end（说明中间有断层？通常是希望接着db_end下载）
-                # 这里简单处理：取 max(start, db_end)
+                # 增量更新
                 if db_end >= start:
                     start = db_end
         
-        # 如果调整后的start已经超过end，说明不需要下载
         if start >= end:
-            print(f"数据已是最新，跳过: {symbol} ({start} >= {end})")
+            print(f"数据已是最新，跳过: {symbol} ({start.date()} >= {end.date()})")
             continue
 
         tasks[key] = {
-            "symbol": symbol,
             "req_symbol": req_symbol,
             "exchange": exchange,
             "interval": interval,
             "start": start,
-            "end": end,
-            "source": "config"
+            "end": end
         }
 
     # 1.2 添加数据库中已有的任务（增量更新）
     for overview in overviews:
+        if overview.interval != Interval.DAILY:
+            continue
+
         key = (overview.symbol, overview.exchange, overview.interval)
         
         if key in tasks:
-            continue  # 配置文件优先（已被处理）
+            continue  # 配置文件优先
 
-        # 增量更新：从最后一条数据的时间开始
         start = overview.end
         if not start:
-            start = datetime(2020, 1, 1)
+            start = datetime(2018, 1, 1) # 默认起始时间
             
-        # 如果start带时区，转为naive以便对比（假设系统运行在Local）
         if start.tzinfo:
             start = start.replace(tzinfo=None)
 
         end = latest_date
         
-        # 如果结束时间早于开始时间（或者差距很小），则跳过
         if start >= end:
             continue
             
         tasks[key] = {
-            "symbol": f"{overview.symbol}.{overview.exchange.value}",
             "req_symbol": overview.symbol,
             "exchange": overview.exchange,
             "interval": overview.interval,
             "start": start,
-            "end": end,
-            "source": "database"
+            "end": end
         }
 
     print(f"共生成 {len(tasks)} 个下载任务")
 
-    # 2. 执行下载
-    def process_task(task):
-        symbol = task["symbol"]
-        req_symbol = task["req_symbol"]
-        exchange = task["exchange"]
-        interval = task["interval"]
-        start = task["start"]
-        end = task["end"]
-        
-        print(f"[{task['source']}] 开始下载【{symbol}】... {start} - {end}")
-        
-        req = HistoryRequest(
-            symbol=req_symbol,
-            exchange=exchange,
-            interval=interval,
-            start=start,
-            end=end
-        )
+    # 2. 任务分组 (按 start_date, end_date 分组)
+    # Key: (start_str, end_str) -> List[ts_code]
+    batches = defaultdict(list)
+    
+    for key, task in tasks.items():
+        ts_code = to_tushare_code(task["req_symbol"], task["exchange"])
+        if not ts_code:
+            continue
+            
+        start_str = task["start"].strftime("%Y%m%d")
+        end_str = task["end"].strftime("%Y%m%d")
+        batches[(start_str, end_str)].append(ts_code)
 
-        try:
-            bars = datafeed.query_bar_history(req)
-            if bars:
-                database.save_bar_data(bars)
-                return f"成功保存【{symbol}】: {len(bars)}条"
-            else:
-                return f"数据为空【{symbol}】"
-        except Exception as e:
-            return f"下载失败【{symbol}】: {e}"
+    # 3. 批量下载与保存
+    total_batches = len(batches)
+    processed_count = 0
+    
+    for (start_str, end_str), ts_codes in batches.items():
+        start_date = datetime.strptime(start_str, "%Y%m%d")
+        end_date = datetime.strptime(end_str, "%Y%m%d") # type: ignore
+        days = (end_date - start_date).days + 1 # type: ignore
+        if days < 1: 
+            days = 1
+            
+        # 计算每批次最大股票数量
+        # Tushare 限制: 单次请求最多返回 6000-8000 行 (保险起见用 5000)
+        # 行数 = 股票数 * 天数
+        # 股票数 = 5000 / 天数
+        max_symbols_per_call = int(5000 / days)
+        if max_symbols_per_call < 1:
+            max_symbols_per_call = 1
+        if max_symbols_per_call > 100: # 限制URL长度/参数过多
+            max_symbols_per_call = 100
+            
+        print(f"处理时间段 {start_str} - {end_str}, 天数: {days}, 批次大小: {max_symbols_per_call}, 总股票数: {len(ts_codes)}")
 
-    # 使用线程池并发下载
-    with ThreadPoolExecutor(max_workers=1) as executor:
-        futures = {executor.submit(process_task, task): task for task in tasks.values()}
-        
-        for future in as_completed(futures):
-            result = future.result()
-            print(result)
+        # 分块处理
+        for i in range(0, len(ts_codes), max_symbols_per_call):
+            chunk = ts_codes[i : i + max_symbols_per_call]
+            ts_code_str = ",".join(chunk)
+            
+            try:
+                # 调用 Tushare 接口
+                df = pro.daily(ts_code=ts_code_str, start_date=start_str, end_date=end_str)
+                
+                if df is not None and not df.empty:
+                    bars = []
+                    for _, row in df.iterrows():
+                        symbol, exchange = from_tushare_code(row["ts_code"])
+                        
+                        bar = BarData(
+                            symbol=symbol,
+                            exchange=exchange,
+                            datetime=datetime.strptime(row["trade_date"], "%Y%m%d"),
+                            interval=Interval.DAILY,
+                            volume=float(row["vol"]),      # 手 -> 股
+                            turnover=float(row["amount"]),# 千元 -> 元
+                            open_interest=0,
+                            open_price=round_to(row["open"], 0.000001),
+                            high_price=round_to(row["high"], 0.000001),
+                            low_price=round_to(row["low"], 0.000001),
+                            close_price=round_to(row["close"], 0.000001),
+                            gateway_name="TS"
+                        )
+                        bars.append(bar)
+                    
+                    if bars:
+                        database.save_bar_data(bars)
+                        print(f"  已保存 {len(bars)} 条数据 (涵盖 {len(chunk)} 只股票)")
+                else:
+                    print(f"  无数据返回: {ts_code_str} ({start_str}-{end_str})")
 
-    print("所有数据下载完成！")
+            except Exception as e:
+                print(f"  下载失败: {e}")
+            
+            # 速率限制: 每分钟 200 次 -> ~0.3s/次
+            time.sleep(0.3)
+            
+        processed_count += 1
+        print(f"进度: {processed_count}/{total_batches} 时间段完成")
+
+    print("所有数据下载任务完成！")
+
 

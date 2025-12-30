@@ -194,69 +194,100 @@ class DailyBasicManager:
         database = get_database()
         overviews = database.get_bar_overview()
         
-        conn = pymysql.connect(**self.db_config)
+        # 1. 收集需关注的股票及时间范围
+        valid_ts_codes = set()
+        stock_requirements = {} # ts_code -> (start, end)
+
+        for overview in overviews:
+            if overview.exchange not in [Exchange.SSE, Exchange.SZSE, Exchange.BSE]:
+                continue
+
+            suffix = self.get_vnpy_suffix(overview.exchange)
+            if not suffix:
+                continue
+                
+            ts_code = f"{overview.symbol}.{suffix}"
+            valid_ts_codes.add(ts_code)
+            
+            if overview.start and overview.end:
+                stock_requirements[ts_code] = (overview.start, overview.end)
         
+        if not valid_ts_codes:
+            print("未找到有效股票配置")
+            return
+
+        conn = pymysql.connect(**self.db_config)
         try:
-            print(f"开始更新每日指标数据，共 {len(overviews)} 只标的...")
-            for overview in overviews:
-                symbol = overview.symbol
-                exchange = overview.exchange
+            print("正在检查现有数据进度...")
+            with conn.cursor() as cursor:
+                # 获取每只股票的最新日期
+                sql = "SELECT ts_code, MAX(trade_date) as last_date FROM dailybasic GROUP BY ts_code"
+                cursor.execute(sql)
+                results = cursor.fetchall()
                 
-                # 只处理股票
-                if exchange not in [Exchange.SSE, Exchange.SZSE, Exchange.BSE]:
-                    continue
-
-                suffix = self.get_vnpy_suffix(exchange)
-                if not suffix:
-                    continue
-                    
-                ts_code = f"{symbol}.{suffix}"
-                
-                if not overview.start or not overview.end:
-                    continue
-                
-                req_start = overview.start
-                req_end = overview.end
-
-                # Check incremental
-                latest_date_str = self.get_latest_date(conn, ts_code)
-                if latest_date_str:
+            existing_dates = {}
+            for row in results:
+                if row['last_date']:
                     try:
-                        latest_date = datetime.strptime(latest_date_str, "%Y%m%d")
-                        # Start from next day
-                        next_start = latest_date + pd.Timedelta(days=1)
-                        
-                        if next_start > req_end:
-                            print(f"  - {ts_code} 数据已是最新 ({latest_date_str})，跳过")
-                            continue
-                        
-                        if next_start > req_start:
-                            req_start = next_start
-                            
-                    except Exception:
+                        # trade_date is VARCHAR
+                        existing_dates[row['ts_code']] = datetime.strptime(str(row['last_date']), "%Y%m%d")
+                    except ValueError:
                         pass
 
-                start_date = req_start.strftime("%Y%m%d")
-                end_date = req_end.strftime("%Y%m%d")
+            # 2. 计算需要下载的日期集合
+            needed_dates = set()
+            print("正在计算需补全的日期...")
+            
+            for ts_code, (req_start, req_end) in stock_requirements.items():
+                last_have = existing_dates.get(ts_code)
                 
-                print(f"正在下载 {ts_code}: {start_date} - {end_date}")
+                start_date = req_start
+                # 如果已有数据，从下一天开始
+                if last_have:
+                    # 如果库里数据比需求的开始时间还晚，说明覆盖了开始部分，直接从库里最新+1开始
+                    if last_have >= req_start:
+                        start_date = last_have + pd.Timedelta(days=1)
                 
+                # 如果开始时间在结束时间之前（或相等），则需要下载
+                if start_date <= req_end:
+                    # 获取该区间内所有日期
+                    dates = pd.date_range(start=start_date, end=req_end)
+                    needed_dates.update(dates.strftime("%Y%m%d"))
+
+            if not needed_dates:
+                print("所有数据已是最新")
+                return
+
+            sorted_dates = sorted(list(needed_dates))
+            print(f"共需下载 {len(sorted_dates)} 个交易日的数据")
+
+            # 3. 按日期批量下载
+            import time
+            total_days = len(sorted_dates)
+            
+            for idx, date_str in enumerate(sorted_dates):
+                print(f"正在下载 {date_str} ({idx+1}/{total_days})...")
                 try:
-                    # 分段下载，避免一次获取过多数据（虽然Tushare单次支持较多，但为了保险可以考虑，这里暂不分段，假设时间跨度不大或API支持）
-                    # Tushare daily_basic 限制：单次最大5000行? 通常daily_basic按日期取较多，按票取通常整个历史没问题（几年几千行）
-                    # 但是如果按票取，Tushare API通常支持
-                    df = self.pro.daily_basic(ts_code=ts_code, start_date=start_date, end_date=end_date)
+                    # 查询当日所有股票数据
+                    df = self.pro.daily_basic(trade_date=date_str)
                     
                     if df is not None and not df.empty:
-                        self.save_data(conn, df)
-                        print(f"  - 成功保存 {len(df)} 条数据")
+                        # 过滤掉不在overview中的股票
+                        df_filtered = df[df['ts_code'].isin(valid_ts_codes)]
+                        
+                        if not df_filtered.empty:
+                            self.save_data(conn, df_filtered)
+                            print(f"  - 成功保存 {len(df_filtered)} 条记录")
+                        else:
+                            print("  - 无关注标的记录")
                     else:
-                        print(f"  - 无数据")
+                        print("  - 无数据")
                         
                 except Exception as e:
                     print(f"  - 下载失败: {e}")
-                    import time
-                    time.sleep(1) # 简单的错误重试等待或限流保护
+                
+                # 简单限流
+                time.sleep(0.3)
                     
         finally:
             conn.close()
