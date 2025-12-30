@@ -11,6 +11,7 @@ from vnpy.trader.constant import Exchange, Interval
 from vnpy.trader.database import get_database
 from vnpy.trader.object import BarData
 from vnpy.trader.utility import round_to
+from vnpy.trader.setting import SETTINGS
 
 
 def to_tushare_code(symbol: str, exchange: Exchange) -> Optional[str]:
@@ -52,7 +53,7 @@ def download_data(config_path: str = "data_manager/download_daily_config.json", 
         config = json.load(f)
 
     # 初始化 Tushare
-    token = config.get("tushare_token", "")
+    token = SETTINGS["datafeed.password"]
     if not token:
         print("Error: tushare_token not found in config.")
         return
