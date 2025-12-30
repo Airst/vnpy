@@ -89,7 +89,7 @@ def run(only_factor: bool = False):
     
     signal_df = engine.calculate_factors()
 
-    engine.analyze_factor_performance(signal_df)
+    signal_df = engine.analyze_factor_performance(signal_df)
 
     if not only_factor:
         signal_df = engine.calculate_signals(signal_df)

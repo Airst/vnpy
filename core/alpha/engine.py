@@ -91,57 +91,58 @@ class AlphaEngine:
 
         return self.factor_calculator.calculate_features(df)
 
-    def analyze_factor_performance(self, factors_df: pl.DataFrame, threshold: float = 0.02) -> List[str]:
+    def analyze_factor_performance(self, factors_df: pl.DataFrame, threshold: float = 0.02) -> pl.DataFrame:
         """
-        因子绩效分析（简化版）并筛选有效因子
+        因子绩效分析（仅展示）
         
         Args:
             factors_df: 包含因子和label的DataFrame
-            threshold: IC绝对值阈值，低于此值的因子将被剔除
+            threshold: (仅用于展示高亮) IC绝对值阈值
             
         Returns:
-            List[str]: 筛选后的有效因子名称列表
+            pl.DataFrame: 返回包含所有因子的原始DataFrame（不进行剔除，防止Look-ahead Bias）
         """
-        print("\n=== 因子绩效分析与筛选 ===")
+        print("\n=== 因子绩效分析 (仅供参考，不进行预筛选) ===")
         
         if factors_df.is_empty():
             print("无因子数据可分析")
-            return []
+            return factors_df
+            
+        # 1. Deep Copy for Analysis (防止污染原始数据)
+        df_analysis = factors_df.clone()
         
-        # 准备数据：计算未来收益率 (5日)
+        # 准备数据：计算未来收益率 (5日)用于IC计算
         print("计算未来5日收益率作为基准...")
-        if "label" in factors_df.columns:
+        if "label" in df_analysis.columns:
              # Label is already calculated (normalized future return)
-             # Use it directly as proxy for return, or try to reconstruct if close was there?
-             # Since we drop close, we must trust 'label'.
-             # Rename/Copy label for consistency
-             df = factors_df.with_columns(pl.col("label").alias("next_ret"))
-        elif "close" in factors_df.columns:
-            df = factors_df.with_columns([
+             df_calc = df_analysis.with_columns(pl.col("label").alias("next_ret"))
+        elif "close" in df_analysis.columns:
+            df_calc = df_analysis.with_columns([
                 ((pl.col("close").shift(-5).over("vt_symbol") / pl.col("close")) - 1).alias("next_ret")
             ])
         else:
             print("无法计算未来收益率：缺少 'close' 或 'label' 列")
-            return []
+            return factors_df
         
-        # 去除无效数据
-        df = df.filter(pl.col("next_ret").is_not_null())
+        # 去除无效数据用于统计
+        df_calc = df_calc.filter(pl.col("next_ret").is_not_null())
         
-        if df.is_empty():
-            print("有效数据不足")
-            return []
+        if df_calc.is_empty():
+            print("有效数据不足进行IC分析")
+            return factors_df
 
         # 分析各因子的IC（信息系数）
         # 排除非因子列
         exclude_cols = ["datetime", "vt_symbol", "close", "open", "high", "low", "volume", "next_ret", "label"]
-        factor_cols = [col for col in df.columns if col not in exclude_cols]
+        # 确保只分析原始factors_df中存在的列
+        factor_cols = [col for col in factors_df.columns if col not in exclude_cols]
         
-        print(f"分析 {len(factor_cols)} 个因子的IC (Mean Rank IC & ICIR)...")
+        print(f"正在分析 {len(factor_cols)} 个因子的全局IC (Mean Rank IC & ICIR)...")
+        print("注意：此分析基于全样本数据，仅供观察因子整体质量，不用于模型特征筛选。")
         
         ic_results = []
         
         # 计算每日截面 Rank IC
-        # We can calculate all ICs in one go using expressions list
         ic_exprs = [
             pl.corr(pl.col(f).rank(), pl.col("next_ret").rank()).alias(f) 
             for f in factor_cols
@@ -149,10 +150,9 @@ class AlphaEngine:
         
         try:
             # 1. Calculate Daily ICs
-            daily_ics = df.group_by("datetime").agg(ic_exprs)
+            daily_ics = df_calc.group_by("datetime").agg(ic_exprs)
             
             # 2. Aggregate Results (Mean, Std -> IR)
-            # Use fill_nan(None) to treat NaNs as Nulls (which are ignored by mean/std)
             stats = daily_ics.select([
                 pl.col(f).fill_nan(pl.lit(None)).mean().alias(f"{f}_mean") for f in factor_cols
             ] + [
@@ -160,7 +160,6 @@ class AlphaEngine:
             ])
             
             stats_row = stats.row(0)
-            # Map columns to indices
             cols = stats.columns
             
             for f in factor_cols:
@@ -173,34 +172,32 @@ class AlphaEngine:
                 icir = mean_ic / (std_ic + 1e-9)
                 
                 ic_results.append({"factor": f, "ic": mean_ic, "icir": icir})
-                # print(f"  - {f}: IC = {mean_ic:.4f}, ICIR = {icir:.4f}") # 减少刷屏
 
         except Exception as e:
             print(f"IC Analysis Failed: {e}")
-            import traceback
-            traceback.print_exc()
-            return factor_cols # Fallback to all
+            # 出错也不影响主流程，返回原数据
+            return factors_df 
         
-        # 筛选和总结
-        selected_factors = []
+        # 展示结果
         if ic_results:
-            # Sort by abs(IC) descending to show most important first
+            # Sort by abs(IC) descending
             ic_results.sort(key=lambda x: abs(x["ic"]), reverse=True)
             
-            print(f"\n因子筛选 (阈值 |IC| >= {threshold}):")
-            for r in ic_results:
+            print(f"\n因子表现概览 (Top 10):")
+            for i, r in enumerate(ic_results[:10]):
                 is_selected = abs(r["ic"]) >= threshold
-                status = "[V]" if is_selected else "[ ]"
-                if is_selected:
-                    selected_factors.append(r["factor"])
+                status = "[*]" if is_selected else "[ ]"
                 print(f"  {status} {r['factor']}: IC {r['ic']:.4f}, ICIR {r['icir']:.4f}")
             
-            print(f"\n筛选结果: {len(selected_factors)} / {len(factor_cols)} 个因子被选中。")
+            # 统计达标数量
+            qualified = sum(1 for r in ic_results if abs(r["ic"]) >= threshold)
+            print(f"\n统计: {qualified} / {len(factor_cols)} 个因子 |IC| >= {threshold}")
         else:
              print("无有效IC结果。")
-             return factor_cols
 
-        return selected_factors
+        # 关键修改：返回原始 factors_df (包含所有列)，不进行剔除
+        # 让后续的 MLP 模型在滚动训练中自己决定如何使用这些特征
+        return factors_df
 
     def calculate_signals(self, factor_df: pl.DataFrame) -> pl.DataFrame:
         """
