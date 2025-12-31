@@ -28,7 +28,7 @@ class AlphaEngine:
         self.data_loader = DataLoader(self.lab)
         # 1. Configuration & Scope
         if not end_date:
-            self.end_date = datetime.now().strftime("%Y-%m-%d")
+            end_date = datetime.now().strftime("%Y-%m-%d")
         if not start_date:
             # Load enough history for training (e.g., 3 years)
             start_date = (datetime.now() - timedelta(days=365*3)).strftime("%Y-%m-%d")
