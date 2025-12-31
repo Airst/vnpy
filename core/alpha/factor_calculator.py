@@ -140,7 +140,7 @@ class FactorCalculator:
         print("[FactorCalculator] Pre-processing data (Global Cross-Sectional Normalization)...")
         try:
             # Identify feature columns
-            exclude_cols = {"datetime", "vt_symbol", "label"}
+            exclude_cols = {"datetime", "vt_symbol", "label", "industry"}
             raw_cols = ["open", "high", "low", "close", "volume", "turnover", "open_interest", "turnover_rate", "pe"]
             existing_raw = [c for c in raw_cols if c in df_features.columns]
             
@@ -155,7 +155,11 @@ class FactorCalculator:
             feature_cols.sort()
             
             # Final column order
-            final_cols = ["datetime", "vt_symbol"] + feature_cols + ["label"]
+            base_cols = ["datetime", "vt_symbol"]
+            if "industry" in dataset_df.columns:
+                base_cols.append("industry")
+                
+            final_cols = base_cols + feature_cols + ["label"]
             dataset_df = dataset_df.select(final_cols)
             
             # Apply Normalization Globally
@@ -402,3 +406,343 @@ def ts_corr(x, y, d):
     
     corr = cov_xy / (std_x * std_y + 1e-8)
     return corr
+
+def cs_rank(x):
+    # x: (Batch, Time)
+    # Rank over Batch dim.
+    
+    # 1. Count valid
+    mask = ~torch.isnan(x)
+    valid_count = mask.sum(dim=0, keepdim=True)
+    
+    # 2. Fill NaN with -inf for ranking
+    x_filled = torch.nan_to_num(x, nan=-float('inf'))
+    
+    # 3. Rank
+    # argsort twice gives 0-based rank indices
+    ranks = x_filled.argsort(dim=0).argsort(dim=0).float()
+    
+    # 4. Adjust ranks to ignore NaNs (which are at the bottom)
+    nan_count = (~mask).sum(dim=0, keepdim=True)
+    ranks_adj = ranks - nan_count
+    
+    # 5. Normalize to [0, 1]
+    denom = valid_count - 1
+    denom = torch.clamp(denom, min=1)
+    
+    res = ranks_adj / denom
+    
+    # Restore NaNs
+    res[~mask] = float('nan')
+    return res
+
+def cs_scale(x):
+    # Rescale such that sum(abs(x)) = 1 (across batch)
+    # x: (Batch, Time)
+    
+    # 1. Calculate sum of abs
+    # Treat NaN as 0 for sum
+    x_zero = torch.nan_to_num(x, nan=0.0)
+    sum_abs = torch.sum(torch.abs(x_zero), dim=0, keepdim=True)
+    
+    # 2. Scale
+    res = x / (sum_abs + 1e-8)
+    return res
+
+def ts_rank(x, d):
+    # Rolling Rank over past d days
+    # Returns normalized rank [0, 1]
+    
+    count_valid = torch.zeros_like(x)
+    rank = torch.zeros_like(x)
+    
+    current = x
+    
+    for i in range(d):
+        past = ts_delay(x, i)
+        mask_valid = ~torch.isnan(past)
+        count_valid += mask_valid.float()
+        
+        # current >= past
+        # Propagate NaNs from current
+        is_ge = (current >= past) & mask_valid
+        rank += is_ge.float()
+        
+    rank[torch.isnan(current)] = float('nan')
+    
+    denom = count_valid
+    denom = torch.clamp(denom, min=1) 
+    
+    out = rank / denom
+    
+    # If no valid data, rank is 0, out is 0. But should be NaN.
+    # count_valid == 0 implies all were NaNs.
+    out[count_valid == 0] = float('nan')
+    
+    return out
+
+def quesval(threshold, x, true_val, false_val):
+    # if x > threshold: true_val else: false_val
+    # threshold can be scalar or tensor
+    # x is tensor
+    condition = x > threshold
+    
+    # Broadcast if necessary (helper to handle scalar/tensor mix)
+    # torch.where supports broadcasting
+    # But if true_val/false_val are scalars, we need to ensure they match type/device if x is tensor?
+    # torch.where handles scalar scalars.
+    
+    # Ensure float dtype if inputs are scalars to avoid int64 issues with NaNs later
+    target_dtype = x.dtype if x.is_floating_point() else torch.float32
+
+    if isinstance(true_val, (float, int)):
+        true_val = torch.tensor(true_val, device=x.device, dtype=target_dtype)
+    if isinstance(false_val, (float, int)):
+        false_val = torch.tensor(false_val, device=x.device, dtype=target_dtype)
+        
+    return torch.where(condition, true_val, false_val)
+
+def quesval2(threshold, x, true_val, false_val):
+    # if x < threshold: true_val else: false_val
+    # (Based on vnpy implementation: feature1 < threshold)
+    condition = x < threshold
+    
+    # Ensure float dtype if inputs are scalars to avoid int64 issues with NaNs later
+    target_dtype = x.dtype if x.is_floating_point() else torch.float32
+
+    if isinstance(true_val, (float, int)):
+        true_val = torch.tensor(true_val, device=x.device, dtype=target_dtype)
+    if isinstance(false_val, (float, int)):
+        false_val = torch.tensor(false_val, device=x.device, dtype=target_dtype)
+        
+    return torch.where(condition, true_val, false_val)
+
+def ts_argmax(x, d):
+    # Returns 1-based index (1=Oldest, d=Newest) where max occurred
+    # Consistent with vnpy (Oldest=1)
+    # My lag: 0=Newest, d-1=Oldest.
+    # Result = d - lag.
+    
+    max_val = torch.full_like(x, -float('inf'))
+    argmax_lag = torch.zeros_like(x)
+    
+    for i in range(d):
+        cur = ts_delay(x, i)
+        mask = (cur > max_val) & (~torch.isnan(cur))
+        max_val = torch.where(mask, cur, max_val)
+        argmax_lag = torch.where(mask, torch.tensor(i, device=x.device, dtype=x.dtype), argmax_lag)
+        
+    argmax_lag[max_val == -float('inf')] = float('nan')
+    return d - argmax_lag
+
+def ts_argmin(x, d):
+    # Returns 1-based index (1=Oldest, d=Newest) where min occurred
+    min_val = torch.full_like(x, float('inf'))
+    argmin_lag = torch.zeros_like(x)
+    
+    for i in range(d):
+        cur = ts_delay(x, i)
+        mask = (cur < min_val) & (~torch.isnan(cur))
+        min_val = torch.where(mask, cur, min_val)
+        argmin_lag = torch.where(mask, torch.tensor(i, device=x.device, dtype=x.dtype), argmin_lag)
+        
+    argmin_lag[min_val == float('inf')] = float('nan')
+    return d - argmin_lag
+
+def ts_product(x, d):
+    # Rolling Product.
+    res = torch.ones_like(x)
+    for i in range(d):
+        cur = ts_delay(x, i)
+        cur_filled = torch.nan_to_num(cur, nan=1.0)
+        res = res * cur_filled
+    return res
+
+def ts_decay_linear(x, d):
+    # Weighted average with weights d, d-1, ..., 1
+    sum_w_x = torch.zeros_like(x)
+    sum_w = torch.zeros_like(x)
+    
+    for i in range(d):
+        w = d - i
+        cur = ts_delay(x, i)
+        mask = ~torch.isnan(cur)
+        
+        cur_zero = torch.nan_to_num(cur, nan=0.0)
+        sum_w_x += cur_zero * w
+        sum_w += mask.float() * w
+        
+    return sum_w_x / (sum_w + 1e-8)
+
+def ts_cov(x, y, d):
+    # Consistent covariance
+    mask = (~torch.isnan(x)) & (~torch.isnan(y))
+    x_m = torch.where(mask, x, torch.tensor(float('nan'), device=x.device))
+    y_m = torch.where(mask, y, torch.tensor(float('nan'), device=y.device))
+    
+    mean_x = ts_mean(x_m, d)
+    mean_y = ts_mean(y_m, d)
+    mean_xy = ts_mean(x_m * y_m, d)
+    
+    return mean_xy - mean_x * mean_y
+
+def pow1(x, e):
+    # Signed power: sign(x) * abs(x)^e
+    # Matches vnpy pow1
+    return torch.sign(x) * torch.pow(torch.abs(x), e)
+
+def pow2(x, e):
+    # vnpy pow2: x^e. 
+    # If x < 0 and e is integer -> -1 * |x|^e
+    # Else if x < 0 -> 0 (or NaN/Null in vnpy)
+    # Here we can approximate.
+    # Usually e is tensor.
+    
+    # Condition: x > 0
+    res = torch.zeros_like(x)
+    pos_mask = x > 0
+    res[pos_mask] = torch.pow(x[pos_mask], e[pos_mask])
+    
+    # Condition: x < 0
+    neg_mask = x < 0
+    # Check if e is integer
+    # float equality is tricky. 
+    # Assume if abs(e - round(e)) < epsilon
+    e_round = torch.round(e)
+    is_int = torch.abs(e - e_round) < 1e-5
+    
+    neg_valid = neg_mask & is_int
+    res[neg_valid] = -1 * torch.pow(torch.abs(x[neg_valid]), e[neg_valid])
+    
+    # Otherwise 0 (or NaN). vnpy returns None/NaN.
+    # We leave as 0 or set to NaN? 
+    # vnpy: otherwise(pl.lit(None)).fill_null(0).
+    # So it returns 0.
+    
+    return res
+
+def ts_greater(x, y):
+    # max(x, y) ignoring NaNs
+    return torch.fmax(x, y)
+
+def ts_less(x, y):
+    # min(x, y) ignoring NaNs
+    return torch.fmin(x, y)
+
+def ts_log(x):
+    return torch.log(x)
+
+def ts_abs(x):
+    return torch.abs(x)
+
+def _rolling_window(x, d):
+    # Helper to unfold tensor for rolling operations
+    # x: (Batch, Time) -> (Batch, Time, d)
+    # We pad the time dimension with NaNs at the beginning
+    # Pad (d-1) to the left
+    pad_size = d - 1
+    # unsqueeze to (Batch, 1, Time) for padding? No, F.pad works on last dim
+    x_pad = F.pad(x, (pad_size, 0), value=float('nan'))
+    # unfold: dimension, size, step
+    return x_pad.unfold(dimension=1, size=d, step=1)
+
+def ts_quantile(x, d, q):
+    # x: (Batch, Time)
+    # q: scalar float 0..1
+    
+    # 1. Unfold to (Batch, Time, d)
+    x_unfolded = _rolling_window(x, d)
+    
+    # 2. Quantile
+    # torch.quantile requires value to be computed.
+    # It might be slow on large data.
+    # nanquantile is available in newer torch versions?
+    # torch.nanquantile is available since 1.8.
+    
+    # We operate on the last dimension
+    return torch.nanquantile(x_unfolded, q, dim=2)
+
+def ts_slope(y, d):
+    # Simple rolling slope of y against x=0..d-1
+    # beta = Cov(x, y) / Var(x)
+    # Var(x) is constant for window size d.
+    # Cov(x, y) = E[xy] - E[x]E[y]
+    
+    # x constants
+    x = torch.arange(d, device=y.device, dtype=y.dtype)
+    mean_x = (d - 1) / 2.0
+    var_x = (d**2 - 1) / 12.0
+    
+    # E[y] (rolling mean) - simplified, not ignoring NaNs to match convolution
+    # If we want to match ts_mean robust logic, we can't efficiently mix with convolution for xy.
+    # So we stick to convolution that propagates NaNs.
+    
+    kernel_sum = torch.ones(1, 1, d, device=y.device, dtype=y.dtype)
+    kernel_xy = torch.arange(d, device=y.device, dtype=y.dtype).view(1, 1, d)
+    
+    y_u = y.unsqueeze(1)
+    y_pad = F.pad(y_u, (d-1, 0), value=float('nan')) # Pad with NaN, convolution will return NaN if any NaN
+    # Actually conv1d with NaN input returns NaN? Yes.
+    
+    sum_y = F.conv1d(y_pad, kernel_sum).squeeze(1)
+    sum_xy = F.conv1d(y_pad, kernel_xy).squeeze(1)
+    
+    mean_y = sum_y / d
+    mean_xy = sum_xy / d
+    
+    cov_xy = mean_xy - mean_x * mean_y
+    beta = cov_xy / var_x
+    return beta
+
+def ts_rsquare(y, d):
+    # R^2 = beta^2 * Var(x) / Var(y)
+    # We need beta and Var(y)
+    
+    # Re-calculate basics (could optimize if we had a shared context)
+    beta = ts_slope(y, d)
+    
+    # Var(y) = E[y^2] - E[y]^2
+    # Standard rolling variance (population or sample? R^2 usually uses same basis)
+    # Let's use population variance for consistency with Var(x) derivation
+    
+    kernel_sum = torch.ones(1, 1, d, device=y.device, dtype=y.dtype)
+    y_u = y.unsqueeze(1)
+    y_pad = F.pad(y_u, (d-1, 0), value=float('nan'))
+    
+    sum_y = F.conv1d(y_pad, kernel_sum).squeeze(1)
+    sum_yy = F.conv1d(y_pad**2, kernel_sum).squeeze(1)
+    
+    mean_y = sum_y / d
+    mean_yy = sum_yy / d
+    
+    var_y = mean_yy - mean_y**2
+    
+    var_x = (d**2 - 1) / 12.0
+    
+    r2 = (beta**2 * var_x) / (var_y + 1e-8)
+    # Clip 0-1
+    return torch.clamp(r2, 0, 1)
+
+def ts_resi(y, d):
+    # Residual at the last point
+    # resi = y_t - (alpha + beta * x_t)
+    # x_t = d - 1
+    # alpha = mean_y - beta * mean_x
+    # y_pred_t = mean_y - beta * mean_x + beta * (d - 1)
+    #          = mean_y + beta * (d - 1 - (d-1)/2)
+    #          = mean_y + beta * (d-1)/2
+    
+    beta = ts_slope(y, d)
+    
+    kernel_sum = torch.ones(1, 1, d, device=y.device, dtype=y.dtype)
+    y_u = y.unsqueeze(1)
+    y_pad = F.pad(y_u, (d-1, 0), value=float('nan'))
+    sum_y = F.conv1d(y_pad, kernel_sum).squeeze(1)
+    mean_y = sum_y / d
+    
+    mean_x = (d - 1) / 2.0
+    
+    # y_t is just y (the current value)
+    y_pred = mean_y + beta * ((d - 1) - mean_x)
+    
+    return y - y_pred

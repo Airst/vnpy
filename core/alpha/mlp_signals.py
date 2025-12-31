@@ -23,6 +23,11 @@ class MLPSignals:
 
 
     def generate_signals(self, dataset_df: pl.DataFrame, start_date: str) -> pl.DataFrame:
+        # Drop 'industry' if present (MlpModel only supports numeric features)
+        if "industry" in dataset_df.columns:
+            print("[MLPSignals] Dropping 'industry' column for model training.")
+            dataset_df = dataset_df.drop("industry")
+
         # 6. Rolling Window Loop
         print("[MLPSignals] Starting Rolling Window Training & Prediction...")
         

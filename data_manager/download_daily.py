@@ -205,7 +205,7 @@ def download_data(config_path: str = "data_manager/download_daily_config.json", 
                 df = pro.daily(ts_code=ts_code_str, start_date=start_str, end_date=end_str)
                 
                 if df is not None and not df.empty:
-                    bars = []
+                    bars_map = defaultdict(list)
                     for _, row in df.iterrows():
                         symbol, exchange = from_tushare_code(row["ts_code"])
                         
@@ -223,11 +223,14 @@ def download_data(config_path: str = "data_manager/download_daily_config.json", 
                             close_price=round_to(row["close"], 0.000001),
                             gateway_name="TS"
                         )
-                        bars.append(bar)
+                        bars_map[row["ts_code"]].append(bar)
                     
-                    if bars:
-                        database.save_bar_data(bars)
-                        print(f"  已保存 {len(bars)} 条数据 (涵盖 {len(chunk)} 只股票)")
+                    if bars_map:
+                        for bars in bars_map.values():
+                            # 根据datetime升序排序
+                            bars.sort(key=lambda x: x.datetime)
+                            database.save_bar_data(bars)
+                        print(f"  已保存 {len(df)} 条数据 (涵盖 {len(bars_map)} 只股票)")
                 else:
                     print(f"  无数据返回: {ts_code_str} ({start_str}-{end_str})")
 

@@ -1,5 +1,5 @@
 
-from core.alpha.factor_calculator import FactorCalculator, ts_corr, ts_delay, ts_mean, ts_std, ts_sum, ta_atr, ta_rsi, torch
+from core.alpha.factor_calculator import FactorCalculator, cs_rank, ts_corr, ts_cov, ts_delay, ts_mean, ts_min, ts_quantile, ts_std, ts_sum, ta_atr, ta_rsi, torch
 
 
 class V3FactorCalculator(FactorCalculator): 
@@ -20,8 +20,14 @@ class V3FactorCalculator(FactorCalculator):
         TR = padded_raw[:, :, 6] # Turnover Rate
         PE = padded_raw[:, :, 7] # PE Ratio
         
+        
+        # Helper vars
         # Helper for mask (where C is not NaN)
         mask = ~torch.isnan(C)
+        # VWAP = Turnover / Volume. 
+        # Handle cases where Volume is 0 or NaN.
+        vwap = T / (V + 1e-8)
+        vwap = torch.where(torch.isnan(vwap), C, vwap) 
 
         features = {}
 
@@ -70,8 +76,17 @@ class V3FactorCalculator(FactorCalculator):
         # (C - L) / (H - L). Closer to 1 means closing strong (buying pressure).
         # features["close_loc_range"] = (C - L) / (H - L + 1e-8)
         
-        # Alpha101 #6 proxy: -1 * Correlation(Open, Volume, 10)
-        features["alpha006_proxy"] = -1 * ts_corr(O, V, 10)
+        # Alpha 13
+        # -1 * cs_rank(ts_cov(cs_rank(close), cs_rank(volume), 5))
+        #features["alpha013"] = -1 * cs_rank(ts_cov(cs_rank(C), cs_rank(V), 5))
+
+        # Alpha 40
+        # ((-1) * cs_rank(ts_std(high, 10))) * ts_corr(high, volume, 10)
+        features["alpha040"] = -1 * cs_rank(ts_std(H, 10)) * ts_corr(H, V, 10)
+
+        # Alpha 42
+        # cs_rank((vwap - close)) / cs_rank((vwap + close))
+        #features["alpha042"] = cs_rank(vwap - C) / (cs_rank(vwap + C) + 1e-8)
         
         # Inverse Volatility (Longer term - 60d)
         # Low beta/volatility stocks tend to outperform in bear/stable markets.
@@ -167,7 +182,21 @@ class V3FactorCalculator(FactorCalculator):
         # Current PE / Avg PE(20d) - 1
         pe_mean_20 = ts_mean(PE, 20)
         features["pe_rank_change_20d"] = PE / (pe_mean_20 + 1e-8) - 1
+
         
+        # qtld_{w} = ts_quantile(close, w, 0.2) / close
+        features[f"qtld_60"] = ts_quantile(C, 60, 0.2) / C
+        
+        # klen = (high - low) / close
+        features["klen"] = (H - L) / C
+
+        for w in [10, 20, 30]:
+            # min_{w} = ts_min(low, w) / close
+            features[f"min_{w}"] = ts_min(L, w) / C
+        
+        for w in [5, 10, 20]:
+            # std_{w} = ts_std(ret_1, w)
+            features[f"std_{w}"] = ts_std(ret_1, w)
         
         # Label: Next 5 days return
         # ts_delay(close, -5) / close - 1

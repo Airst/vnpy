@@ -3,6 +3,7 @@ import tushare as ts
 import pandas as pd
 from datetime import datetime, timedelta
 import os
+from vnpy.trader.setting import SETTINGS
 
 def filter_stocks(config_path: str = "data_download/download_config.json"):
     """
@@ -17,7 +18,7 @@ def filter_stocks(config_path: str = "data_download/download_config.json"):
     with open(config_path, "r", encoding="utf-8") as f:
         config = json.load(f)
     
-    token = config.get("tushare_token", "")
+    token = SETTINGS["datafeed.password"]
     if not token:
         print("Error: tushare_token not found in config.")
         return

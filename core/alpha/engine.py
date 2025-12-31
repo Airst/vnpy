@@ -10,6 +10,7 @@ from vnpy.alpha.lab import AlphaLab
 from core.alpha.factor_calculator import FactorCalculator
 from core.alpha.mlp_signals import MLPSignals
 from core.selector import FundamentalSelector
+from core.alpha.data_loader import DataLoader
 from data_manager.daily_basic_manager import DailyBasicManager
 
 ALPHA_DB_PATH = "core/alpha_db"
@@ -24,6 +25,7 @@ class AlphaEngine:
         self.mlp_signals = mlp_signals
         self.signal_name = signal_name
         self.database = get_database()
+        self.data_loader = DataLoader(self.lab)
         # 1. Configuration & Scope
         if not end_date:
             self.end_date = datetime.now().strftime("%Y-%m-%d")
@@ -83,7 +85,7 @@ class AlphaEngine:
         print(f"[AlphaEngine] Symbols: {len(symbols)}")
         
         # 3. Load Data
-        df = self._load_ashare_data(symbols, self.start_date, self.end_date)
+        df = self.data_loader.load_ashare_data(symbols, self.start_date, self.end_date)
         if df.is_empty():
             print("[AlphaEngine] No data loaded.")
             raise ValueError("No data loaded.")
@@ -180,14 +182,38 @@ class AlphaEngine:
         
         # 展示结果
         if ic_results:
-            # Sort by abs(IC) descending
-            ic_results.sort(key=lambda x: abs(x["ic"]), reverse=True)
+            # 区分正负因子
+            pos_ics = [r for r in ic_results if r["ic"] > 0]
+            neg_ics = [r for r in ic_results if r["ic"] < 0]
+
+            # 正向因子：从大到小排序 (Strong -> Weak)
+            pos_ics.sort(key=lambda x: x["ic"], reverse=True)
+            # 负向因子：从小到大排序 (Strong Negative -> Weak Negative)
+            neg_ics.sort(key=lambda x: x["ic"], reverse=False)
             
-            print(f"\n因子表现概览 (Top 10):")
-            for i, r in enumerate(ic_results[:10]):
-                is_selected = abs(r["ic"]) >= threshold
-                status = "[*]" if is_selected else "[ ]"
-                print(f"  {status} {r['factor']}: IC {r['ic']:.4f}, ICIR {r['icir']:.4f}")
+            print(f"\n因子表现概览:")
+            
+            # 1. Top 5 正向强相关
+            print(f"\n[Top 5 正向强相关 (IC > 0, Descending)]:")
+            for r in pos_ics[:5]:
+                print(f"  {r['factor']}: IC {r['ic']:.4f}, ICIR {r['icir']:.4f}")
+                
+            # 2. Top 5 负向强相关
+            print(f"\n[Top 5 负向强相关 (IC < 0, Ascending)]:")
+            for r in neg_ics[:5]:
+                print(f"  {r['factor']}: IC {r['ic']:.4f}, ICIR {r['icir']:.4f}")
+                
+            # 3. Top 5 正向最弱 (Closest to 0)
+            print(f"\n[Top 5 正向最弱 (Close to 0)]:")
+            # 取最后5个，并按IC从小到大(接近0到远离0)排序展示
+            for r in sorted(pos_ics[-5:], key=lambda x: x["ic"]):
+                print(f"  {r['factor']}: IC {r['ic']:.4f}, ICIR {r['icir']:.4f}")
+
+            # 4. Top 5 负向最弱 (Closest to 0)
+            print(f"\n[Top 5 负向最弱 (Close to 0)]:")
+            # 取最后5个(它们是接近0的)，按绝对值从小到大排序展示
+            for r in sorted(neg_ics[-5:], key=lambda x: abs(x["ic"])):
+                print(f"  {r['factor']}: IC {r['ic']:.4f}, ICIR {r['icir']:.4f}")
             
             # 统计达标数量
             qualified = sum(1 for r in ic_results if abs(r["ic"]) >= threshold)
@@ -222,133 +248,6 @@ class AlphaEngine:
                 ashare_symbols.append(symbol)
         
         return ashare_symbols
-
-    def _load_ashare_data(self, symbols, start_date, end_date) -> pl.DataFrame:
-        """
-        加载A股数据，包含财务数据和行情数据
-        
-        Returns:
-            pl.DataFrame: 包含以下列:
-                - vt_symbol: str
-                - datetime: datetime
-                - open, high, low, close, volume: float
-                - turnover, open_interest: float
-                - turnover_rate: float (换手率)
-                - turnover_rate_f: float (换手率-自由流通)
-                - volume_ratio: float (量比)
-                - pe: float (市盈率)
-                - pe_ttm: float (市盈率TTM)
-                - pb: float (市净率)
-                - ps: float (市销率)
-                - ps_ttm: float (市销率TTM)
-                - dv_ratio: float (股息率)
-                - dv_ttm: float (股息率TTM)
-                - total_share: float (总股本)
-                - float_share: float (流通股本)
-                - free_share: float (自由流通股本)
-                - total_mv: float (总市值)
-                - circ_mv: float (流通市值)
-        """
-        # 扩展天数考虑A股交易特点
-        extended_days = 250  
-        
-        print(f"加载数据，扩展天数: {extended_days}")
-        
-        # 1. 加载行情数据
-        price_df = self.lab.load_bar_df(
-            vt_symbols=symbols,
-            interval="d",
-            start=start_date,
-            end=end_date,
-            extended_days=extended_days
-        )
-        
-        if price_df is None or price_df.is_empty():
-            return pl.DataFrame()
-        
-        # 2. 加载财务数据（每日指标）
-        print("加载每日指标数据(Daily Basic)...")
-        try:
-            db_manager = DailyBasicManager()
-            # 格式化日期为 YYYYMMDD
-            s_date = start_date.replace("-", "")
-            e_date = end_date.replace("-", "")
-            
-            # 由于需要计算前向填充，开始时间也尽量往前推一点，或直接使用price_df的最小时间
-            if not price_df.is_empty():
-                min_date = price_df["datetime"].min()
-                if min_date:
-                     s_date = min_date.strftime("%Y%m%d") #type: ignore
-
-            basic_df_pd = db_manager.load_data(symbols, s_date, e_date)
-            
-            if not basic_df_pd.empty:
-                # 转换为 Polars
-                basic_df = pl.from_pandas(basic_df_pd)
-                
-                # Align datetime precision to microseconds (us) to match price_df
-                # Fix: Explicitly check and cast. Pandas usually results in ns.
-                if "datetime" in basic_df.columns:
-                     basic_df = basic_df.with_columns(pl.col("datetime").cast(pl.Datetime("us")))
-                
-                # 处理列名冲突，移除多余列
-                # basic_df 包含: vt_symbol, datetime, close, turnover_rate...
-                # 移除 close, ts_code, trade_date
-                cols_to_drop = ["close", "ts_code", "trade_date"]
-                basic_df = basic_df.drop([c for c in cols_to_drop if c in basic_df.columns])
-                
-                # 合并
-                price_df = price_df.join(
-                    basic_df,
-                    on=["vt_symbol", "datetime"],
-                    how="left"
-                )
-                
-                # 前向填充
-                price_df = price_df.sort(["vt_symbol", "datetime"])
-                # 需要填充的列是 basic_df 的列
-                fill_cols = [c for c in basic_df.columns if c not in ["vt_symbol", "datetime"]]
-                
-                price_df = price_df.with_columns([
-                    pl.col(col).forward_fill().over("vt_symbol")
-                    for col in fill_cols
-                ])
-                print(f"每日指标数据加载完成，合并后维度: {price_df.shape}")
-            else:
-                print("未查询到每日指标数据")
-                
-        except Exception as e:
-            print(f"加载每日指标数据失败: {e}")
-            import traceback
-            traceback.print_exc()
-
-        # 3. 加载其他财务数据（如果有的话）
-        financial_df = self._load_financial_data(symbols, end_date)
-        
-        # 4. 合并其他财务数据
-        if not financial_df.is_empty():
-            # 对财务数据进行前向填充（季度数据填充到日频）
-            financial_df = financial_df.sort(["vt_symbol", "report_date"])
-            price_df = price_df.join(
-                financial_df,
-                on=["vt_symbol", "datetime"],
-                how="left"
-            )
-            
-            # 前向填充财务数据
-            price_df = price_df.sort(["vt_symbol", "datetime"])
-            price_df = price_df.with_columns([
-                pl.col(col).forward_fill().over("vt_symbol")
-                for col in financial_df.columns if col not in ["vt_symbol", "datetime"]
-            ])
-        
-        return price_df
-
-    def _load_financial_data(self, symbols, end_date) -> pl.DataFrame:
-        """模拟加载财务数据（实际使用时需要接入财务数据库）"""
-        # 这里返回一个空DataFrame，实际使用时需要实现
-        return pl.DataFrame()
-
 
     def save_factors(self, signal_df):
         if signal_df is not None:
