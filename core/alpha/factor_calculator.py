@@ -42,8 +42,19 @@ class FactorCalculator:
         symbols = df["vt_symbol"].to_numpy()
         
         # Numerical columns needed
-        cols = ["open", "high", "low", "close", "volume", "turnover", "turnover_rate", "pe"]
+        cols = ["open", "high", "low", "close", "volume", "turnover", "turnover_rate", "pe", "pb", "ps", "dv_ratio", "total_mv"]
         
+        # Check for industry
+        if "industry" in df.columns:
+            print("[FactorCalculator] Found 'industry' column. Encoding...")
+            # Encode industry to integer
+            # Cast to Categorical and then to Physical (Integer ID)
+            # Handle nulls
+            df = df.with_columns(
+                pl.col("industry").fill_null("Unknown").cast(pl.Categorical).to_physical().alias("industry_code")
+            )
+            cols.append("industry_code")
+
         # Check if columns exist, if not, fill with NaN
         # Ideally AlphaEngine provides them. If not, we might crash or should handle gracefully.
         # Assuming they exist for now as per previous step.
@@ -746,3 +757,78 @@ def ts_resi(y, d):
     y_pred = mean_y + beta * ((d - 1) - mean_x)
     
     return y - y_pred
+
+def cs_group_mean(x, groups, num_groups=None):
+    """
+    Calculate Cross-Sectional Mean per Group.
+    x: (Batch, Time) Values
+    groups: (Batch, Time) Integer Group IDs
+    
+    Returns:
+    out: (Batch, Time) where each element is the mean of its group at that time step.
+    """
+    # 1. Handle NaNs in groups
+    # Create mask for valid groups
+    mask_groups = ~torch.isnan(groups)
+    
+    # Fill NaN groups with 0 for safe conversion to long
+    # (These 0s will be masked out during scatter so they don't affect Group 0)
+    groups_filled = torch.nan_to_num(groups, nan=0.0)
+    groups_long = groups_filled.long()
+    
+    if num_groups is None:
+        # Infer max group ID from valid groups only
+        if mask_groups.any():
+            # Masked select is 1D, which is fine for max
+            valid_groups = torch.masked_select(groups_long, mask_groups)
+            num_groups = int(torch.max(valid_groups).item()) + 1
+        else:
+            num_groups = 1 # Fallback if no valid groups
+
+    B, T = x.shape
+    
+    # Prepare scatter target
+    # Shape: (NumGroups, Time)
+    sums = torch.zeros(num_groups, T, device=x.device, dtype=x.dtype)
+    counts = torch.zeros(num_groups, T, device=x.device, dtype=x.dtype)
+    
+    # 2. Handle NaNs in x
+    mask_x = ~torch.isnan(x)
+    
+    # Combined mask: Valid Group AND Valid Data
+    valid_mask = mask_groups & mask_x
+    
+    x_zero = torch.nan_to_num(x, nan=0.0)
+    
+    # Scatter Add
+    # We scatter 'x' into 'sums' at 'groups_long' indices.
+    # We only want to add where 'valid_mask' is True.
+    # Where valid_mask is False, we add 0.0 (which does nothing).
+    # Note: If a position was NaN group (mapped to 0), valid_mask is False.
+    # So we add 0.0 to sum[0] and 0.0 to count[0]. This is safe.
+    
+    # sums[group, t] += x[b, t] * mask
+    sums.scatter_add_(0, groups_long, x_zero * valid_mask.float())
+    counts.scatter_add_(0, groups_long, valid_mask.float())
+    
+    # Calculate Means
+    means = sums / (counts + 1e-8)
+    
+    # Map back to (Batch, Time)
+    out = means.gather(0, groups_long)
+    
+    # Restore NaNs where groups were invalid or result is invalid (count=0)
+    # If count was 0, means is 0. 
+    # But for an original position (b, t):
+    # If groups[b,t] was NaN -> we want NaN.
+    # If groups[b,t] was valid G, but count[G] was 0 (no valid x in that group) -> we want NaN.
+    
+    # Check count for the assigned group
+    assigned_counts = counts.gather(0, groups_long)
+    
+    # Final mask
+    final_mask = mask_groups & (assigned_counts > 0)
+    
+    out[~final_mask] = float('nan')
+    
+    return out

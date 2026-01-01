@@ -14,7 +14,7 @@ class MLPSignals:
     def __init__(self):
         self.model_settings = {
             "hidden_sizes": (256, 128, 64),
-            "n_epochs": 300,  # Adjustable based on needs
+            "n_epochs": 400,  # Adjustable based on needs
             "batch_size": 4096,
             "lr": 0.001,
             "early_stop_rounds": 20,

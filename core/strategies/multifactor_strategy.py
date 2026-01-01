@@ -37,7 +37,7 @@ class MultiFactorStrategy(StrategyTemplate):
         self.signal_name = setting.get("signal_name", "ashare_multi_factor")
         self.max_holdings = setting.get("max_holdings", 5)
         self.capital = setting.get("capital", 1_000_000)
-        self.sell_threshold = setting.get("sell_threshold", 0.5)
+        self.sell_threshold = setting.get("sell_threshold", 1)
         self.buy_threshold = setting.get("buy_threshold", 1)
         self.rates = portfolio_engine.rates
         self.cash = self.capital
@@ -64,14 +64,12 @@ class MultiFactorStrategy(StrategyTemplate):
         
         if trade.direction == Direction.LONG:
             self.cash -= trade.price * trade.volume
-            print(f"Buy: {trade.vt_symbol} Price: {trade.price} Volume: {trade.volume} cash after trade: {self.cash:.2f}")
         elif trade.direction == Direction.SHORT:
             # Simulate Stamp Duty for Sells (A-share standard: 0.1%)
             # Even if the engine doesn't charge it, being conservative prevents overspending.
             stamp_duty = trade.price * trade.volume * 0.0005
             commission += stamp_duty
             self.cash += trade.price * trade.volume
-            print(f"Sell: {trade.vt_symbol} Price: {trade.price} Volume: {trade.volume} cash after trade: {self.cash:.2f}")
         else:
             return
             
@@ -145,7 +143,6 @@ class MultiFactorStrategy(StrategyTemplate):
         current_dt = list(bars.values())[0].datetime
         date_str = current_dt.strftime("%Y-%m-%d")
         available_cash = self.cash
-        print(f"{date_str} - Available Cash: {available_cash:.2f}")
 
         # Update last prices
         for vt_symbol, bar in bars.items():
@@ -215,7 +212,8 @@ class MultiFactorStrategy(StrategyTemplate):
                         self.buy(vt_symbol, price * 1.0002, volume)
 
         # 5b. Sell based on explicit sell signal (final_signal < threshold)
-        for vt_symbol in held_symbols:
+        sell_candidates = [s for s in held_symbols if s not in target_symbols]
+        for vt_symbol in sell_candidates:
             # Check sell signal using relative score
             score = scores.get(vt_symbol, 0.0)
             
@@ -235,5 +233,9 @@ class MultiFactorStrategy(StrategyTemplate):
                 pos = self.get_pos(vt_symbol)
                 # Sell at simulated limit price below close (ensure execution)
                 self.sell(vt_symbol, price * 0.998, pos)
+                
+                print(f"{date_str}, {vt_symbol} Sell, score: {score}")
+            else:
+                print(f"{date_str}, {vt_symbol} Held, score: {score}")
         
         self.put_event()

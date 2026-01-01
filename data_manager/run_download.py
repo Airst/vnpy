@@ -14,4 +14,3 @@ if __name__ == "__main__":
     print("\n开始更新每日指标数据...")
     manager = DailyBasicManager()
     manager.download_all()
-

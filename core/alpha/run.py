@@ -110,7 +110,7 @@ def run(version: str, only_factor: bool = False, sync: bool = False):
         mlp_signals=MLPSignals(),
         selector=FundamentalSelector(),
         signal_name=signal_name,
-        start_date="2020-12-28",
+        start_date="2019-12-28",
         end_date=datetime.now().strftime("%Y-%m-%d")
     )
    
