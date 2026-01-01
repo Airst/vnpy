@@ -11,7 +11,6 @@ from core.alpha.factor_calculator import FactorCalculator
 from core.alpha.mlp_signals import MLPSignals
 from core.selector import FundamentalSelector
 from core.alpha.data_loader import DataLoader
-from data_manager.daily_basic_manager import DailyBasicManager
 
 ALPHA_DB_PATH = "core/alpha_db"
 

@@ -144,6 +144,16 @@ class CoreService:
                 "volume": float(trade.volume),
                 "pnl": 0  # Portfolio engine doesn't track individual trade pnl in engine.trades
             })
+        
+        for trade in engine.active_limit_orders.values():
+            trades.append({
+                "date": trade.datetime.strftime("%Y-%m-%d %H:%M:%S"), # type: ignore
+                "symbol": trade.vt_symbol,
+                "direction": trade.direction.value, # type: ignore
+                "price": float(trade.price),
+                "volume": float(trade.volume),
+                "pnl": 0  # Portfolio engine doesn't track individual trade pnl in engine.trades
+            })
 
         # Calculate PnL for trades (FIFO)
         # Tracks buy positions: {symbol: [{"price": price, "volume": volume}, ...]}

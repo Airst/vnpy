@@ -1,6 +1,6 @@
-from download_daily import download_data
-from daily_basic_manager import DailyBasicManager
-from stock_info_manager import StockInfoManager
+from data_manager.tushare.download_daily import download_data
+from data_manager.tushare.daily_basic_manager import DailyBasicManager
+from data_manager.tushare.stock_info_manager import StockInfoManager
 
 
 if __name__ == "__main__":

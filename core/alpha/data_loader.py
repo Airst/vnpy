@@ -2,8 +2,8 @@ import polars as pl
 from typing import List, Optional
 from datetime import datetime
 from vnpy.alpha.lab import AlphaLab
-from data_manager.daily_basic_manager import DailyBasicManager
-from data_manager.stock_info_manager import StockInfoManager
+from data_manager.tushare.daily_basic_manager import DailyBasicManager
+from data_manager.tushare.stock_info_manager import StockInfoManager
 
 class DataLoader:
     def __init__(self, lab: AlphaLab):

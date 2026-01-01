@@ -39,14 +39,23 @@ class MultiFactorStrategy(StrategyTemplate):
         self.capital = setting.get("capital", 1_000_000)
         self.sell_threshold = setting.get("sell_threshold", 1)
         self.buy_threshold = setting.get("buy_threshold", 1)
+        self.stop_loss_pct = setting.get("stop_loss_pct", 0.10)
+        self.trailing_stop_pct = setting.get("trailing_stop_pct", 0.15)
+        self.cooldown_days = setting.get("cooldown_days", 3)
+        
         self.rates = portfolio_engine.rates
         self.cash = self.capital
         
-        print(f"MultiFactorStrategy initialized with lab: {self.lab_path} signal: {self.signal_name}, max_holdings: {self.max_holdings}, capital: {self.capital}, buy_threshold: {self.buy_threshold}, sell_threshold: {self.sell_threshold}")
+        print(f"MultiFactorStrategy initialized with lab: {self.lab_path} signal: {self.signal_name}, max_holdings: {self.max_holdings}, capital: {self.capital}, buy_threshold: {self.buy_threshold}, sell_threshold: {self.sell_threshold}, stop_loss: {self.stop_loss_pct}")
         # Signals: {date_str: {vt_symbol: score}}
         self.signal_data = {}
         self.last_scores = {}
         self.last_prices = {}
+        
+        # Position tracking for Stop Loss
+        self.pos_entry_price = {}
+        self.pos_high_price = {}
+        self.cooldown_map = {} # {vt_symbol: cooldown_counter}
 
     def on_init(self):
         print("MultiFactorStrategy Initialized")
@@ -64,12 +73,41 @@ class MultiFactorStrategy(StrategyTemplate):
         
         if trade.direction == Direction.LONG:
             self.cash -= trade.price * trade.volume
+            
+            # Update Entry Price (Weighted Average)
+            old_pos = self.get_pos(trade.vt_symbol)
+            if old_pos == 0:
+                 self.pos_entry_price[trade.vt_symbol] = trade.price
+                 self.pos_high_price[trade.vt_symbol] = trade.price
+            else:
+                 # Standard avg price calculation: (old_price * old_vol + new_price * new_vol) / total_vol
+                 # Note: self.get_pos returns volume BEFORE this trade update in some engines, 
+                 # but StrategyTemplate usually updates position AFTER calling update_trade?
+                 # Actually, vnpy_portfoliostrategy updates pos AFTER `update_trade` callback usually.
+                 # Let's assume old_pos is current holding before this trade.
+                 current_avg = self.pos_entry_price.get(trade.vt_symbol, trade.price)
+                 new_avg = (current_avg * old_pos + trade.price * trade.volume) / (old_pos + trade.volume)
+                 self.pos_entry_price[trade.vt_symbol] = new_avg
+                 # Reset high price if significantly adding? No, keep high price for trailing stop?
+                 # Usually trailing stop resets on new entry or keeps high? 
+                 # Let's keep high price as max(old_high, new_price)
+                 old_high = self.pos_high_price.get(trade.vt_symbol, trade.price)
+                 self.pos_high_price[trade.vt_symbol] = max(old_high, trade.price)
+
         elif trade.direction == Direction.SHORT:
             # Simulate Stamp Duty for Sells (A-share standard: 0.1%)
             # Even if the engine doesn't charge it, being conservative prevents overspending.
             stamp_duty = trade.price * trade.volume * 0.0005
             commission += stamp_duty
             self.cash += trade.price * trade.volume
+            
+            # If closed completely, remove from tracking
+            new_pos = self.get_pos(trade.vt_symbol) - trade.volume
+            if new_pos <= 0:
+                if trade.vt_symbol in self.pos_entry_price:
+                    del self.pos_entry_price[trade.vt_symbol]
+                if trade.vt_symbol in self.pos_high_price:
+                    del self.pos_high_price[trade.vt_symbol]
         else:
             return
             
@@ -148,6 +186,11 @@ class MultiFactorStrategy(StrategyTemplate):
         for vt_symbol, bar in bars.items():
             self.last_prices[vt_symbol] = bar.close_price
             
+            # Update High Price for Trailing Stop
+            if vt_symbol in self.pos_high_price:
+                if bar.close_price > self.pos_high_price[vt_symbol]:
+                    self.pos_high_price[vt_symbol] = bar.close_price
+            
         
         # 2. Get Scores
         scores = self.signal_data.get(date_str, {})
@@ -156,34 +199,110 @@ class MultiFactorStrategy(StrategyTemplate):
         if not scores:
             return
 
-        # 3. Rank candidates
+        # Update Cooldowns
+        expired_cooldowns = []
+        for s in self.cooldown_map:
+            self.cooldown_map[s] -= 1
+            if self.cooldown_map[s] <= 0:
+                expired_cooldowns.append(s)
+        for s in expired_cooldowns:
+            del self.cooldown_map[s]
+
+
+        # 3. Stop Loss Logic (Priority 1)
+        held_symbols = []
+        stop_loss_triggered = []
+        
+        for vt_symbol in self.vt_symbols:
+            pos = self.get_pos(vt_symbol)
+            if pos > 0:
+                held_symbols.append(vt_symbol)
+                
+                if vt_symbol not in bars:
+                    continue
+                
+                price = bars[vt_symbol].close_price
+                entry = self.pos_entry_price.get(vt_symbol, price)
+                high = self.pos_high_price.get(vt_symbol, price)
+                
+                # Check Hard Stop
+                hard_stop_price = entry * (1 - self.stop_loss_pct)
+                # Check Trailing Stop
+                trailing_stop_price = high * (1 - self.trailing_stop_pct)
+                
+                if price < hard_stop_price:
+                    print(f"{date_str} {vt_symbol} HARD STOP triggered. Price: {price}, Entry: {entry} (-{(1-price/entry)*100:.1f}%)")
+                    self.cooldown_map[vt_symbol] = self.cooldown_days
+                    stop_loss_triggered.append(vt_symbol)
+                    
+                elif price < trailing_stop_price:
+                    print(f"{date_str} {vt_symbol} TRAILING STOP triggered. Price: {price}, High: {high} (-{(1-price/high)*100:.1f}%)")
+                    self.cooldown_map[vt_symbol] = self.cooldown_days
+                    stop_loss_triggered.append(vt_symbol)
+
+        # 4. Rank candidates
         available_symbols = list(bars.keys())
         sorted_symbols = sorted(available_symbols, key=lambda s: scores.get(s, -999), reverse=True)
         
-        # 4. Generate Target Portfolio
+        # 5. Generate Target Portfolio
         target_symbols = []
         for s in sorted_symbols:
-            if scores.get(s, 0) > self.buy_threshold: # Only positive scores
+            # Filter:
+            # 1. Score > threshold
+            # 2. Not in cooldown
+            if scores.get(s, 0) > self.buy_threshold and s not in self.cooldown_map: 
                 target_symbols.append(s)
             if len(target_symbols) >= self.max_holdings:
                 break
         
-        # 5. Execute Trading
-        
-        # Count currently held stocks
-        held_symbols = []
-        for vt_symbol in self.vt_symbols:
-            if self.get_pos(vt_symbol) > 0:
-                held_symbols.append(vt_symbol)
-        
+        # 6. Execute Trading (Buy/Sell Rotation)
         held_count = len(held_symbols)
         
-        # 5a. Buy (stocks in target but not held)
+        # 6a. Buy (stocks in target but not held)
         # Identify valid buy candidates (in target, not held)
         buy_candidates = [s for s in target_symbols if s not in held_symbols]
         
         # Determine how many we can buy (limited by available slots)
         # Update held_count based on sells to allow rotation into new stocks
+        # (Actually we haven't processed 'score-based sells' yet. Let's process Sells FIRST to free up slots/cash?)
+        # Standard logic: Buy what fits, Sell what should go.
+        # Ideally: Sell candidates -> Free up cash -> Buy new.
+        
+        # 6b. Sell based on explicit sell signal (final_signal < threshold)
+        sell_candidates = list(set([s for s in held_symbols if s not in target_symbols] + stop_loss_triggered))
+        
+        # We process sells first to free up 'virtual' slots if we assume T+0 cash availability? 
+        # A-share is T+1 selling, so cash isn't available same day usually. 
+        # But 'held_count' logic matters.
+        
+        for vt_symbol in sell_candidates:
+            # Check sell signal using relative score
+            score = scores.get(vt_symbol, 0.0)
+            
+            # Explicit Sell Condition
+            # e.g., if score < -0.5 (underperforming average)
+            should_sell = score < self.sell_threshold
+            
+            if should_sell:
+                # Need current price. If not in bars (suspended), we can't sell.
+                if vt_symbol not in bars:
+                    continue
+                    
+                price = bars[vt_symbol].close_price
+                if price <= 0:
+                    continue
+
+                pos = self.get_pos(vt_symbol)
+                # Sell at simulated limit price below close (ensure execution)
+                self.sell(vt_symbol, price * 0.998, pos)
+                
+                print(f"{date_str}, {vt_symbol} Sell, score: {score}")
+                
+            else:
+                # print(f"{date_str}, {vt_symbol} Held, score: {score}")
+                pass
+
+        # Now Buy
         num_to_buy = min(len(buy_candidates), self.max_holdings - held_count)
         
         if num_to_buy > 0 and available_cash > 0:
@@ -210,32 +329,5 @@ class MultiFactorStrategy(StrategyTemplate):
                     if volume > 0:
                         # Buy at simulated limit price above close (ensure execution)
                         self.buy(vt_symbol, price * 1.0002, volume)
-
-        # 5b. Sell based on explicit sell signal (final_signal < threshold)
-        sell_candidates = [s for s in held_symbols if s not in target_symbols]
-        for vt_symbol in sell_candidates:
-            # Check sell signal using relative score
-            score = scores.get(vt_symbol, 0.0)
-            
-            # Explicit Sell Condition
-            # e.g., if score < -0.5 (underperforming average)
-            should_sell = score < self.sell_threshold
-            
-            if should_sell:
-                # Need current price. If not in bars (suspended), we can't sell.
-                if vt_symbol not in bars:
-                    continue
-                    
-                price = bars[vt_symbol].close_price
-                if price <= 0:
-                    continue
-
-                pos = self.get_pos(vt_symbol)
-                # Sell at simulated limit price below close (ensure execution)
-                self.sell(vt_symbol, price * 0.998, pos)
-                
-                print(f"{date_str}, {vt_symbol} Sell, score: {score}")
-            else:
-                print(f"{date_str}, {vt_symbol} Held, score: {score}")
         
         self.put_event()

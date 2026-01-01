@@ -1,4 +1,4 @@
-from core.alpha.factor_calculator import FactorCalculator, cs_rank, ts_corr, ts_cov, ts_delay, ts_mean, ts_min, ts_max, ts_quantile, ts_std, ts_sum, ts_rsquare, ts_slope, ta_atr, ta_rsi, cs_group_mean, torch
+from core.alpha.factor_calculator import FactorCalculator, cs_rank, ts_corr, ts_cov, ts_delay, ts_mean, ts_min, ts_max, ts_quantile, ts_std, ts_sum, ts_rsquare, ts_slope, ta_atr, ta_rsi, cs_group_mean, ts_kdj, torch
 
 
 class V3FactorCalculator(FactorCalculator): 
@@ -177,9 +177,20 @@ class V3FactorCalculator(FactorCalculator):
         # Rebound from trough (20d)
         features["rebound_20d"] = C / ts_min(L, 20) - 1
         
-        # KDJ RSV
-        # ll_9 = ts_min(L, 9)
-        # hh_9 = ts_max(H, 9)
+        # KDJ
+        # k, d, j = ts_kdj(C, H, L)
+        # features["kdj_k"] = k
+        # features["kdj_d"] = d
+        # features["kdj_j"] = j
+        
+        # KDJ Relationships (Interaction Factors)
+        # features["kdj_kd_diff"] = k - d
+        # features["kdj_j_k_diff"] = j - k
+        # features["kdj_j_d_diff"] = j - d
+        
+        # J Slope
+        # features["kdj_j_slope_5"] = ts_slope(j, 5)
+        
         # features["kdj_rsv_9"] = (C - ll_9) / (hh_9 - ll_9 + 0.0001)
         
         # PSY: Mean of sign(return) > 0? No, sign of delta.

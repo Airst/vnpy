@@ -27,6 +27,7 @@ SETTINGS: dict = {
     "datafeed.name": "",
     "datafeed.username": "",
     "datafeed.password": "",
+    "bigquant.token": "",
 
     "database.timezone": get_localzone_name(),
     "database.name": "sqlite",

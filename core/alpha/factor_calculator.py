@@ -832,3 +832,39 @@ def cs_group_mean(x, groups, num_groups=None):
     out[~final_mask] = float('nan')
     
     return out
+
+def ts_kdj(C, H, L, n=9):
+    # C, H, L: (Batch, Time)
+    # 1. RSV
+    low_n = ts_min(L, n)
+    high_n = ts_max(H, n)
+    rsv = (C - low_n) / (high_n - low_n + 1e-8) * 100
+    
+    # Fill NaN with 50
+    rsv = torch.nan_to_num(rsv, nan=50.0)
+    
+    # 2. Iterate for K, D
+    # K = 2/3 PrevK + 1/3 RSV
+    # D = 2/3 PrevD + 1/3 K
+    
+    B, T = C.shape
+    device = C.device
+    dtype = C.dtype
+    
+    k = torch.zeros_like(C)
+    d = torch.zeros_like(C)
+    
+    k_val = torch.full((B,), 50.0, device=device, dtype=dtype)
+    d_val = torch.full((B,), 50.0, device=device, dtype=dtype)
+    
+    # Loop over Time
+    for t in range(T):
+        curr_rsv = rsv[:, t]
+        k_val = (2.0/3.0) * k_val + (1.0/3.0) * curr_rsv
+        d_val = (2.0/3.0) * d_val + (1.0/3.0) * k_val
+        k[:, t] = k_val
+        d[:, t] = d_val
+        
+    j = 3 * k - 2 * d
+    return k, d, j
+
