@@ -11,6 +11,7 @@ import re
 import subprocess
 import asyncio
 from pathlib import Path
+from typing import List
 
 # --- Logger Redirection ---
 class LoggerWriter:
@@ -54,9 +55,25 @@ class LoggerWriter:
 # Check if already redirected to avoid double wrapping on reload
 if not hasattr(sys.stdout, 'file') or not isinstance(sys.stdout, LoggerWriter):
     try:
-        file = open("web_ui.log", "w")
+        # Clean up old logs (keep latest 3)
+        log_files = sorted(Path(".").glob("web_ui_*.log"), key=lambda p: p.stat().st_mtime)
+        
+        while len(log_files) >= 3:
+            oldest_log = log_files.pop(0)
+            try:
+                oldest_log.unlink()
+                print(f"Deleted old log file: {oldest_log}")
+            except Exception as e:
+                print(f"Failed to delete old log file {oldest_log}: {e}")
+
+        # Create new log file with timestamp
+        timestamp = datetime.now().strftime("%Y%m%d_%H%M%S")
+        log_filename = f"web_ui_{timestamp}.log"
+        
+        file = open(log_filename, "a", encoding="utf-8")
         sys.stdout = LoggerWriter(sys.stdout, file)
         sys.stderr = LoggerWriter(sys.stderr, file)
+        print(f"Logging to {log_filename}")
     except Exception as e:
         print(f"Failed to setup logger redirection: {e}")
 # --------------------------
@@ -82,6 +99,12 @@ class BacktestRequest(BaseModel):
 class PredictionRequest(BaseModel):
     strategy_name: str
     setting: dict = {}
+
+class SignalDataRequest(BaseModel):
+    signal_name: str
+    start_date: str
+    end_date: str
+    vt_symbols: List[str] = []
 
 async def ingest_alpha_data():
     """
@@ -202,6 +225,23 @@ def run_prediction(req: PredictionRequest):
         )
         return {"results": predictions}
     except Exception as e:
+        raise HTTPException(status_code=500, detail=str(e))
+
+@app.post("/api/signal_data")
+def get_signal_data(req: SignalDataRequest):
+    try:
+        start = datetime.strptime(req.start_date, "%Y%m%d")
+        end = datetime.strptime(req.end_date, "%Y%m%d")
+        result = core_service.get_signals_data(
+            signal_name=req.signal_name,
+            start_date=start,
+            end_date=end,
+            vt_symbols=req.vt_symbols
+        )
+        return result
+    except Exception as e:
+        import traceback
+        traceback.print_exc()
         raise HTTPException(status_code=500, detail=str(e))
 
 # Static Files (React Frontend)

@@ -3,10 +3,11 @@ import {
     Layout, Menu, Button, Card, DatePicker, message, Select, 
     Typography, Space, Spin, InputNumber
 } from 'antd';
-import { DashboardOutlined, BarChartOutlined, BgColorsOutlined } from '@ant-design/icons';
+import { DashboardOutlined, BarChartOutlined, BgColorsOutlined, LineChartOutlined } from '@ant-design/icons';
 import dayjs from 'dayjs';
 import BacktestResults from './components/BacktestResults';
 import PredictionResults from './components/PredictionResults';
+import SignalAnalysis from './components/SignalAnalysis';
 
 const { Header, Sider, Content } = Layout;
 const { Text } = Typography;
@@ -176,6 +177,11 @@ const App = () => {
             key: 'prediction',
             label: 'Prediction',
             icon: <BgColorsOutlined />
+        },
+        {
+            key: 'signal',
+            label: 'Signal Analysis',
+            icon: <LineChartOutlined />
         },
         {
             key: 'system',
@@ -359,6 +365,14 @@ const App = () => {
                 return renderBacktest();
             case 'prediction':
                 return renderPrediction();
+            case 'signal':
+                return (
+                    <SignalAnalysis 
+                        factors={factors}
+                        defaultStart={btStart}
+                        defaultEnd={btEnd}
+                    />
+                );
             default:
                 return null;
         }

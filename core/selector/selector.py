@@ -20,6 +20,19 @@ class FundamentalSelector:
                 vt_symbol = f"{overview.symbol}.{overview.exchange.value}"
                 symbols.append(vt_symbol)
         
+        # Filter symbols by market type (only keep '主板')
+        if symbols:
+            try:
+                from data_manager.tushare.stock_info_manager import StockInfoManager
+                stock_info_manager = StockInfoManager()
+                df = stock_info_manager.load_data(symbols)
+                
+                if not df.empty:
+                    df_filtered = df[df["market"] == "主板"]
+                    symbols = df_filtered["vt_symbol"].tolist()
+            except Exception as e:
+                print(f"Warning: Failed to filter symbols by market type: {e}")
+        
         return symbols
 
     def get_data_range(self) -> Tuple[datetime, datetime]:

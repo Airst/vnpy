@@ -42,6 +42,7 @@ class MultiFactorStrategy(StrategyTemplate):
         self.stop_loss_pct = setting.get("stop_loss_pct", 0.10)
         self.trailing_stop_pct = setting.get("trailing_stop_pct", 0.15)
         self.cooldown_days = setting.get("cooldown_days", 3)
+        self.persistence_days = setting.get("persistence_days", 3)
         
         self.rates = portfolio_engine.rates
         self.cash = self.capital
@@ -56,6 +57,7 @@ class MultiFactorStrategy(StrategyTemplate):
         self.pos_entry_price = {}
         self.pos_high_price = {}
         self.cooldown_map = {} # {vt_symbol: cooldown_counter}
+        self.pending_sell = {} # {vt_symbol: days_remaining}
 
     def on_init(self):
         print("MultiFactorStrategy Initialized")
@@ -93,6 +95,10 @@ class MultiFactorStrategy(StrategyTemplate):
                  # Let's keep high price as max(old_high, new_price)
                  old_high = self.pos_high_price.get(trade.vt_symbol, trade.price)
                  self.pos_high_price[trade.vt_symbol] = max(old_high, trade.price)
+            
+            # Clear any pending sell status on new buy
+            if trade.vt_symbol in self.pending_sell:
+                del self.pending_sell[trade.vt_symbol]
 
         elif trade.direction == Direction.SHORT:
             # Simulate Stamp Duty for Sells (A-share standard: 0.1%)
@@ -108,6 +114,8 @@ class MultiFactorStrategy(StrategyTemplate):
                     del self.pos_entry_price[trade.vt_symbol]
                 if trade.vt_symbol in self.pos_high_price:
                     del self.pos_high_price[trade.vt_symbol]
+                if trade.vt_symbol in self.pending_sell:
+                    del self.pending_sell[trade.vt_symbol]
         else:
             return
             
@@ -207,6 +215,15 @@ class MultiFactorStrategy(StrategyTemplate):
                 expired_cooldowns.append(s)
         for s in expired_cooldowns:
             del self.cooldown_map[s]
+            
+        # Update Pending Sells
+        expired_pending = []
+        for s in self.pending_sell:
+            self.pending_sell[s] -= 1
+            if self.pending_sell[s] <= 0:
+                expired_pending.append(s)
+        for s in expired_pending:
+            del self.pending_sell[s]
 
 
         # 3. Stop Loss Logic (Priority 1)
@@ -275,28 +292,67 @@ class MultiFactorStrategy(StrategyTemplate):
         # A-share is T+1 selling, so cash isn't available same day usually. 
         # But 'held_count' logic matters.
         
-        for vt_symbol in sell_candidates:
+        for vt_symbol in held_symbols:
             # Check sell signal using relative score
             score = scores.get(vt_symbol, 0.0)
             
+            # --- Signal Persistence Logic ---
+            # 1. If score drops below threshold, mark as pending sell (persist)
+            if score < self.sell_threshold:
+                self.pending_sell[vt_symbol] = self.persistence_days
+            
+            # 2. If score becomes very strong (Trend Reversal), clear pending
+            # Arbitrary buffer: Buy Threshold + 0.5 (Significant strength)
+            if score > (self.buy_threshold + 0.5):
+                if vt_symbol in self.pending_sell:
+                    del self.pending_sell[vt_symbol]
+
+            if vt_symbol not in sell_candidates:
+                # Even if not a 'sell_candidate' by rotation (meaning it might still be in top N but < BuyThreshold),
+                # we might want to force sell if it triggered persistence or stop loss.
+                # 'sell_candidates' above includes stop_loss_triggered and those NOT in target (Top N).
+                # If a stock is in Top N, but score < sell_threshold (contradiction? Possible if N is large and scores are low),
+                # we should respect the sell threshold.
+                pass
+            
             # Explicit Sell Condition
             # e.g., if score < -0.5 (underperforming average)
-            should_sell = score < self.sell_threshold
+            is_stop_loss = vt_symbol in stop_loss_triggered
+            is_persistent_sell = vt_symbol in self.pending_sell
+            
+            # Union of reasons to sell
+            should_sell = (score < self.sell_threshold) or is_persistent_sell or is_stop_loss
             
             if should_sell:
                 # Need current price. If not in bars (suspended), we can't sell.
                 if vt_symbol not in bars:
                     continue
                     
-                price = bars[vt_symbol].close_price
+                bar = bars[vt_symbol]
+                price = bar.close_price
                 if price <= 0:
                     continue
 
                 pos = self.get_pos(vt_symbol)
-                # Sell at simulated limit price below close (ensure execution)
-                self.sell(vt_symbol, price * 0.998, pos)
                 
-                print(f"{date_str}, {vt_symbol} Sell, score: {score}")
+                # --- Dynamic Limit Price (Smart Execution) ---
+                # Use daily range (High - Low) as volatility proxy.
+                daily_range = bar.high_price - bar.low_price
+                if daily_range == 0:
+                    # Fallback if doji or no data: 2%
+                    daily_range = price * 0.02
+                
+                # Limit Price = Close - Range. 
+                # Gives enough room for a standard deviation drop, ensuring execution unless extreme gap.
+                limit_price = price - daily_range
+                
+                # Safety Guard: Don't sell below 90% (Circuit Breaker limit usually)
+                limit_price = max(limit_price, price * 0.95)
+                
+                self.sell(vt_symbol, limit_price, pos)
+                
+                reason = "STOP_LOSS" if is_stop_loss else ("PERSIST" if is_persistent_sell else "SIGNAL")
+                print(f"{date_str}, {vt_symbol} Sell ({reason}), limit_price:{limit_price:.2f} (Close:{price}) score: {score}")
                 
             else:
                 # print(f"{date_str}, {vt_symbol} Held, score: {score}")
@@ -328,6 +384,9 @@ class MultiFactorStrategy(StrategyTemplate):
                     
                     if volume > 0:
                         # Buy at simulated limit price above close (ensure execution)
-                        self.buy(vt_symbol, price * 1.0002, volume)
-        
+                        # Use 1.05 to handle gap ups (standard aggressive buy)
+                        self.buy(vt_symbol, price * 1.02, volume)
+                        
+                        print(f"{date_str}, {vt_symbol} Buy, price: {price * 1.02}, volume: {volume}, score: {scores.get(vt_symbol, 0)}")
+
         self.put_event()

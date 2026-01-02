@@ -12,13 +12,22 @@ from vnpy.alpha import Segment, AlphaDataset
 class MLPSignals:
 
     def __init__(self):
+        #self.model_settings = {
+        #    "hidden_sizes": (256, 128, 64),
+        #    "n_epochs": 400,  # Adjustable based on needs
+        #    "batch_size": 4096,
+        #    "lr": 0.001,
+        #    "early_stop_rounds": 20,
+        #    "device": "auto"  # Will detect GPU
+        #}
         self.model_settings = {
-            "hidden_sizes": (256, 128, 64),
-            "n_epochs": 400,  # Adjustable based on needs
-            "batch_size": 4096,
-            "lr": 0.001,
-            "early_stop_rounds": 20,
-            "device": "auto"  # Will detect GPU
+            "hidden_sizes": (256, 128, 64),  # 保持结构
+            "n_epochs": 800,                  # 增加训练轮数
+            "batch_size": 2048,              # 减小批量大小
+            "lr": 0.0005,                    # 降低学习率（微调）
+            "early_stop_rounds": 30,         # 增加早停耐心
+            "weight_decay": 0.0001,          # 添加轻微正则化
+            "optimizer": "adam"             # 如果有的话
         }
 
 
@@ -178,6 +187,8 @@ class MLPSignals:
             batch_size=self.model_settings["batch_size"],
             lr=self.model_settings["lr"],
             early_stop_rounds=self.model_settings["early_stop_rounds"],
+            weight_decay=self.model_settings.get("weight_decay", 0.0),
+            optimizer=self.model_settings.get("optimizer", "adam"),
             device=device,
             seed=42
         )

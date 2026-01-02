@@ -301,6 +301,22 @@ class V3FactorCalculator(FactorCalculator):
             # std_{w} = ts_std(ret_1, w)
             features[f"std_{w}"] = ts_std(ret_1, w)
         
+        # --- Consolidation / Plateau Detectors ---
+        # Volatility Ratio: Short-term vol / Long-term vol. 
+        # Low ratio (<1) indicates volatility is compressing (Consolidation/Plateau).
+        features["vol_ratio_5_20"] = features["std_5"] / (features["std_20"] + 1e-8)
+        
+        # Turnover Ratio: Activity change.
+        features["turnover_ratio_5_20"] = features["turnover_mean_5d"] / (features["turnover_mean_20d"] + 1e-8)
+        
+        # Short term trend slope (5d)
+        slope_5 = ts_slope(C, 5)
+        features["trend_slope_5"] = slope_5 / (C + 1e-8)
+        
+        # Slope Divergence: Short term slope - Long term slope
+        # If Long term is + (Up) and Short term is 0 (Flat) -> Negative divergence (Plateauing)
+        features["slope_div_5_20"] = features["trend_slope_5"] - features["trend_slope_20"]
+        
         # Label: Next 5 days return (Market Neutral Rank)
         # Using cs_rank on the future return ensures we are learning to rank stocks,
         # which is regime-independent (works in both Bull and Bear markets).
