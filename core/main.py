@@ -244,6 +244,10 @@ def get_signal_data(req: SignalDataRequest):
         traceback.print_exc()
         raise HTTPException(status_code=500, detail=str(e))
 
+@app.get("/api/symbols/search")
+def search_symbols(keyword: str):
+    return {"symbols": core_service.search_symbols(keyword)}
+
 # Static Files (React Frontend)
 # Mount assets first to avoid conflict with root catch-all
 if os.path.exists("core/web_ui/dist/assets"):

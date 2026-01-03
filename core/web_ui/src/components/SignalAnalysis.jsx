@@ -1,4 +1,4 @@
-import React, { useState, useEffect } from 'react';
+import React, { useState, useEffect, useRef } from 'react';
 import { Card, Select, DatePicker, Button, Space, message, Spin, Empty } from 'antd';
 import { LineChart, Line, XAxis, YAxis, CartesianGrid, Tooltip, Legend, ResponsiveContainer } from 'recharts';
 import dayjs from 'dayjs';
@@ -12,6 +12,11 @@ const SignalAnalysis = ({ factors = [], defaultStart, defaultEnd }) => {
     const [loading, setLoading] = useState(false);
     const [data, setData] = useState(null);
     const [chartData, setChartData] = useState([]);
+
+    // Search related state
+    const [searchOptions, setSearchOptions] = useState([]);
+    const [searchLoading, setSearchLoading] = useState(false);
+    const searchTimeoutRef = useRef(null);
 
     const colors = [
         '#8884d8', '#82ca9d', '#ffc658', '#ff7300', '#d0ed57', 
@@ -73,6 +78,33 @@ const SignalAnalysis = ({ factors = [], defaultStart, defaultEnd }) => {
         }
     };
 
+    const handleSearch = (value) => {
+        if (searchTimeoutRef.current) {
+            clearTimeout(searchTimeoutRef.current);
+        }
+        
+        if (!value) {
+            setSearchOptions([]);
+            return;
+        }
+
+        searchTimeoutRef.current = setTimeout(() => {
+            setSearchLoading(true);
+            fetch(`/api/symbols/search?keyword=${value}`)
+                .then(res => res.json())
+                .then(data => {
+                    if (data.symbols) {
+                        setSearchOptions(data.symbols);
+                    }
+                    setSearchLoading(false);
+                })
+                .catch(err => {
+                    console.error("Search failed", err);
+                    setSearchLoading(false);
+                });
+        }, 500);
+    };
+
     return (
         <div style={{ display: 'flex', flexDirection: 'column', gap: '20px', height: '100%' }}>
             <Card title="Signal Analysis Configuration" bordered={false}>
@@ -92,12 +124,16 @@ const SignalAnalysis = ({ factors = [], defaultStart, defaultEnd }) => {
                         <div>
                             <label style={{ fontSize: '12px', color: '#666', display: 'block', marginBottom: '4px' }}>Symbols (Optional - Empty for Top 5)</label>
                             <Select
-                                mode="tags"
+                                mode="multiple"
                                 style={{ width: '100%' }}
-                                placeholder="Enter symbols e.g. 000001.SZ"
+                                placeholder="Search symbols (code or name)"
                                 onChange={setSelectedSymbols}
                                 value={selectedSymbols}
-                                tokenSeparators={[',', ' ']}
+                                onSearch={handleSearch}
+                                filterOption={false}
+                                notFoundContent={searchLoading ? <Spin size="small" /> : null}
+                                options={searchOptions}
+                                allowClear
                             />
                         </div>
                     </div>

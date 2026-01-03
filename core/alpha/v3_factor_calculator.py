@@ -178,20 +178,22 @@ class V3FactorCalculator(FactorCalculator):
         features["rebound_20d"] = C / ts_min(L, 20) - 1
         
         # KDJ
-        # k, d, j = ts_kdj(C, H, L)
-        # features["kdj_k"] = k
-        # features["kdj_d"] = d
-        # features["kdj_j"] = j
+        k, d, j = ts_kdj(C, H, L)
+        # Normalize KDJ to 0-1 range for better NN stability
+        kdj_k = k / 100.0
+        kdj_d = d / 100.0
+        kdj_j = j / 100.0
         
-        # KDJ Relationships (Interaction Factors)
-        # features["kdj_kd_diff"] = k - d
-        # features["kdj_j_k_diff"] = j - k
-        # features["kdj_j_d_diff"] = j - d
+        # KDJ Auxiliary Trends (Predicting Future Crosses)
+        # Distance between K and D. Near 0 = Potential Cross.
+        features["kdj_kd_diff"] = kdj_k - kdj_d
         
-        # J Slope
-        # features["kdj_j_slope_5"] = ts_slope(j, 5)
+        # Velocity of convergence (Change in KD diff)
+        # If Diff is negative (K below D) and Velocity is positive, it means K is approaching D (Pre-Golden Cross).
+        # Smooth velocity over 3 days to reduce noise
+        raw_velocity = features["kdj_kd_diff"] - ts_delay(features["kdj_kd_diff"], 1)
+        features["kdj_kd_velocity"] = ts_mean(raw_velocity, 3)
         
-        # features["kdj_rsv_9"] = (C - ll_9) / (hh_9 - ll_9 + 0.0001)
         
         # PSY: Mean of sign(return) > 0? No, sign of delta.
         # sign(ts_delta(close, 1)) -> 1 if >0, -1 if <0, 0. 

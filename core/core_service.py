@@ -59,6 +59,51 @@ class CoreService:
     def get_candidate_symbols(self) -> List[str]:
         return self.selector.get_candidate_symbols()
 
+    def search_symbols(self, keyword: str) -> List[Dict]:
+        """
+        Fuzzy search symbols.
+        Returns list of {"value": vt_symbol, "label": "vt_symbol name"}
+        """
+        results = []
+        
+        # 1. Try StockInfoManager for name search
+        try:
+            from data_manager.tushare.stock_info_manager import StockInfoManager
+            manager = StockInfoManager()
+            # This might fail if DB is not configured
+            stock_data = manager.search_symbols(keyword)
+            
+            for item in stock_data:
+                results.append({
+                    "value": item["vt_symbol"],
+                    "label": f"{item['vt_symbol']} {item['name']}"
+                })
+        except Exception as e:
+            # Silence error if DB or Tushare manager is not available/configured
+            pass
+            
+        # 2. If no results (or DB failed), and keyword is numeric, search in candidate_symbols
+        # Or if we just want to augment results with local candidate symbols (which might not be in stock_basic if it's outdated)
+        if not results:
+             candidates = self.get_candidate_symbols()
+             # Simple fuzzy match on code
+             lower_kw = keyword.lower()
+             
+             matched = []
+             for sym in candidates:
+                 if lower_kw in sym.lower():
+                     matched.append(sym)
+                     if len(matched) >= 20:
+                         break
+            
+             for sym in matched:
+                 results.append({
+                     "value": sym,
+                     "label": sym # No name available
+                 })
+                 
+        return results
+
     def get_data_range(self):
         return self.selector.get_data_range()
 
@@ -261,7 +306,9 @@ class CoreService:
             
             # Get unique sorted dates from the filtered dataframe
             dates = sorted(df["datetime"].unique().to_list())
+            print("Dates for plotting:", dates)
             date_strs = [d.strftime("%Y-%m-%d") for d in dates]
+            print("Dates for plotting:", date_strs)
             
             series = []
             

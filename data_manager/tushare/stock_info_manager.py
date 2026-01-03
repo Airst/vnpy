@@ -152,6 +152,47 @@ class StockInfoManager:
         finally:
             conn.close()
 
+    def search_symbols(self, keyword: str) -> list[dict]:
+        """
+        模糊查询股票信息
+        :param keyword: 股票代码或名称关键字
+        :return: list of dict
+        """
+        if not keyword:
+            return []
+            
+        conn = pymysql.connect(**self.db_config)
+        try:
+            with conn.cursor() as cursor:
+                # Search by symbol or name
+                sql = "SELECT * FROM stock_basic WHERE symbol LIKE %s OR name LIKE %s LIMIT 20"
+                param = f"%{keyword}%"
+                cursor.execute(sql, (param, param))
+                result = cursor.fetchall()
+                
+                data = []
+                for row in result:
+                    exchange = row.get("exchange", "")
+                    symbol = row.get("symbol", "")
+                    name = row.get("name", "")
+                    
+                    # Convert Tushare exchange to vnpy exchange if needed
+                    # Tushare: SSE, SZSE, BSE
+                    # vnpy: SSE, SZSE, BSE
+                    # Usually they match for these main exchanges
+                    
+                    if exchange and symbol:
+                        vt_symbol = f"{symbol}.{exchange}"
+                        data.append({
+                            "vt_symbol": vt_symbol,
+                            "symbol": symbol,
+                            "name": name,
+                            "exchange": exchange
+                        })
+                return data
+        finally:
+            conn.close()
+
     def download_all(self):
         """全量查询并更新"""
         print("正在从 Tushare 下载股票基础信息 (stock_basic)...")

@@ -5,13 +5,17 @@ from vnpy.trader.constant import Exchange, Interval
 from vnpy.trader.database import get_database
 
 class FundamentalSelector:
-    def __init__(self):
+    def __init__(self, vt_symbols: List[str] = None):
         self.database = get_database()
+        self.vt_symbols = vt_symbols
 
     def get_candidate_symbols(self) -> List[str]:
         """
         Returns a list of vt_symbols (e.g. '000001.SZSE') available in the database.
         """
+        if self.vt_symbols:
+            return self.vt_symbols
+
         symbols = []
         overviews = self.database.get_bar_overview()
         

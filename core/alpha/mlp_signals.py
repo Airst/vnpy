@@ -40,7 +40,7 @@ class MLPSignals:
         # 6. Rolling Window Loop
         print("[MLPSignals] Starting Rolling Window Training & Prediction...")
         
-        dates = dataset_df["datetime"].unique().sort()
+        dates = dataset_df["datetime"].unique().sort().to_list()
         # Increased requirement for 500-day window
         if len(dates) < 550: 
              print(f"[MLPSignals] Not enough dates for rolling window: {len(dates)} (Need ~550)")
@@ -93,7 +93,11 @@ class MLPSignals:
                 
             pred_end_date = dates[pred_end_idx]
             
-            print(f"[MLPSignals] Window: Train [500 days pre {pred_start_date.date()}] -> Predict [{pred_start_date.date()} to {pred_end_date.date()}]")
+            # Format dates for logging
+            ps_str = pred_start_date.strftime("%Y-%m-%d") if hasattr(pred_start_date, "strftime") else str(pred_start_date)
+            pe_str = pred_end_date.strftime("%Y-%m-%d") if hasattr(pred_end_date, "strftime") else str(pred_end_date)
+            
+            print(f"[MLPSignals] Window: Train [500 days pre {ps_str}] -> Predict [{ps_str} to {pe_str}]")
             
             # Define Training Window (Previous 500 indices)
             train_end_idx = curr_idx - 1
@@ -108,9 +112,10 @@ class MLPSignals:
             valid_len = 50
             train_period_end_idx = train_end_idx - valid_len
             
-            train_period = (dates[train_start_idx].strftime("%Y-%m-%d"), dates[train_period_end_idx].strftime("%Y-%m-%d"))
-            valid_period = (dates[train_period_end_idx + 1].strftime("%Y-%m-%d"), dates[train_end_idx].strftime("%Y-%m-%d"))
-            test_period = (dates[curr_idx].strftime("%Y-%m-%d"), dates[pred_end_idx].strftime("%Y-%m-%d"))
+            # Use raw datetime objects to avoid string ambiguity and ensure precision
+            train_period = (dates[train_start_idx], dates[train_period_end_idx])
+            valid_period = (dates[train_period_end_idx + 1], dates[train_end_idx])
+            test_period = (dates[curr_idx], dates[pred_end_idx])
             
             # Construct Dataset for this window
             # Note: passing the WHOLE dataset_df is fine, AlphaDataset filters by period
@@ -187,6 +192,7 @@ class MLPSignals:
             batch_size=self.model_settings["batch_size"],
             lr=self.model_settings["lr"],
             early_stop_rounds=self.model_settings["early_stop_rounds"],
+            eval_steps=self.model_settings.get("eval_steps", 20),
             weight_decay=self.model_settings.get("weight_decay", 0.0),
             optimizer=self.model_settings.get("optimizer", "adam"),
             device=device,
