@@ -1,6 +1,7 @@
 import os
 from datetime import datetime
-from typing import List, Tuple
+from typing import List, Tuple, Dict
+import polars as pl
 from vnpy.trader.constant import Exchange, Interval
 from vnpy.trader.database import get_database
 
@@ -8,6 +9,57 @@ class FundamentalSelector:
     def __init__(self, vt_symbols: List[str] = None):
         self.database = get_database()
         self.vt_symbols = vt_symbols
+
+    @staticmethod
+    def check_stock_filters(factors: Dict[str, float]) -> bool:
+        """
+        Check if the stock passes fundamental filters (A-share common practices).
+        Return True if passed, False if rejected.
+        """
+        if not factors:
+            return True
+            
+        # 1. Profitability Filter (剔除亏损股)
+        # ep_ratio = 1 / PE. If ep_ratio < 0, it means PE is negative (Loss making).
+        if "ep_ratio" in factors:
+             if factors["ep_ratio"] < 0:
+                 return False
+
+        # 2. Liquidity Filter (剔除流动性枯竭)
+        # Tushare turnover_rate is usually in %. 
+        # A threshold of 1.0 (1%) is a standard minimum for active alpha strategies.
+        if "turnover_mean_20d" in factors:
+             if factors["turnover_mean_20d"] < 1.0: 
+                 return False
+
+        # 4. Market Cap Filter (剔除微盘股/壳股)
+        # size_ln_cap = ln(TotalMV). 
+        # TotalMV unit is 10,000 RMB (万元).
+        # Example: 10亿 RMB = 100,000 万元 -> ln(100,000) ≈ 11.5
+        if "size_ln_cap" in factors:
+            if factors["size_ln_cap"] < 11.5: 
+                return False
+                 
+        return True
+
+    @staticmethod
+    def filter_polars(df: pl.DataFrame) -> pl.DataFrame:
+        """
+        Apply fundamental filters to a Polars DataFrame.
+        """
+        # 1. Profitability Filter
+        if "ep_ratio" in df.columns:
+            df = df.filter(pl.col("ep_ratio") >= 0)
+            
+        # 2. Liquidity Filter
+        if "turnover_mean_20d" in df.columns:
+            df = df.filter(pl.col("turnover_mean_20d") >= 1.0)
+            
+        # 3. Market Cap Filter
+        if "size_ln_cap" in df.columns:
+            df = df.filter(pl.col("size_ln_cap") >= 11.5)
+            
+        return df
 
     def get_candidate_symbols(self) -> List[str]:
         """
@@ -27,7 +79,7 @@ class FundamentalSelector:
         # Filter symbols by market type (only keep '主板')
         if symbols:
             try:
-                from data_manager.tushare.stock_info_manager import StockInfoManager
+                from data_manager.ts_downloader.stock_info_manager import StockInfoManager
                 stock_info_manager = StockInfoManager()
                 df = stock_info_manager.load_data(symbols)
                 

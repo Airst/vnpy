@@ -868,3 +868,27 @@ def ts_kdj(C, H, L, n=9):
     j = 3 * k - 2 * d
     return k, d, j
 
+def cs_zscore(x):
+    # Cross-sectional Z-Score Normalization
+    # x: (Batch, Time) -> Normalize across Batch (dim=0)
+    
+    mask = ~torch.isnan(x)
+    x_zero = torch.nan_to_num(x, nan=0.0)
+    
+    # Count valid values per time step
+    count = mask.sum(dim=0, keepdim=True)
+    count = torch.clamp(count, min=1)
+    
+    # Mean
+    mean = x_zero.sum(dim=0, keepdim=True) / count
+    
+    # Std
+    diff = (x_zero - mean) * mask.float()
+    var = (diff ** 2).sum(dim=0, keepdim=True) / count
+    std = torch.sqrt(var)
+    
+    # Z-Score
+    z = (x - mean) / (std + 1e-8)
+    
+    # Clip to avoid extreme outliers causing gradient explosion
+    return torch.clamp(z, -3.0, 3.0)

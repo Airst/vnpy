@@ -59,9 +59,9 @@ def main():
     # main_engine.add_gateway(RohonGateway)
     # main_engine.add_gateway(TtsGateway)
 
-    main_engine.add_app(PaperAccountApp)
-    main_engine.add_app(CtaStrategyApp)
-    main_engine.add_app(CtaBacktesterApp)
+    # main_engine.add_app(PaperAccountApp)
+    # main_engine.add_app(CtaStrategyApp)
+    # main_engine.add_app(CtaBacktesterApp)
     # main_engine.add_app(SpreadTradingApp)
     # main_engine.add_app(AlgoTradingApp)
     # main_engine.add_app(OptionMasterApp)

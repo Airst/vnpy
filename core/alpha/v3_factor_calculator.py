@@ -1,5 +1,4 @@
-from core.alpha.factor_calculator import FactorCalculator, cs_rank, ts_corr, ts_cov, ts_delay, ts_mean, ts_min, ts_max, ts_quantile, ts_std, ts_sum, ts_rsquare, ts_slope, ta_atr, ta_rsi, cs_group_mean, ts_kdj, torch
-
+from core.alpha.factor_calculator import FactorCalculator, cs_rank, ts_corr, cs_zscore, ts_delay, ts_mean, ts_min, ts_max, ts_quantile, ts_std, ts_sum, ts_rsquare, ts_slope, ta_atr, ta_rsi, cs_group_mean, ts_kdj, torch
 
 class V3FactorCalculator(FactorCalculator): 
     def __init__(self):
@@ -147,7 +146,9 @@ class V3FactorCalculator(FactorCalculator):
         
         # Inverse Volatility (Longer term - 60d)
         # Low beta/volatility stocks tend to outperform in bear/stable markets.
-        features["inv_vol_60"] = 1.0 / (features["volatility_60d"] + 1e-4)
+        inv_vol_60 = 1.0 / (features["volatility_60d"] + 1e-4)
+        features["inv_vol_60"] = inv_vol_60
+
 
         # Return Skewness Proxy (Upside Vol / Downside Vol)
         # If upside vol > downside vol -> Positive Skew potential

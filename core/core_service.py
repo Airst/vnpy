@@ -68,7 +68,7 @@ class CoreService:
         
         # 1. Try StockInfoManager for name search
         try:
-            from data_manager.tushare.stock_info_manager import StockInfoManager
+            from data_manager.ts_downloader.stock_info_manager import StockInfoManager
             manager = StockInfoManager()
             # This might fail if DB is not configured
             stock_data = manager.search_symbols(keyword)
@@ -306,9 +306,7 @@ class CoreService:
             
             # Get unique sorted dates from the filtered dataframe
             dates = sorted(df["datetime"].unique().to_list())
-            print("Dates for plotting:", dates)
             date_strs = [d.strftime("%Y-%m-%d") for d in dates]
-            print("Dates for plotting:", date_strs)
             
             series = []
             

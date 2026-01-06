@@ -90,7 +90,9 @@ class AlphaEngine:
             raise ValueError("No data loaded.")
 
 
-        return self.factor_calculator.calculate_features(df)
+        factor_df = self.factor_calculator.calculate_features(df)
+
+        return factor_df
 
     def analyze_factor_performance(self, factors_df: pl.DataFrame, threshold: float = 0.02) -> pl.DataFrame:
         """
