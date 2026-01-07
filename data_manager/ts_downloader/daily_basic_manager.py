@@ -96,11 +96,19 @@ class DailyBasicManager:
             cursor.executemany(sql, values)
         conn.commit()
 
-    def get_latest_date(self, conn, ts_code: str) -> str:
+    def get_latest_date(self, ts_code: str = None) -> str:
         """获取数据库中最新的日期"""
+        
+        conn = pymysql.connect(**self.db_config)
+
         with conn.cursor() as cursor:
-            sql = "SELECT MAX(trade_date) as max_date FROM dailybasic WHERE ts_code = %s"
-            cursor.execute(sql, (ts_code,))
+            if ts_code:
+                sql = "SELECT MAX(trade_date) as max_date FROM dailybasic WHERE ts_code = %s"
+                cursor.execute(sql, (ts_code,))
+            else:
+                sql = "SELECT MAX(trade_date) as max_date FROM dailybasic"
+                cursor.execute(sql)
+
             result = cursor.fetchone()
             if result and result['max_date']:
                 return result['max_date']

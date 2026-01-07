@@ -1,7 +1,8 @@
 import os
+import json
 import importlib
 import inspect
-from datetime import datetime
+from datetime import datetime, date
 from typing import List, Dict, Type
 import numpy as np
 import pandas as pd
@@ -15,6 +16,7 @@ from vnpy.alpha.lab import AlphaLab
 from core.selector import FundamentalSelector
 
 STRATEGY_PATH = "core/strategies"
+BACKTEST_DB_PATH = "core/alpha_db/backtest"
 
 class CoreService:
     def __init__(self):
@@ -22,6 +24,7 @@ class CoreService:
         self.selector = FundamentalSelector()
         self.lab = AlphaLab("core/alpha_db")
         self.load_strategies()
+        os.makedirs(BACKTEST_DB_PATH, exist_ok=True)
 
     def load_strategies(self):
         """Load all strategies from the strategies directory."""
@@ -166,6 +169,8 @@ class CoreService:
                     sanitized_stats[k] = v.item()
             elif isinstance(v, np.ndarray):
                 sanitized_stats[k] = np.nan_to_num(v).tolist()
+            elif isinstance(v, (datetime, date)):
+                sanitized_stats[k] = v.strftime("%Y-%m-%d")
             else:
                 sanitized_stats[k] = v
 
@@ -244,11 +249,67 @@ class CoreService:
                 
                 trade["pnl"] = round(realized_pnl, 2)
 
-        return {
+        result = {
             "statistics": sanitized_stats,
             "daily_data": daily_data,
             "trades": trades
         }
+
+        # Save result to file
+        timestamp = datetime.now().strftime("%Y%m%d_%H%M%S")
+        start_str = start.strftime("%Y%m%d")
+        end_str = end.strftime("%Y%m%d")
+        filename = f"{strategy_name}_{start_str}_{end_str}_{timestamp}.json"
+        filepath = os.path.join(BACKTEST_DB_PATH, filename)
+        
+        try:
+            with open(filepath, "w", encoding="utf-8") as f:
+                json.dump(result, f, ensure_ascii=False, indent=4)
+        except Exception as e:
+            print(f"Failed to save backtest result: {e}")
+
+        return result
+
+    def get_backtest_history(self) -> List[Dict]:
+        """Get list of saved backtest results."""
+        if not os.path.exists(BACKTEST_DB_PATH):
+            return []
+            
+        files = []
+        for filename in os.listdir(BACKTEST_DB_PATH):
+            if filename.endswith(".json"):
+                filepath = os.path.join(BACKTEST_DB_PATH, filename)
+                try:
+                    stat = os.stat(filepath)
+                    # Parse filename for metadata: strategy_start_end_timestamp.json
+                    parts = filename.replace(".json", "").split("_")
+                    if len(parts) >= 4:
+                        timestamp_str = parts[-2] + "_" + parts[-1]
+                        end_date = parts[-3]
+                        start_date = parts[-4]
+                        strategy_name = "_".join(parts[:-4])
+                        
+                        files.append({
+                            "filename": filename,
+                            "strategy": strategy_name,
+                            "start_date": start_date,
+                            "end_date": end_date,
+                            "timestamp": datetime.fromtimestamp(stat.st_mtime).strftime("%Y-%m-%d %H:%M:%S")
+                        })
+                except Exception as e:
+                    print(f"Error parsing backtest file {filename}: {e}")
+                    
+        # Sort by timestamp descending
+        return sorted(files, key=lambda x: x["timestamp"], reverse=True)
+
+    def get_backtest_result(self, filename: str) -> Dict:
+        """Load a specific backtest result."""
+        filepath = os.path.join(BACKTEST_DB_PATH, filename)
+        if not os.path.exists(filepath):
+            raise FileNotFoundError(f"Backtest result {filename} not found")
+            
+        with open(filepath, "r", encoding="utf-8") as f:
+            return json.load(f)
 
     def get_signals_data(self, 
                          signal_name: str, 

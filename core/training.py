@@ -5,9 +5,8 @@ from pathlib import Path
 import re
 import argparse
 
-# Ensure project root is in path
-PROJECT_ROOT = Path(__file__).resolve().parent.parent.parent
-sys.path.insert(0, str(PROJECT_ROOT))
+# Add current working directory to sys.path
+sys.path.append(os.getcwd())
 
 from vnpy.alpha import logger
 from core.alpha.engine import AlphaEngine
@@ -18,6 +17,14 @@ from core.selector.selector import FundamentalSelector
 from core.alpha.v3_factor_calculator import V3FactorCalculator
 from core.alpha.v4_factor_calculator import V4FactorCalculator
 from core.alpha.v5_factor_calculator import V5FactorCalculator
+
+
+from data_manager.ts_downloader.download_daily import download_data
+from data_manager.ts_downloader.daily_basic_manager import DailyBasicManager
+from data_manager.ts_downloader.stock_info_manager import StockInfoManager
+
+
+from core.core_service import CoreService
 
 # --- Logger Redirection ---
 class LoggerWriter:
@@ -58,7 +65,7 @@ class LoggerWriter:
         raise OSError("LoggerWriter has no fileno")
 
 def setup_logger(version: str):
-    log_filename = f"core/alpha/run_{version}.log"
+    log_filename = f"core/run_{version}.log"
     
     # Redirect stdout and stderr to log file
     if not hasattr(sys.stdout, 'file') or not isinstance(sys.stdout, LoggerWriter):
@@ -91,7 +98,9 @@ if __name__ == "__main__":
     parser.add_argument("-v5", action="store_true", help="Run V5")
     
     parser.add_argument("-a", "--ans", action="store_true", help="Only calculate factors (no signal model)")
-    parser.add_argument("-s", "--sync", action="store_true", help="Sync data before running")
+    parser.add_argument("-s", "--skip", action="store_true", help="Skip Sync data before running")
+
+    parser.add_argument("-b", "--basic", action="store_true", help="Sync Stock Basic data before running")
 
     parser.add_argument("-vt", help="vt_symbol mode")
     
@@ -137,6 +146,7 @@ if __name__ == "__main__":
         print(f"Error: Unknown version '{version}'. Supported versions: v3, v4, v5")
         sys.exit(1)
 
+
     engine = AlphaEngine(
         factor_calculator=calculator,
         mlp_signals=MLPSignals(),
@@ -145,12 +155,24 @@ if __name__ == "__main__":
         start_date="2019-12-28",
         end_date=datetime.now().strftime("%Y-%m-%d")
     )
-   
-    if args.sync:
+
+    if args.basic:
+        print("开始更新股票基础信息...")
+        stock_manager = StockInfoManager()
+        stock_manager.download_all()
+
+    manager = DailyBasicManager()
+    latest_date = manager.get_latest_date()
+    if latest_date < datetime.now().strftime("%Y%m%d") and not args.skip:
+        print("\n开始下载历史数据...")
+        download_data(end_date="latest")
+
+        print("\n开始更新每日指标数据...")
+        manager.download_all()
+        
         print("Syncing data from remote source...")
         engine.sync_data()
 
-        sys.exit(0)
     
     signal_df = engine.calculate_factors()
 
@@ -158,4 +180,20 @@ if __name__ == "__main__":
 
     if not args.ans:
         signal_df = engine.calculate_signals(signal_df)
-        engine.save_factors(signal_df)
+        engine.save_signals(signal_df)
+
+        start = datetime.strptime("20220101", "%Y%m%d")
+        end = datetime.now()
+        
+        
+        core_service = CoreService()
+        result = core_service.run_backtest(
+            strategy_name="MultiFactorStrategy",
+            start=start,
+            end=end,
+            setting={
+                "max_holdings": 5,
+                "signal_name": signal_name,
+            }
+        )
+

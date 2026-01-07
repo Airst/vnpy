@@ -250,7 +250,7 @@ class AlphaEngine:
         
         return ashare_symbols
 
-    def save_factors(self, signal_df):
+    def save_signals(self, signal_df):
         if signal_df is not None:
             print(f"[AlphaEngine] Saving signals to '{self.signal_name}'...")
             self.lab.save_signal(self.signal_name, signal_df)

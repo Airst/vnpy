@@ -26,6 +26,8 @@ const App = () => {
     const [btEnd, setBtEnd] = useState(null);
     const [btResult, setBtResult] = useState(null);
     const [btLoading, setBtLoading] = useState(false);
+    const [btHistory, setBtHistory] = useState([]);
+    const [loadingHistory, setLoadingHistory] = useState(false);
 
     // Prediction State
     const [predStrategy, setPredStrategy] = useState(null);
@@ -41,6 +43,7 @@ const App = () => {
         loadStrategies();
         loadFactors();
         loadDataRange();
+        loadBacktestHistory();
     }, []);
 
     useEffect(() => {
@@ -81,6 +84,39 @@ const App = () => {
         } catch (error) {
             message.error('Failed to load factors');
         }
+    };
+
+    const loadBacktestHistory = async () => {
+        setLoadingHistory(true);
+        try {
+            const res = await fetch('/api/backtest/history');
+            const data = await res.json();
+            setBtHistory(data.history.map(h => ({
+                value: h.filename,
+                label: `${h.strategy} (${h.start_date}-${h.end_date}) - ${h.timestamp}`
+            })));
+        } catch (error) {
+            console.error("Failed to load backtest history", error);
+        } finally {
+            setLoadingHistory(false);
+        }
+    };
+
+    const handleLoadHistory = async (filename) => {
+         if (!filename) return;
+         setBtLoading(true);
+         try {
+             const res = await fetch(`/api/backtest/result/${filename}`);
+             if (!res.ok) throw new Error(res.statusText);
+             const data = await res.json();
+             setBtResult(data);
+             message.success('Loaded backtest result');
+         } catch (error) {
+             message.error('Failed to load backtest result');
+             console.error(error);
+         } finally {
+             setBtLoading(false);
+         }
     };
 
     const handleIngest = async () => {
@@ -132,6 +168,7 @@ const App = () => {
             const data = await res.json();
             setBtResult(data);
             message.success('Backtest completed');
+            loadBacktestHistory(); // Refresh history
         } catch (error) {
             message.error('Backtest failed');
             console.error(error);
@@ -242,6 +279,18 @@ const App = () => {
             {/* 操作区 */}
             <Card title="Configuration" bordered={false}>
                 <Space direction="vertical" style={{ width: '100%' }} size="middle">
+                    <div>
+                        <label style={{ fontSize: '12px', color: '#666', display: 'block', marginBottom: '4px' }}>Load History</label>
+                        <Select
+                            style={{ width: '100%' }}
+                            placeholder="Select Past Result"
+                            options={btHistory}
+                            onChange={handleLoadHistory}
+                            onDropdownVisibleChange={(open) => { if (open) loadBacktestHistory(); }}
+                            allowClear
+                            loading={loadingHistory}
+                        />
+                    </div>
                     <div>
                         <label style={{ fontSize: '12px', color: '#666', display: 'block', marginBottom: '4px' }}>Strategy</label>
                         <Select

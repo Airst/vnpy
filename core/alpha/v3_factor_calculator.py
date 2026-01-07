@@ -324,6 +324,14 @@ class V3FactorCalculator(FactorCalculator):
         # Using cs_rank on the future return ensures we are learning to rank stocks,
         # which is regime-independent (works in both Bull and Bear markets).
         raw_ret_5 = ts_delay(C, -5) / C - 1
+        
+        # Penalize low liquidity stocks (Turnover < 1%)
+        # Even if they are profitable, we want to reduce signals for them due to liquidity risk.
+        # We subtract a penalty from the return before ranking.
+        low_liq_penalty = (features["turnover_mean_20d"] < 1.0).float() * 0.05
+        # Note: We subtract the penalty. If turnover < 1, return is reduced by 5%.
+        raw_ret_5 = raw_ret_5 - low_liq_penalty
+
         features["label"] = cs_rank(raw_ret_5)
 
         return features

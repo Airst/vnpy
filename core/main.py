@@ -216,6 +216,19 @@ def run_backtest(req: BacktestRequest):
         traceback.print_exc()
         raise HTTPException(status_code=500, detail=str(e))
 
+@app.get("/api/backtest/history")
+def get_backtest_history():
+    return {"history": core_service.get_backtest_history()}
+
+@app.get("/api/backtest/result/{filename}")
+def get_backtest_result(filename: str):
+    try:
+        return core_service.get_backtest_result(filename)
+    except FileNotFoundError:
+        raise HTTPException(status_code=404, detail="Backtest result not found")
+    except Exception as e:
+        raise HTTPException(status_code=500, detail=str(e))
+
 @app.post("/api/predict")
 def run_prediction(req: PredictionRequest):
     try:
