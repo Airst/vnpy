@@ -27,7 +27,15 @@ class MultiFactorStrategy(StrategyTemplate):
         "buy_threshold"
     ]
 
-    project_root = Path(os.getcwd())
+    variables = [
+        "cash",
+        "pos_entry_price",
+        "pos_high_price",
+        "cooldown_map",
+        "pending_sell"
+    ]
+
+    project_root = Path(__file__).parent.parent.parent
     lab_path = project_root / ALPHA_DB_PATH
     lab = AlphaLab(str(lab_path))
 
@@ -44,7 +52,7 @@ class MultiFactorStrategy(StrategyTemplate):
         self.cooldown_days = setting.get("cooldown_days", 3)
         self.persistence_days = setting.get("persistence_days", 3)
         
-        self.rates = portfolio_engine.rates
+        self.rate = setting.get("rate", 0.0003)
         self.cash = self.capital
         
         print(f"MultiFactorStrategy initialized with lab: {self.lab_path} signal: {self.signal_name}, max_holdings: {self.max_holdings}, capital: {self.capital}, buy_threshold: {self.buy_threshold}, sell_threshold: {self.sell_threshold}, stop_loss: {self.stop_loss_pct}")
@@ -69,7 +77,7 @@ class MultiFactorStrategy(StrategyTemplate):
         Callback of new trade data.
         """
         # Calculate commission
-        raw_commission = trade.price * trade.volume * self.rates[trade.vt_symbol]
+        raw_commission = trade.price * trade.volume * self.rate
         # Apply minimum commission (e.g., 5.0 for A-shares) to be conservative
         commission = max(raw_commission, 5.0)
         

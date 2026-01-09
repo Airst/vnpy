@@ -1,216 +1,371 @@
-from core.alpha.factor_calculator import (
-    FactorCalculator, 
-    ts_mean, ts_std, ts_max, ts_min, ts_delay, ts_delta, 
-    ts_rank, ts_argmax, ts_argmin, ts_corr, 
-    ts_greater, ts_less, ts_slope, ts_rsquare, ts_resi, 
-    ts_quantile, ts_log, ts_abs, ts_sum,
-    torch
-)
+from core.alpha.factor_calculator import FactorCalculator, cs_rank, ts_corr, cs_zscore, ts_delay, ts_mean, ts_min, ts_max, ts_quantile, ts_std, ts_sum, ts_rsquare, ts_slope, ta_atr, ta_rsi, cs_group_mean, ts_kdj, ts_cov, torch
 
 class V5FactorCalculator(FactorCalculator): 
-    """
-    Alpha158 Factor Calculator
-    Migrated from vnpy/alpha/dataset/datasets/alpha_158.py
-    """
     def __init__(self):
         super().__init__()
 
     def build_features(self, padded_raw) -> dict[str, torch.Tensor]:
         # Unpack
         # 0:open, 1:high, 2:low, 3:close, 4:volume, 5:turnover, 6:turnover_rate, 7:pe
+        # 8:pb, 9:ps, 10:dv_ratio, 11:total_mv
         
+        # Let's keep (Batch, Time) for basic ops
         O = padded_raw[:, :, 0]
         H = padded_raw[:, :, 1]
         L = padded_raw[:, :, 2]
         C = padded_raw[:, :, 3]
         V = padded_raw[:, :, 4]
-        # Turnover (Amount) is 5, but Alpha158 uses VWAP from Qlib which is Amount/Volume usually.
-        # We can calculate VWAP from Turnover / Volume.
-        # However, Alpha158 source code (qlib) often provides VWAP as a column.
-        # In our padded_raw, we have Turnover (Amount).
-        # vwap = Turnover / (Volume + 1e-8)
-        # Note: if Volume is 0, VWAP is usually Close or NaN.
+        T = padded_raw[:, :, 5] # Turnover (Amount)
+        TR = padded_raw[:, :, 6] # Turnover Rate
+        PE = padded_raw[:, :, 7] # PE Ratio
+        PB = padded_raw[:, :, 8] # PB Ratio
+        PS = padded_raw[:, :, 9] # PS Ratio
+        DV = padded_raw[:, :, 10] # Dividend Ratio
+        MV = padded_raw[:, :, 11] # Total Market Value
         
-        T = padded_raw[:, :, 5] 
+        # Industry Code (if available, index 12)
+        IND = None
+        if padded_raw.shape[2] > 12:
+            IND = padded_raw[:, :, 12]
+        
+        # Helper vars
+        # Helper for mask (where C is not NaN)
+        mask = ~torch.isnan(C)
+        # VWAP = Turnover / Volume. 
+        # Handle cases where Volume is 0 or NaN.
         vwap = T / (V + 1e-8)
-        vwap = torch.where(V < 1e-5, C, vwap)
+        vwap = torch.where(torch.isnan(vwap), C, vwap) 
 
         features = {}
+
+        # 1. Momentum / Reversal
+        features["rev_5d"] = (C / ts_delay(C, 5) - 1) * -1
+        features["mom_5d"] = C / ts_delay(C, 5) - 1
+        # features["bias_6"] = (C / ts_mean(C, 6)) - 1
+        features["mom_20d"] = C / ts_delay(C, 20) - 1
+        features["mom_60d"] = C / ts_delay(C, 60) - 1
+        features["mom_120d"] = C / ts_delay(C, 120) - 1
+        # features["ma_bias_60"] = C / ts_mean(C, 60) - 1
+        features["ma_bias_120"] = C / ts_mean(C, 120) - 1
+        features["price_zscore_20d"] = (C - ts_mean(C, 20)) / (ts_std(C, 20) + 1e-8)
+
+        # A-share specific: Overnight vs Intraday
+        features["ret_overnight"] = O / ts_delay(C, 1) - 1
+        features["ret_intraday"] = C / O - 1
         
-        # --- Candlestick pattern features ---
-        # kmid = (close - open) / open
-        features["kmid"] = (C - O) / O
+        # Bias (Distance from MA) - Mean Reversion signals
+        features["bias_5"] = C / ts_mean(C, 5) - 1
+        features["bias_10"] = C / ts_mean(C, 10) - 1
+        features["bias_20"] = C / ts_mean(C, 20) - 1
+        features["bias_60"] = C / ts_mean(C, 60) - 1
+
+        # Industry Factors
+        if IND is not None:
+             # Industry Momentum (20d, 5d)
+             # Group Mean of individual stock momentums
+             ind_mom_60d = cs_group_mean(features["mom_60d"], IND)
+             ind_mom_20d = cs_group_mean(features["mom_20d"], IND)
+             ind_mom_5d = cs_group_mean(features["mom_5d"], IND)
+             
+             features["ind_mom_60d"] = ind_mom_60d
+             features["ind_mom_20d"] = ind_mom_20d
+             features["ind_mom_5d"] = ind_mom_5d
+             
+             # Relative Momentum (Stock Mom - Ind Mom)
+             features["ind_rel_mom_60d"] = features["mom_60d"] - ind_mom_60d
+             features["ind_rel_mom_20d"] = features["mom_20d"] - ind_mom_20d
+             
+             # Industry PE
+             ind_pe = cs_group_mean(PE, IND)
+             features["ind_pe"] = ind_pe
+             # Relative PE (Stock PE / Ind PE)
+             features["ind_rel_pe"] = PE / (ind_pe + 1e-8)
         
-        # klen = (high - low) / open
-        features["klen"] = (H - L) / O
+        # 2. Volatility
+        ret_1 = C / ts_delay(C, 1) - 1
+        features["volatility_20d"] = ts_std(ret_1, 20)
         
-        # kmid_2 = (close - open) / (high - low + 1e-12)
-        features["kmid_2"] = (C - O) / (H - L + 1e-12)
+        # --- Market Style Factors (New) ---
+        # 1. Market Return (Cross-Sectional Mean of Returns)
+        # (Time,) -> (Batch, Time)
+        ret_1_clean = torch.nan_to_num(ret_1, nan=0.0)
+        ret_1_mask = ~torch.isnan(ret_1)
+        valid_cnt = ret_1_mask.sum(dim=0)
+        # Avoid division by zero
+        mkt_ret_1d = ret_1_clean.sum(dim=0) / (valid_cnt + 1e-8)
+        mkt_ret_broad = mkt_ret_1d.unsqueeze(0).expand_as(ret_1)
         
-        # kup = (high - ts_greater(open, close)) / open
-        features["kup"] = (H - ts_greater(O, C)) / O
+        # 2. Beta (Sensitivity to Market)
+        # Beta = Cov(R_i, R_m) / Var(R_m)
+        cov_im = ts_cov(ret_1, mkt_ret_broad, 20)
+        var_m = ts_std(mkt_ret_broad, 20) ** 2
+        features["beta_20d"] = cov_im / (var_m + 1e-8)
         
-        # kup_2 = (high - ts_greater(open, close)) / (high - low + 1e-12)
-        features["kup_2"] = (H - ts_greater(O, C)) / (H - L + 1e-12)
+        # 3. Residual Volatility (Idiosyncratic Risk)
+        # epsilon = R_i - (alpha + beta * R_m)
+        # alpha = E[R_i] - beta * E[R_m]
+        # We can calculate residual directly from realized values?
+        # Standard approach: Resid = ret - beta * mkt_ret (assuming alpha is small or using rolling alpha)
+        # Let's use rolling alpha for correctness.
+        mean_ret = ts_mean(ret_1, 20)
+        mean_mkt = ts_mean(mkt_ret_broad, 20)
+        alpha = mean_ret - features["beta_20d"] * mean_mkt
+        exp_ret = alpha + features["beta_20d"] * mkt_ret_broad
+        resid = ret_1 - exp_ret
+        features["resid_vol_20d"] = ts_std(resid, 20)
         
-        # klow = (ts_less(open, close) - low) / open
-        features["klow"] = (ts_less(O, C) - L) / O
+        # 4. Non-Linear Size (Size Cube)
+        # Commonly used in Barra models (NLSIZE)
+        # Here we just use the cube of log cap to capture tails
+        #features["size_nl_cap"] = torch.pow(torch.log(MV + 1.0), 3)
+
+        # Trend Quality (Bull Market Helpers)
+        # High R^2 = Smooth Trend. Low R^2 = Choppy.
+        features["trend_rsquare_20"] = ts_rsquare(C, 20)
         
-        # klow_2 = ((ts_less(open, close) - low) / (high - low + 1e-12))
-        features["klow_2"] = (ts_less(O, C) - L) / (H - L + 1e-12)
+        # Linear Slope (Normalized)
+        # measures the steepness of the trend
+        slope_20 = ts_slope(C, 20)
+        features["trend_slope_20"] = slope_20 / (C + 1e-8)
         
-        # ksft = (close * 2 - high - low) / open
-        features["ksft"] = (C * 2 - H - L) / O
+        # Modified Sharpe (Slope / Volatility)
+        features["trend_sharpe_20"] = features["trend_slope_20"] / (features["volatility_20d"] + 1e-8)
         
-        # ksft_2 = (close * 2 - high - low) / (high - low + 1e-12)
-        features["ksft_2"] = (C * 2 - H - L) / (H - L + 1e-12)
+        features["volatility_60d"] = ts_std(ret_1, 60)
+        features["volatility_120d"] = ts_std(ret_1, 120) # Long term risk
+        # features["std_20"] = ts_std(C, 20) / C
+        features["atr_ratio_14"] = ta_atr(H, L, C, 14) / C
+        # MAX factor (Lottery ticket effect - typically negative alpha in A-share)
+        features["max_ret_20d"] = ts_max(ret_1, 20)
+        features["min_ret_20d"] = ts_min(ret_1, 20) # Tail risk
+
+        # features["drawdown_20d"] = (C / ts_max(C, 20)) - 1
+        features["daily_range"] = H / L - 1
         
-        # --- Price change features ---
-        # {field}_0 = {field} / close
-        features["open_0"] = O / C
-        features["high_0"] = H / C
-        features["low_0"] = L / C
-        features["vwap_0"] = vwap / C
+        # Downside Volatility (Bear Market Defense)
+        # sqrt( sum(min(r, 0)^2) / N )
+        neg_ret = torch.clamp(ret_1, max=0)
+        features["downside_vol_20d"] = torch.sqrt(ts_mean(neg_ret ** 2, 20))
+
+        # New Positive Factors
+        # Inverse Volatility (Low Vol Anomaly)
+        # features["inv_std_20"] = 1.0 / (features["std_20"] + 1e-4)
         
-        # --- Time series features ---
-        windows = [5, 10, 20, 30, 60]
+        # Trend Efficiency (Net Move / Total Path)
+        # High efficiency = strong trend (less noise)
+        # net_move_20 = (C - ts_delay(C, 20)).abs()
+        # total_path_20 = ts_sum((C - ts_delay(C, 1)).abs(), 20)
+        # features["trend_efficiency_20"] = net_move_20 / (total_path_20 + 1e-8)
+
+        # Price-Volume Correlation (20d)
+        # Correlation between Close and Volume. 
+        # Positive corr: Price up/Vol up or Price down/Vol down (Trend confirmation).
+        features["price_vol_corr_20"] = ts_corr(C, V, 20)
         
-        for w in windows:
-            # roc_{w} = ts_delay(close, w) / close  (Note: Qlib definition might be different? 
-            # In vnpy alpha_158.py: "ts_delay(close, {w}) / close".
-            # Usually ROC is Close / Delay(Close) - 1. But we follow the string formula exactly.
-            # "ts_delay(close, {w}) / close" -> Price(t-w) / Price(t)
-            features[f"roc_{w}"] = ts_delay(C, w) / C
-            
-            # ma_{w} = ts_mean(close, w) / close
-            features[f"ma_{w}"] = ts_mean(C, w) / C
-            
-            # std_{w} = ts_std(close, w) / close
-            features[f"std_{w}"] = ts_std(C, w) / C
-            
-            # beta_{w} = ts_slope(close, w) / close
-            features[f"beta_{w}"] = ts_slope(C, w) / C
-            
-            # rsqr_{w} = ts_rsquare(close, w)
-            features[f"rsqr_{w}"] = ts_rsquare(C, w)
-            
-            # resi_{w} = ts_resi(close, w) / close
-            features[f"resi_{w}"] = ts_resi(C, w) / C
-            
-            # max_{w} = ts_max(high, w) / close
-            features[f"max_{w}"] = ts_max(H, w) / C
-            
+        # Intraday Strength (Close Location Value)
+        # (C - L) / (H - L). Closer to 1 means closing strong (buying pressure).
+        # features["close_loc_range"] = (C - L) / (H - L + 1e-8)
+        
+        # Alpha 13
+        # -1 * cs_rank(ts_cov(cs_rank(close), cs_rank(volume), 5))
+        #features["alpha013"] = -1 * cs_rank(ts_cov(cs_rank(C), cs_rank(V), 5))
+
+        # Alpha 40
+        # ((-1) * cs_rank(ts_std(high, 10))) * ts_corr(high, volume, 10)
+        features["alpha040"] = -1 * cs_rank(ts_std(H, 10)) * ts_corr(H, V, 10)
+
+        # Alpha 42
+        # cs_rank((vwap - close)) / cs_rank((vwap + close))
+        #features["alpha042"] = cs_rank(vwap - C) / (cs_rank(vwap + C) + 1e-8)
+        
+        # Inverse Volatility (Longer term - 60d)
+        # Low beta/volatility stocks tend to outperform in bear/stable markets.
+        inv_vol_60 = 1.0 / (features["volatility_60d"] + 1e-4)
+        features["inv_vol_60"] = inv_vol_60
+
+
+        # Return Skewness Proxy (Upside Vol / Downside Vol)
+        # If upside vol > downside vol -> Positive Skew potential
+        ret_pos = torch.clamp(ret_1, min=0)
+        ret_neg_abs = torch.clamp(ret_1, max=0).abs()
+        vol_pos = ts_sum(ret_pos**2, 20).sqrt()
+        vol_neg = ts_sum(ret_neg_abs**2, 20).sqrt()
+        features["vol_skew_20"] = vol_pos / (vol_neg + 1e-8)
+        
+        # 3. Technical
+        ma_20 = ts_mean(C, 20)
+        std_20 = ts_std(C, 20)
+        features["bollinger_position"] = (C - ma_20) / (std_20 * 2 + 1e-8)
+        features["boll_width_20"] = (std_20 * 4) / ma_20
+        
+        features["rsi_14"] = ta_rsi(C, 14)
+        # features["rsi_6"] = ta_rsi(C, 6)
+
+        # PSY (Psychological Line) - Sentiment
+        delta = C - ts_delay(C, 1)
+        is_up = (delta > 0).float()
+        features["psy_12"] = ts_mean(is_up, 12)
+        
+        # Drawdown from peak (20d)
+        features["drawdown_20d"] = C / ts_max(C, 20) - 1
+        
+        # Rebound from trough (20d)
+        features["rebound_20d"] = C / ts_min(L, 20) - 1
+        
+        # KDJ
+        k, d, j = ts_kdj(C, H, L)
+        # Normalize KDJ to 0-1 range for better NN stability
+        kdj_k = k / 100.0
+        kdj_d = d / 100.0
+        kdj_j = j / 100.0
+        
+        # KDJ Auxiliary Trends (Predicting Future Crosses)
+        # Distance between K and D. Near 0 = Potential Cross.
+        features["kdj_kd_diff"] = kdj_k - kdj_d
+        
+        # Velocity of convergence (Change in KD diff)
+        # If Diff is negative (K below D) and Velocity is positive, it means K is approaching D (Pre-Golden Cross).
+        # Smooth velocity over 3 days to reduce noise
+        raw_velocity = features["kdj_kd_diff"] - ts_delay(features["kdj_kd_diff"], 1)
+        features["kdj_kd_velocity"] = ts_mean(raw_velocity, 3)
+        
+        
+        # PSY: Mean of sign(return) > 0? No, sign of delta.
+        # sign(ts_delta(close, 1)) -> 1 if >0, -1 if <0, 0. 
+        # PSY is percentage of up days. (sign > 0).
+        # We can implement:
+        # delta_c = ts_delta(C, 1)
+        # is_up = (delta_c > 0).float()
+        # features["psy_12"] = ts_mean(is_up, 12)
+        
+        # MA Alignment
+        # ma_5 = ts_mean(C, 5)
+        # ma_10 = ts_mean(C, 10)
+        # ma_20 defined above
+        # ((ma_5 > ma_10) & (ma_10 > ma_20)) * 1
+        # features["ma_alignment"] = ((ma_5 > ma_10) & (ma_10 > ma_20)).float()
+
+        # CCI 14 (Commodity Channel Index) - Good for oscillating markets
+        # TP = (H + L + C) / 3
+        # CCI = (TP - SMA(TP)) / (0.015 * MeanDev(TP))
+        tp = (H + L + C) / 3.0
+        sma_tp = ts_mean(tp, 14)
+        mad_tp = ts_mean(torch.abs(tp - sma_tp), 14)
+        features["tech_cci_14"] = (tp - sma_tp) / (0.015 * mad_tp + 1e-8)
+        
+        # 4. Volume
+        features["volume_ratio"] = V / ts_mean(V, 20)
+        # features["vol_roc_5"] = V / ts_delay(V, 5) - 1
+        features["vol_cv_20"] = ts_std(V, 20) / ts_mean(V, 20)
+        features["vol_stability_20"] = 1.0 / (features["vol_cv_20"] + 1e-4)
+
+        # Coefficient of Variation of Turnover (Instability)
+        features["turnover_cv_20d"] = ts_std(TR, 20) / (ts_mean(TR, 20) + 1e-8)
+        
+        # Amihud Illiquidity (Price Impact)
+        # |Ret| / (Price * Volume) => |Ret| / Turnover
+        # High Illiquidity -> Low Volume for big move.
+        abs_ret = torch.abs(ret_1)
+        # Add epsilon to turnover to avoid div by zero
+        illiq = abs_ret / (T + 1e-1) * 1e8 # Scale up
+        features["illiquidity_20d"] = ts_mean(illiq, 20)
+
+        # Price Volume Divergence
+        # (close > prev_close) & (volume < prev_volume)
+        # c_prev = ts_delay(C, 1)
+        # v_prev = ts_delay(V, 1)
+        # price_up = C > c_prev
+        # vol_down = V < v_prev
+        # features["price_volume_divergence"] = (price_up & vol_down).float()
+        
+        # 5. Money Flow
+        # (((close - open) / (high - low + 0.0001)) * volume)
+        # mf_val = ((C - O) / (H - L + 0.0001)) * V
+        # features["money_flow_20d"] = mf_val / ts_mean(mf_val, 20)
+        
+        # VWAP Dev
+        # ts_sum(close * volume, 20) / ts_sum(volume, 20)
+        vwap_20 = ts_sum(C * V, 20) / ts_sum(V, 20)
+        features["vwap_dev_20"] = C / vwap_20 - 1
+        
+        # 6. Fundamental / Daily Basic
+        # Turnover Rate
+        features["turnover_mean_5d"] = ts_mean(TR, 5)
+        features["turnover_mean_20d"] = ts_mean(TR, 20)
+        features["turnover_std_20d"] = ts_std(TR, 20)
+
+        # Turnover Growth (Activity Change)
+        # TR / delay(TR, 20) - 1
+        features["fund_turnover_growth"] = TR / (ts_delay(TR, 20) + 1e-8) - 1
+        
+        # PE / Valuation
+        # EP Ratio (Earnings Yield) = 1 / PE
+        # Handle division by zero or near zero if PE is 0.
+        features["ep_ratio"] = 1.0 / (PE + 1e-4)
+        
+        # Value Factors (PB, PS, Dividend) - Defensive
+        features["val_pb"] = 1.0 / (PB + 1e-4)
+        features["val_ps"] = 1.0 / (PS + 1e-4)
+        features["val_dv"] = DV # Dividend Yield
+        
+        # Size Factor (Log Market Cap)
+        # Use log to normalize the distribution
+        features["size_ln_cap"] = torch.log(MV + 1.0)
+        
+        # PE Z-Score (Time-series)
+        # (PE - Mean_PE) / Std_PE
+        pe_mean_60 = ts_mean(PE, 60)
+        pe_std_60 = ts_std(PE, 60)
+        features["pe_zscore_60d"] = (PE - pe_mean_60) / (pe_std_60 + 1e-8)
+        
+        # PE Rank Change (Relative Valuation)
+        # Current PE / Avg PE(20d) - 1
+        pe_mean_20 = ts_mean(PE, 20)
+        features["pe_rank_change_20d"] = PE / (pe_mean_20 + 1e-8) - 1
+
+        
+        # qtld_{w} = ts_quantile(close, w, 0.2) / close
+        features[f"qtld_60"] = ts_quantile(C, 60, 0.2) / C
+        
+        # klen = (high - low) / close
+        features["klen"] = (H - L) / C
+
+        for w in [10, 20, 30]:
             # min_{w} = ts_min(low, w) / close
             features[f"min_{w}"] = ts_min(L, w) / C
-            
-            # qtlu_{w} = ts_quantile(close, w, 0.8) / close
-            features[f"qtlu_{w}"] = ts_quantile(C, w, 0.8) / C
-            
-            # qtld_{w} = ts_quantile(close, w, 0.2) / close
-            features[f"qtld_{w}"] = ts_quantile(C, w, 0.2) / C
-            
-            # rank_{w} = ts_rank(close, w)
-            features[f"rank_{w}"] = ts_rank(C, w)
-            
-            # rsv_{w} = (close - ts_min(low, w)) / (ts_max(high, w) - ts_min(low, w) + 1e-12)
-            min_l = ts_min(L, w)
-            max_h = ts_max(H, w)
-            features[f"rsv_{w}"] = (C - min_l) / (max_h - min_l + 1e-12)
-            
-            # imax_{w} = ts_argmax(high, w) / w
-            features[f"imax_{w}"] = ts_argmax(H, w) / w
-            
-            # imin_{w} = ts_argmin(low, w) / w
-            features[f"imin_{w}"] = ts_argmin(L, w) / w
-            
-            # imxd_{w} = (ts_argmax(high, w) - ts_argmin(low, w)) / w
-            features[f"imxd_{w}"] = (ts_argmax(H, w) - ts_argmin(L, w)) / w
-            
-            # corr_{w} = ts_corr(close, ts_log(volume + 1), w)
-            log_vol = ts_log(V + 1)
-            features[f"corr_{w}"] = ts_corr(C, log_vol, w)
-            
-            # cord_{w} = ts_corr(close / ts_delay(close, 1), ts_log(volume / ts_delay(volume, 1) + 1), w)
-            ret = C / ts_delay(C, 1)
-            vol_ret_log = ts_log(V / ts_delay(V, 1) + 1)
-            features[f"cord_{w}"] = ts_corr(ret, vol_ret_log, w)
-            
-            # cntp_{w} = ts_mean(close > ts_delay(close, 1), w)
-            # Boolean to float
-            is_pos = (C > ts_delay(C, 1)).float()
-            features[f"cntp_{w}"] = ts_mean(is_pos, w)
-            
-            # cntn_{w} = ts_mean(close < ts_delay(close, 1), w)
-            is_neg = (C < ts_delay(C, 1)).float()
-            features[f"cntn_{w}"] = ts_mean(is_neg, w)
-            
-            # cntd_{w} = cntp - cntn
-            features[f"cntd_{w}"] = features[f"cntp_{w}"] - features[f"cntn_{w}"]
-            
-            # sump_{w} = ts_sum(ts_greater(close - ts_delay(close, 1), 0), w) / (ts_sum(ts_abs(close - ts_delay(close, 1)), w) + 1e-12)
-            delta_c = C - ts_delay(C, 1)
-            pos_delta = ts_greater(delta_c, torch.tensor(0.0, device=C.device))
-            abs_delta = ts_abs(delta_c)
-            features[f"sump_{w}"] = ts_mean(pos_delta, w) * w / (ts_mean(abs_delta, w) * w + 1e-12) # ts_sum implemented as conv, but robust ts_sum uses mean * count?
-            # My ts_sum(x, d) returns sum directly.
-            features[f"sump_{w}"] = ts_mean(pos_delta, w) * w / (ts_mean(abs_delta, w) * w + 1e-12) # Wait, ts_sum uses ts_mean logic? No, factor_calculator has explicit ts_sum
-            # Let's use ts_sum directly
-            features[f"sump_{w}"] = ts_mean(pos_delta, w) * w / (ts_mean(abs_delta, w) * w + 1e-12)
-            # Actually better to use ts_sum directly if available and robust
-            
-            # Re-check ts_sum in factor_calculator:
-            # def ts_sum(x, d):
-            #     ...
-            #     res = sum_res.squeeze(1)
-            #     res[count_res.squeeze(1) == 0] = float('nan')
-            #     return res
-            # It sums 0-padded values.
-            
-            features[f"sump_{w}"] = ts_sum(pos_delta, w) / (ts_sum(abs_delta, w) + 1e-12)
-
-            # sumn_{w} = ts_sum(ts_greater(ts_delay(close, 1) - close, 0), w) / ...
-            neg_delta_val = ts_delay(C, 1) - C
-            neg_delta = ts_greater(neg_delta_val, torch.tensor(0.0, device=C.device))
-            features[f"sumn_{w}"] = ts_sum(neg_delta, w) / (ts_sum(abs_delta, w) + 1e-12)
-            
-            # sumd_{w} = (sump - sumn)
-            # Formula: (ts_sum(pos) - ts_sum(neg)) / ts_sum(abs)
-            # This is equivalent to (sump_{w} - sumn_{w}) if denominators are same.
-            features[f"sumd_{w}"] = (ts_sum(pos_delta, w) - ts_sum(neg_delta, w)) / (ts_sum(abs_delta, w) + 1e-12)
-            
-            # vma_{w} = ts_mean(volume, w) / (volume + 1e-12)
-            features[f"vma_{w}"] = ts_mean(V, w) / (V + 1e-12)
-            
-            # vstd_{w} = ts_std(volume, w) / (volume + 1e-12)
-            features[f"vstd_{w}"] = ts_std(V, w) / (V + 1e-12)
-            
-            # wvma_{w} = ts_std(ts_abs(close / ts_delay(close, 1) - 1) * volume, w) / (ts_mean(ts_abs(close / ts_delay(close, 1) - 1) * volume, w) + 1e-12)
-            abs_ret_vol = ts_abs(C / ts_delay(C, 1) - 1) * V
-            features[f"wvma_{w}"] = ts_std(abs_ret_vol, w) / (ts_mean(abs_ret_vol, w) + 1e-12)
-            
-            # vsump_{w} = ts_sum(ts_greater(volume - ts_delay(volume, 1), 0), w) / (ts_sum(ts_abs(volume - ts_delay(volume, 1)), w) + 1e-12)
-            delta_v = V - ts_delay(V, 1)
-            pos_delta_v = ts_greater(delta_v, torch.tensor(0.0, device=V.device))
-            abs_delta_v = ts_abs(delta_v)
-            features[f"vsump_{w}"] = ts_sum(pos_delta_v, w) / (ts_sum(abs_delta_v, w) + 1e-12)
-            
-            # vsumn_{w} = ts_sum(ts_greater(ts_delay(volume, 1) - volume, 0), w) / ...
-            neg_delta_v_val = ts_delay(V, 1) - V
-            neg_delta_v = ts_greater(neg_delta_v_val, torch.tensor(0.0, device=V.device))
-            features[f"vsumn_{w}"] = ts_sum(neg_delta_v, w) / (ts_sum(abs_delta_v, w) + 1e-12)
-            
-            # vsumd_{w} = ...
-            features[f"vsumd_{w}"] = (ts_sum(pos_delta_v, w) - ts_sum(neg_delta_v, w)) / (ts_sum(abs_delta_v, w) + 1e-12)
-
-        # Label: ts_delay(close, -3) / ts_delay(close, -1) - 1
-        # Shift -1 means shift left by 1 (future).
-        # We need to use negative delay.
-        # Check ts_delay implementation: 
-        # res = torch.roll(x, shifts=d, dims=1)
-        # if d > 0: res[:, :d] = nan
-        # else: res[:, d:] = nan
-        # So it supports negative d.
         
-        features["label"] = ts_delay(C, -3) / ts_delay(C, -1) - 1
+        for w in [5, 10, 20]:
+            # std_{w} = ts_std(ret_1, w)
+            features[f"std_{w}"] = ts_std(ret_1, w)
         
+        # --- Consolidation / Plateau Detectors ---
+        # Volatility Ratio: Short-term vol / Long-term vol. 
+        # Low ratio (<1) indicates volatility is compressing (Consolidation/Plateau).
+        features["vol_ratio_5_20"] = features["std_5"] / (features["std_20"] + 1e-8)
+        
+        # Turnover Ratio: Activity change.
+        features["turnover_ratio_5_20"] = features["turnover_mean_5d"] / (features["turnover_mean_20d"] + 1e-8)
+        
+        # Short term trend slope (5d)
+        slope_5 = ts_slope(C, 5)
+        features["trend_slope_5"] = slope_5 / (C + 1e-8)
+        
+        # Slope Divergence: Short term slope - Long term slope
+        # If Long term is + (Up) and Short term is 0 (Flat) -> Negative divergence (Plateauing)
+        features["slope_div_5_20"] = features["trend_slope_5"] - features["trend_slope_20"]
+        
+        # Label: Next 5 days return (Market Neutral Rank)
+        # Using cs_rank on the future return ensures we are learning to rank stocks,
+        # which is regime-independent (works in both Bull and Bear markets).
+        raw_ret_5 = ts_delay(C, -5) / C - 1
+        
+        # Penalize low liquidity stocks (Turnover < 1%)
+        # Even if they are profitable, we want to reduce signals for them due to liquidity risk.
+        # We subtract a penalty from the return before ranking.
+        low_liq_penalty = (features["turnover_mean_20d"] < 1.0).float() * 0.05
+        # Note: We subtract the penalty. If turnover < 1, return is reduced by 5%.
+        raw_ret_5 = raw_ret_5 - low_liq_penalty
+
+        features["label"] = cs_rank(raw_ret_5)
+
         return features

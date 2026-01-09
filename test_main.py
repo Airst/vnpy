@@ -8,11 +8,6 @@ import sys
 import os
 from pathlib import Path
 
-# Ensure project root is in path
-# core/main.py -> core -> root
-PROJECT_ROOT = Path(__file__).resolve().parent.parent
-sys.path.append(str(PROJECT_ROOT))
-
 from core.core_service import CoreService
 
 app = FastAPI()

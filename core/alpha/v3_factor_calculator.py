@@ -1,4 +1,4 @@
-from core.alpha.factor_calculator import FactorCalculator, cs_rank, ts_corr, cs_zscore, ts_delay, ts_mean, ts_min, ts_max, ts_quantile, ts_std, ts_sum, ts_rsquare, ts_slope, ta_atr, ta_rsi, cs_group_mean, ts_kdj, torch
+from core.alpha.factor_calculator import FactorCalculator, cs_rank, ts_corr, cs_zscore, ts_delay, ts_mean, ts_min, ts_max, ts_quantile, ts_std, ts_sum, ts_rsquare, ts_slope, ta_atr, ta_rsi, cs_group_mean, ts_kdj, ts_cov, torch
 
 class V3FactorCalculator(FactorCalculator): 
     def __init__(self):
@@ -85,6 +85,40 @@ class V3FactorCalculator(FactorCalculator):
         ret_1 = C / ts_delay(C, 1) - 1
         features["volatility_20d"] = ts_std(ret_1, 20)
         
+        # --- Market Style Factors (New) ---
+        # 1. Market Return (Cross-Sectional Mean of Returns)
+        # (Time,) -> (Batch, Time)
+        ret_1_clean = torch.nan_to_num(ret_1, nan=0.0)
+        ret_1_mask = ~torch.isnan(ret_1)
+        valid_cnt = ret_1_mask.sum(dim=0)
+        # Avoid division by zero
+        mkt_ret_1d = ret_1_clean.sum(dim=0) / (valid_cnt + 1e-8)
+        mkt_ret_broad = mkt_ret_1d.unsqueeze(0).expand_as(ret_1)
+        
+        # 2. Beta (Sensitivity to Market)
+        # Beta = Cov(R_i, R_m) / Var(R_m)
+        cov_im = ts_cov(ret_1, mkt_ret_broad, 20)
+        var_m = ts_std(mkt_ret_broad, 20) ** 2
+        features["beta_20d"] = cov_im / (var_m + 1e-8)
+        
+        # 3. Residual Volatility (Idiosyncratic Risk)
+        # epsilon = R_i - (alpha + beta * R_m)
+        # alpha = E[R_i] - beta * E[R_m]
+        # We can calculate residual directly from realized values?
+        # Standard approach: Resid = ret - beta * mkt_ret (assuming alpha is small or using rolling alpha)
+        # Let's use rolling alpha for correctness.
+        mean_ret = ts_mean(ret_1, 20)
+        mean_mkt = ts_mean(mkt_ret_broad, 20)
+        alpha = mean_ret - features["beta_20d"] * mean_mkt
+        exp_ret = alpha + features["beta_20d"] * mkt_ret_broad
+        resid = ret_1 - exp_ret
+        features["resid_vol_20d"] = ts_std(resid, 20)
+        
+        # 4. Non-Linear Size (Size Cube)
+        # Commonly used in Barra models (NLSIZE)
+        # Here we just use the cube of log cap to capture tails
+        #features["size_nl_cap"] = torch.pow(torch.log(MV + 1.0), 3)
+
         # Trend Quality (Bull Market Helpers)
         # High R^2 = Smooth Trend. Low R^2 = Choppy.
         features["trend_rsquare_20"] = ts_rsquare(C, 20)

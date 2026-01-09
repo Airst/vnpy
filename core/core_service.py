@@ -15,20 +15,26 @@ from vnpy.trader.constant import Interval
 from vnpy.alpha.lab import AlphaLab
 from core.selector import FundamentalSelector
 
-STRATEGY_PATH = "core/strategies"
-BACKTEST_DB_PATH = "core/alpha_db/backtest"
+# Resolve project root
+PROJECT_ROOT = Path(__file__).parent.parent
+STRATEGY_PATH = PROJECT_ROOT.joinpath("core/strategies")
+BACKTEST_DB_PATH = PROJECT_ROOT.joinpath("core/alpha_db/backtest")
+ALPHA_DB_PATH = PROJECT_ROOT.joinpath("core/alpha_db")
+SIGNAL_PATH = PROJECT_ROOT.joinpath("core/alpha_db/signal")
 
 class CoreService:
     def __init__(self):
         self.strategies: Dict[str, Type[StrategyTemplate]] = {}
         self.selector = FundamentalSelector()
-        self.lab = AlphaLab("core/alpha_db")
+        self.lab = AlphaLab(str(ALPHA_DB_PATH))
         self.load_strategies()
         os.makedirs(BACKTEST_DB_PATH, exist_ok=True)
 
     def load_strategies(self):
         """Load all strategies from the strategies directory."""
-        if not os.path.exists(STRATEGY_PATH):
+        print(f"Loading strategies from: {STRATEGY_PATH}")
+        if not STRATEGY_PATH.exists():
+            print(f"Strategy path does not exist: {STRATEGY_PATH}")
             return
 
         for filename in os.listdir(STRATEGY_PATH):
@@ -41,6 +47,7 @@ class CoreService:
                             issubclass(obj, StrategyTemplate) and 
                             obj is not StrategyTemplate):
                             self.strategies[name] = obj
+                            print(f"Loaded strategy: {name}")
                 except Exception as e:
                     print(f"Failed to load strategy from {filename}: {e}")
 
@@ -49,14 +56,16 @@ class CoreService:
 
     def get_signals(self) -> List[str]:
         """Get list of available signals from core/alpha_db/signal directory."""
-        signal_path = "core/alpha_db/signal"
-        if not os.path.exists(signal_path):
+        if not SIGNAL_PATH.exists():
+            print(f"Signal path does not exist: {SIGNAL_PATH}")
             return []
             
         signals = []
-        for filename in os.listdir(signal_path):
+        for filename in os.listdir(SIGNAL_PATH):
             if filename.endswith(".parquet"):
                 signals.append(os.path.splitext(filename)[0])
+        
+        # print(f"Found signals in {SIGNAL_PATH}: {signals}")
         return sorted(signals)
 
     def get_candidate_symbols(self) -> List[str]:

@@ -3,11 +3,12 @@ import {
     Layout, Menu, Button, Card, DatePicker, message, Select, 
     Typography, Space, Spin, InputNumber
 } from 'antd';
-import { DashboardOutlined, BarChartOutlined, BgColorsOutlined, LineChartOutlined } from '@ant-design/icons';
+import { DashboardOutlined, BarChartOutlined, BgColorsOutlined, LineChartOutlined, TransactionOutlined } from '@ant-design/icons';
 import dayjs from 'dayjs';
 import BacktestResults from './components/BacktestResults';
 import PredictionResults from './components/PredictionResults';
 import SignalAnalysis from './components/SignalAnalysis';
+import TradeDashboard from './components/TradeDashboard';
 
 const { Header, Sider, Content } = Layout;
 const { Text } = Typography;
@@ -205,6 +206,11 @@ const App = () => {
     };
 
     const menuItems = [
+        {
+            key: 'trade',
+            label: 'Trade',
+            icon: <TransactionOutlined />
+        },
         {
             key: 'backtest',
             label: 'Backtest',
@@ -408,6 +414,8 @@ const App = () => {
 
     const renderContent = () => {
         switch (activeMenu) {
+            case 'trade':
+                return <TradeDashboard />;
             case 'system':
                 return renderSystemManagement();
             case 'backtest':

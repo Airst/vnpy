@@ -96,7 +96,7 @@ class AlphaEngine:
 
     def analyze_factor_performance(self, factors_df: pl.DataFrame, threshold: float = 0.02) -> pl.DataFrame:
         """
-        因子绩效分析（仅展示）
+        因子绩效分析（滚动窗口模式）
         
         Args:
             factors_df: 包含因子和label的DataFrame
@@ -105,7 +105,7 @@ class AlphaEngine:
         Returns:
             pl.DataFrame: 返回包含所有因子的原始DataFrame（不进行剔除，防止Look-ahead Bias）
         """
-        print("\n=== 因子绩效分析 (仅供参考，不进行预筛选) ===")
+        print("\n=== 因子绩效分析 (Rolling Window: 200 Days) ===")
         
         if factors_df.is_empty():
             print("无因子数据可分析")
@@ -115,7 +115,7 @@ class AlphaEngine:
         df_analysis = factors_df.clone()
         
         # 准备数据：计算未来收益率 (5日)用于IC计算
-        print("计算未来5日收益率作为基准...")
+        # print("计算未来5日收益率作为基准...")
         if "label" in df_analysis.columns:
              # Label is already calculated (normalized future return)
              df_calc = df_analysis.with_columns(pl.col("label").alias("next_ret"))
@@ -134,96 +134,144 @@ class AlphaEngine:
             print("有效数据不足进行IC分析")
             return factors_df
 
-        # 分析各因子的IC（信息系数）
         # 排除非因子列
         exclude_cols = ["datetime", "vt_symbol", "close", "open", "high", "low", "volume", "next_ret", "label"]
         # 确保只分析原始factors_df中存在的列
         factor_cols = [col for col in factors_df.columns if col not in exclude_cols]
+        factor_cols.sort()
         
-        print(f"正在分析 {len(factor_cols)} 个因子的全局IC (Mean Rank IC & ICIR)...")
-        print("注意：此分析基于全样本数据，仅供观察因子整体质量，不用于模型特征筛选。")
+        print(f"正在分析 {len(factor_cols)} 个因子...")
+
+        # --- Rolling Window Analysis ---
+        # 1. Get unique dates
+        dates = df_calc["datetime"].unique().sort()
+        total_days = len(dates)
+        window_size = 200
         
-        ic_results = []
+        results = {} # {factor_name: {period: (ic, icir)}}
         
-        # 计算每日截面 Rank IC
-        ic_exprs = [
-            pl.corr(pl.col(f).rank(), pl.col("next_ret").rank()).alias(f) 
-            for f in factor_cols
-        ]
-        
-        try:
-            # 1. Calculate Daily ICs
-            daily_ics = df_calc.group_by("datetime").agg(ic_exprs)
+        # Initialize results structure
+        for f in factor_cols:
+            results[f] = {}
+
+        # Helper to calc stats
+        def calc_stats(sub_df, period_name):
+            if sub_df.is_empty():
+                return
             
-            # 2. Aggregate Results (Mean, Std -> IR)
-            stats = daily_ics.select([
-                pl.col(f).fill_nan(pl.lit(None)).mean().alias(f"{f}_mean") for f in factor_cols
-            ] + [
-                pl.col(f).fill_nan(pl.lit(None)).std().alias(f"{f}_std") for f in factor_cols
-            ])
+            # Calculate Rank IC per day
+            ic_exprs = [
+                pl.corr(pl.col(f).rank(), pl.col("next_ret").rank()).alias(f) 
+                for f in factor_cols
+            ]
             
-            stats_row = stats.row(0)
-            cols = stats.columns
-            
-            for f in factor_cols:
-                mean_ic = stats_row[cols.index(f"{f}_mean")]
-                std_ic = stats_row[cols.index(f"{f}_std")]
+            try:
+                daily_ics = sub_df.group_by("datetime").agg(ic_exprs)
                 
-                if mean_ic is None:
-                    continue
+                # Mean IC & ICIR
+                stats = daily_ics.select([
+                    pl.col(f).fill_nan(None).mean().alias(f"{f}_mean") for f in factor_cols
+                ] + [
+                    pl.col(f).fill_nan(None).std().alias(f"{f}_std") for f in factor_cols
+                ])
+                
+                stats_row = stats.row(0)
+                cols = stats.columns
+                
+                for f in factor_cols:
+                    mean_ic = stats_row[cols.index(f"{f}_mean")]
+                    std_ic = stats_row[cols.index(f"{f}_std")]
                     
-                icir = mean_ic / (std_ic + 1e-9)
-                
-                ic_results.append({"factor": f, "ic": mean_ic, "icir": icir})
+                    if mean_ic is None:
+                        icir = 0.0
+                        mean_ic = 0.0
+                    else:
+                        icir = mean_ic / (std_ic + 1e-9)
+                    
+                    # Store as string "IC (ICIR)"
+                    results[f][period_name] = (mean_ic, icir)
+                    
+            except Exception as e:
+                print(f"Error in period {period_name}: {e}")
 
-        except Exception as e:
-            print(f"IC Analysis Failed: {e}")
-            # 出错也不影响主流程，返回原数据
-            return factors_df 
+        # 2. Iterate Windows
+        num_windows = (total_days + window_size - 1) // window_size
+        periods = []
         
-        # 展示结果
-        if ic_results:
-            # 区分正负因子
-            pos_ics = [r for r in ic_results if r["ic"] > 0]
-            neg_ics = [r for r in ic_results if r["ic"] < 0]
+        for i in range(num_windows):
+            start_idx = i * window_size
+            end_idx = min((i + 1) * window_size, total_days)
+            
+            start_date = dates[start_idx]
+            end_date = dates[end_idx - 1] # inclusive
+            
+            period_name = f"{start_date.strftime('%y%m%d')}-{end_date.strftime('%y%m%d')}"
+            periods.append(period_name)
+            
+            # Filter Data
+            # Polars filter by date range
+            sub_df = df_calc.filter((pl.col("datetime") >= start_date) & (pl.col("datetime") <= end_date))
+            
+            calc_stats(sub_df, period_name)
+            
+        # 3. Overall Stats
+        calc_stats(df_calc, "Overall")
+        periods.append("Overall")
 
-            # 正向因子：从大到小排序 (Strong -> Weak)
-            pos_ics.sort(key=lambda x: x["ic"], reverse=True)
-            # 负向因子：从小到大排序 (Strong Negative -> Weak Negative)
-            neg_ics.sort(key=lambda x: x["ic"], reverse=False)
+        # --- Build Result Table ---
+        # Columns: Factor, Period1_IC, Period1_ICIR, ..., Overall_IC, Overall_ICIR
+        # Simplified: Just show IC (and maybe color code or format string)
+        # User asked for a table. Let's make columns: Factor, [Period Name IC/ICIR]...
+        
+        # Let's separate IC and ICIR tables or combine them?
+        # A combined string "0.05 (0.5)" is compact.
+        
+        table_data = []
+        for f in factor_cols:
+            row = {"Factor": f}
+            overall_ic = results[f].get("Overall", (0,0))[0]
+            row["_sort_key"] = abs(overall_ic) # Helper for sorting
             
-            print(f"\n因子表现概览:")
+            for p in periods:
+                val = results[f].get(p, None)
+                if val:
+                    ic, icir = val
+                    row[p] = f"{ic:.3f} ({icir:.2f})"
+                else:
+                    row[p] = "-"
+            table_data.append(row)
             
-            # 1. Top 5 正向强相关
-            print(f"\n[Top 5 正向强相关 (IC > 0, Descending)]:")
-            for r in pos_ics[:5]:
-                print(f"  {r['factor']}: IC {r['ic']:.4f}, ICIR {r['icir']:.4f}")
+        # Sort by Overall IC magnitude
+        table_data.sort(key=lambda x: x["_sort_key"], reverse=True)
+        
+        # Convert to Polars for display
+        final_cols = ["Factor"] + periods
+        display_data = []
+        for r in table_data:
+            dr = {k: r[k] for k in final_cols}
+            display_data.append(dr)
+            
+        if display_data:
+            res_df = pl.DataFrame(display_data)
+            
+            # Adjust Polars display settings to show all columns
+            with pl.Config(
+                tbl_rows=100, 
+                tbl_cols=len(periods)+1, 
+                fmt_str_lengths=20,
+                tbl_width_chars=200
+            ):
+                print(res_df)
                 
-            # 2. Top 5 负向强相关
-            print(f"\n[Top 5 负向强相关 (IC < 0, Ascending)]:")
-            for r in neg_ics[:5]:
-                print(f"  {r['factor']}: IC {r['ic']:.4f}, ICIR {r['icir']:.4f}")
-                
-            # 3. Top 5 正向最弱 (Closest to 0)
-            print(f"\n[Top 5 正向最弱 (Close to 0)]:")
-            # 取最后5个，并按IC从小到大(接近0到远离0)排序展示
-            for r in sorted(pos_ics[-5:], key=lambda x: x["ic"]):
-                print(f"  {r['factor']}: IC {r['ic']:.4f}, ICIR {r['icir']:.4f}")
-
-            # 4. Top 5 负向最弱 (Closest to 0)
-            print(f"\n[Top 5 负向最弱 (Close to 0)]:")
-            # 取最后5个(它们是接近0的)，按绝对值从小到大排序展示
-            for r in sorted(neg_ics[-5:], key=lambda x: abs(x["ic"])):
-                print(f"  {r['factor']}: IC {r['ic']:.4f}, ICIR {r['icir']:.4f}")
-            
-            # 统计达标数量
-            qualified = sum(1 for r in ic_results if abs(r["ic"]) >= threshold)
-            print(f"\n统计: {qualified} / {len(factor_cols)} 个因子 |IC| >= {threshold}")
+            # Print Summary of Top 5
+            print("\n[Top 5 Factors (Overall |IC|)]")
+            for i in range(min(5, len(display_data))):
+                f = display_data[i]["Factor"]
+                v = display_data[i]["Overall"]
+                print(f"  {f}: {v}")
         else:
-             print("无有效IC结果。")
+            print("No results generated.")
 
-        # 关键修改：返回原始 factors_df (包含所有列)，不进行剔除
-        # 让后续的 MLP 模型在滚动训练中自己决定如何使用这些特征
         return factors_df
 
     def calculate_signals(self, factor_df: pl.DataFrame) -> pl.DataFrame:

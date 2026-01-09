@@ -5,9 +5,6 @@ from pathlib import Path
 import re
 import argparse
 
-# Add current working directory to sys.path
-sys.path.append(os.getcwd())
-
 from vnpy.alpha import logger
 from core.alpha.engine import AlphaEngine
 from core.alpha.mlp_signals import MLPSignals

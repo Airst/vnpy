@@ -12,6 +12,16 @@ import subprocess
 import asyncio
 from pathlib import Path
 from typing import List
+from contextlib import asynccontextmanager
+from vnpy.trader.logger import logger as td_logger
+from vnpy.alpha import logger
+
+# Ensure project root is in path
+# core/main.py -> core -> root
+PROJECT_ROOT = Path(__file__).resolve().parent
+
+from core.core_service import CoreService
+from core.trade_service import TradeService
 
 # --- Logger Redirection ---
 class LoggerWriter:
@@ -56,7 +66,7 @@ class LoggerWriter:
 if not hasattr(sys.stdout, 'file') or not isinstance(sys.stdout, LoggerWriter):
     try:
         # Clean up old logs (keep latest 3)
-        log_files = sorted(Path(".").glob("web_ui_*.log"), key=lambda p: p.stat().st_mtime)
+        log_files = sorted(Path(PROJECT_ROOT).glob("web_ui_*.log"), key=lambda p: p.stat().st_mtime)
         
         while len(log_files) >= 3:
             oldest_log = log_files.pop(0)
@@ -68,25 +78,36 @@ if not hasattr(sys.stdout, 'file') or not isinstance(sys.stdout, LoggerWriter):
 
         # Create new log file with timestamp
         timestamp = datetime.now().strftime("%Y%m%d_%H%M%S")
-        log_filename = f"web_ui_{timestamp}.log"
+        log_filename = f"{PROJECT_ROOT}/web_ui_{timestamp}.log"
         
         file = open(log_filename, "a", encoding="utf-8")
         sys.stdout = LoggerWriter(sys.stdout, file)
         sys.stderr = LoggerWriter(sys.stderr, file)
+        
+
+        # Remove default output
+        logger.remove()
+        td_logger.remove()
+
+        # Add terminal output (which now goes to file via LoggerWriter)
+        fmt: str = "{time:YYYY-MM-DD HH:mm:ss} {message}"
+        logger.add(sys.stdout, colorize=True, format=fmt)
+        td_logger.add(sys.stdout, colorize=True, format=fmt)
         print(f"Logging to {log_filename}")
     except Exception as e:
         print(f"Failed to setup logger redirection: {e}")
-# --------------------------
-
-# Ensure project root is in path
-# core/main.py -> core -> root
-PROJECT_ROOT = Path(__file__).resolve().parent.parent
-sys.path.append(str(PROJECT_ROOT))
-
-from core.core_service import CoreService
-
-app = FastAPI()
+        
 core_service = CoreService()
+trade_service = TradeService()
+
+
+@asynccontextmanager
+async def lifespan(app: FastAPI):
+    yield
+    trade_service.close()
+    print("Shut down TradeService...")
+
+app = FastAPI(lifespan=lifespan)
 
 # API Routes
 class BacktestRequest(BaseModel):
@@ -142,7 +163,7 @@ async def run_alpha_research_stream():
     Generator that runs the alpha research script and yields output line by line.
     """
     python_executable = sys.executable
-    script_path = os.path.join(PROJECT_ROOT, "core", "alpha", "run_research.py")
+    script_path = os.path.join(PROJECT_ROOT, "core", "training.py")
     
     yield f"Starting alpha calculation process...\n"
     yield f"Script: {script_path}\n"
@@ -261,6 +282,33 @@ def get_signal_data(req: SignalDataRequest):
 def search_symbols(keyword: str):
     return {"symbols": core_service.search_symbols(keyword)}
 
+# --- Trade API ---
+@app.post("/api/trade/connect")
+def connect_trade():
+    return trade_service.connect()
+
+@app.post("/api/trade/reset")
+def reset_trade():
+    trade_service.reset_connection()
+    return trade_service.connect()
+
+@app.get("/api/trade/accounts")
+def get_accounts():
+    return {"accounts": trade_service.get_accounts()}
+
+@app.get("/api/trade/positions")
+def get_positions():
+    return {"positions": trade_service.get_positions()}
+
+@app.get("/api/trade/orders")
+def get_orders():
+    return {"orders": trade_service.get_orders()}
+
+@app.get("/api/trade/trades")
+def get_trades():
+    return {"trades": trade_service.get_trades()}
+# -----------------
+
 # Static Files (React Frontend)
 # Mount assets first to avoid conflict with root catch-all
 if os.path.exists("core/web_ui/dist/assets"):
@@ -275,4 +323,8 @@ async def serve_react_app(full_path: str):
     return FileResponse("core/web_ui/dist/index.html")
 
 if __name__ == "__main__":
-    uvicorn.run("core.main:app", host="0.0.0.0", port=8000, reload=True)
+    # --------------------------
+    uvicorn.run("main:app", host="0.0.0.0", port=8000, reload=True, reload_dirs=[str(PROJECT_ROOT)])
+    # Force exit to ensure no dangling threads (e.g. from C++ extensions) keep the process alive
+    print("Forcing process exit...")
+    os._exit(0)
