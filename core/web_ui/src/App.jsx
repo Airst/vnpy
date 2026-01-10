@@ -4,6 +4,7 @@ import {
     Typography, Space, Spin, InputNumber
 } from 'antd';
 import { BarChartOutlined, LineChartOutlined, TransactionOutlined } from '@ant-design/icons';
+import { Routes, Route, useNavigate, useLocation, Navigate } from 'react-router-dom';
 import dayjs from 'dayjs';
 import BacktestResults from './components/BacktestResults';
 import SignalAnalysis from './components/SignalAnalysis';
@@ -13,10 +14,12 @@ const { Header, Sider, Content } = Layout;
 const { Text } = Typography;
 
 const App = () => {
+    const navigate = useNavigate();
+    const location = useLocation();
+    
     const [strategies, setStrategies] = useState([]);
     const [loadingStrategies, setLoadingStrategies] = useState(false);
     const [factors, setFactors] = useState([]);
-    const [activeMenu, setActiveMenu] = useState('backtest');
     
     // Backtest State
     const [btStrategy, setBtStrategy] = useState(null);
@@ -141,17 +144,17 @@ const App = () => {
 
     const menuItems = [
         {
-            key: 'trade',
+            key: '/trade',
             label: 'Trade',
             icon: <TransactionOutlined />
         },
         {
-            key: 'backtest',
+            key: '/backtest',
             label: 'Backtest',
             icon: <BarChartOutlined />
         },
         {
-            key: 'signal',
+            key: '/signal',
             label: 'Signal Analysis',
             icon: <LineChartOutlined />
         },
@@ -249,25 +252,6 @@ const App = () => {
         </div>
     );
 
-    const renderContent = () => {
-        switch (activeMenu) {
-            case 'trade':
-                return <TradeDashboard />;
-            case 'backtest':
-                return renderBacktest();
-            case 'signal':
-                return (
-                    <SignalAnalysis 
-                        factors={factors}
-                        defaultStart={btStart}
-                        defaultEnd={btEnd}
-                    />
-                );
-            default:
-                return null;
-        }
-    };
-
     return (
         <Layout style={{ minHeight: '100vh' }}>
             <Header style={{ 
@@ -285,8 +269,8 @@ const App = () => {
                 <Sider width={200} style={{ background: '#fff' }} collapsible>
                     <Menu
                         mode="vertical"
-                        selectedKeys={[activeMenu]}
-                        onClick={(e) => setActiveMenu(e.key)}
+                        selectedKeys={[location.pathname]}
+                        onClick={(e) => navigate(e.key)}
                         items={menuItems}
                         style={{ border: 'none' }}
                     />
@@ -298,7 +282,18 @@ const App = () => {
                     display: 'flex',
                     flexDirection: 'column'
                 }}>
-                    {renderContent()}
+                    <Routes>
+                        <Route path="/" element={<Navigate to="/backtest" replace />} />
+                        <Route path="/trade" element={<TradeDashboard />} />
+                        <Route path="/backtest" element={renderBacktest()} />
+                        <Route path="/signal" element={
+                            <SignalAnalysis 
+                                factors={factors}
+                                defaultStart={btStart}
+                                defaultEnd={btEnd}
+                            />
+                        } />
+                    </Routes>
                 </Content>
             </Layout>
         </Layout>

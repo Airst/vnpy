@@ -14,7 +14,7 @@ const TradeDashboard = () => {
 
     useEffect(() => {
         // Try to connect or check status on mount
-        handleConnect(true); 
+        handleConnect(false); 
     }, []);
 
     const handleConnect = async (silent = false) => {
@@ -26,8 +26,8 @@ const TradeDashboard = () => {
                 if (!silent) message.success(data.message);
                 // Wait for data sync if just connected
                 setTimeout(() => {
-                    fetchData();
-                }, 3000);
+                    fetchData(true);
+                }, 1000);
             } else {
                 if (!silent) message.error(data.message);
             }
@@ -50,8 +50,8 @@ const TradeDashboard = () => {
                 setOrders([]);
                 setTrades([]);
                 setTimeout(() => {
-                    fetchData();
-                }, 3000);
+                    fetchData(true);
+                }, 1000);
             } else {
                 message.error(data.message || 'Failed to reset');
             }
@@ -63,8 +63,8 @@ const TradeDashboard = () => {
         }
     };
 
-    const fetchData = async () => {
-        if (!connected) return;
+    const fetchData = async (force = false) => {
+        if (!connected && force !== true) return;
         setLoading(true);
         try {
             const [accRes, posRes, ordRes, trdRes] = await Promise.all([
