@@ -29,7 +29,7 @@ from core.strategies.multifactor_strategy import MultiFactorStrategy
 STRATEGY_NAME = "daily_multifactor"
 GATEWAY_NAME = "TORASTOCK"
 CONNECT_FILE = "connect_torastock.json"
-SIGNAL_NAME = "ashare_mlp_signal_v3"
+SIGNAL_NAME = "ashare_mlp_signal_v4"
 
 def run_daily_trading():
     """

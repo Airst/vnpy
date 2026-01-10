@@ -268,7 +268,8 @@ class CoreService:
         timestamp = datetime.now().strftime("%Y%m%d_%H%M%S")
         start_str = start.strftime("%Y%m%d")
         end_str = end.strftime("%Y%m%d")
-        filename = f"{strategy_name}_{start_str}_{end_str}_{timestamp}.json"
+        signal_name = setting['signal_name'] if setting['signal_name'] else strategy_name
+        filename = f"{signal_name}_{start_str}_{end_str}_{timestamp}.json"
         filepath = os.path.join(BACKTEST_DB_PATH, filename)
         
         try:

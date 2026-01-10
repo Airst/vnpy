@@ -43,7 +43,7 @@ def from_tushare_code(ts_code: str) -> Tuple[str, Exchange]:
 
 def download_data(config_path: str = "data_manager/ts_downloader/download_daily_config.json", end_date: str = "latest"):
     """
-    下载历史数据并存入数据库 (使用 Tushare 批量接口)
+    下载历史数据并存入数据库 (使用 Tushare 批量接口), end_date:yyyymmdd
     """
     database = get_database()
     print("数据库连接成功")

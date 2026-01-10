@@ -1,12 +1,11 @@
 import React, { useState, useEffect, useRef } from 'react';
-import { 
-    Layout, Menu, Button, Card, DatePicker, message, Select, 
+import {
+    Layout, Menu, Button, Card, DatePicker, message, Select,
     Typography, Space, Spin, InputNumber
 } from 'antd';
-import { DashboardOutlined, BarChartOutlined, BgColorsOutlined, LineChartOutlined, TransactionOutlined } from '@ant-design/icons';
+import { DashboardOutlined, BarChartOutlined, LineChartOutlined, TransactionOutlined } from '@ant-design/icons';
 import dayjs from 'dayjs';
 import BacktestResults from './components/BacktestResults';
-import PredictionResults from './components/PredictionResults';
 import SignalAnalysis from './components/SignalAnalysis';
 import TradeDashboard from './components/TradeDashboard';
 
@@ -29,11 +28,6 @@ const App = () => {
     const [btLoading, setBtLoading] = useState(false);
     const [btHistory, setBtHistory] = useState([]);
     const [loadingHistory, setLoadingHistory] = useState(false);
-
-    // Prediction State
-    const [predStrategy, setPredStrategy] = useState(null);
-    const [predResult, setPredResult] = useState(null);
-    const [predLoading, setPredLoading] = useState(false);
 
     // Ingest State
     const [ingestLoading, setIngestLoading] = useState(false);
@@ -178,33 +172,6 @@ const App = () => {
         }
     };
 
-    const handlePrediction = async () => {
-        if (!predStrategy) {
-            message.warning('Please select strategy');
-            return;
-        }
-        setPredLoading(true);
-        setPredResult(null);
-        try {
-            const payload = {
-                strategy_name: predStrategy,
-            };
-            const res = await fetch('/api/predict', {
-                method: 'POST',
-                headers: {'Content-Type': 'application/json'},
-                body: JSON.stringify(payload)
-            });
-            const data = await res.json();
-            setPredResult(data);
-            message.success('Prediction completed');
-        } catch (error) {
-            message.error('Prediction failed');
-            console.error(error);
-        } finally {
-            setPredLoading(false);
-        }
-    };
-
     const menuItems = [
         {
             key: 'trade',
@@ -215,11 +182,6 @@ const App = () => {
             key: 'backtest',
             label: 'Backtest',
             icon: <BarChartOutlined />
-        },
-        {
-            key: 'prediction',
-            label: 'Prediction',
-            icon: <BgColorsOutlined />
         },
         {
             key: 'signal',
@@ -371,47 +333,6 @@ const App = () => {
         </div>
     );
 
-    // Prediction Content
-    const renderPrediction = () => (
-        <div style={{ display: 'flex', flexDirection: 'column', gap: '20px', height: '100%' }}>
-            {/* 操作区 */}
-            <Card title="Configuration" bordered={false}>
-                <Space direction="vertical" style={{ width: '100%' }} size="middle">
-                    <div>
-                        <label style={{ fontSize: '12px', color: '#666', display: 'block', marginBottom: '4px' }}>Strategy</label>
-                        <Select
-                            style={{ width: '100%' }}
-                            placeholder="Select Strategy"
-                            options={strategies}
-                            onChange={setPredStrategy}
-                            value={predStrategy}
-                        />
-                    </div>
-                    <Button type="primary" onClick={handlePrediction} loading={predLoading} block size="large">
-                        Run Prediction
-                    </Button>
-                </Space>
-            </Card>
-
-            {/* 数据展示区 */}
-            <Spin spinning={predLoading} style={{ flex: 1, overflow: 'hidden' }}>
-                {predResult ? (
-                    <div style={{ height: '100%', overflow: 'auto' }}>
-                        <PredictionResults result={predResult} />
-                    </div>
-                ) : (
-                    <Card 
-                        title="Results" 
-                        bordered={false}
-                        style={{ height: '100%', display: 'flex', alignItems: 'center', justifyContent: 'center' }}
-                    >
-                        <Text type="secondary">Run prediction to see results</Text>
-                    </Card>
-                )}
-            </Spin>
-        </div>
-    );
-
     const renderContent = () => {
         switch (activeMenu) {
             case 'trade':
@@ -420,8 +341,6 @@ const App = () => {
                 return renderSystemManagement();
             case 'backtest':
                 return renderBacktest();
-            case 'prediction':
-                return renderPrediction();
             case 'signal':
                 return (
                     <SignalAnalysis 

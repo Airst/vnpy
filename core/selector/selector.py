@@ -1,9 +1,11 @@
 import os
-from datetime import datetime
+from datetime import datetime, timedelta
 from typing import List, Tuple, Dict
 import polars as pl
+import tushare as ts
 from vnpy.trader.constant import Exchange, Interval
 from vnpy.trader.database import get_database
+from vnpy.trader.setting import SETTINGS
 
 class FundamentalSelector:
     def __init__(self, vt_symbols: List[str] = None):
@@ -113,3 +115,50 @@ class FundamentalSelector:
                         max_end = overview.end
                 
         return min_start, max_end
+
+    def get_last_trading_day(self) -> datetime:
+        """
+        Get the last trading day before current time.
+        If today is trading day and time < 17:00, return previous trading day.
+        """
+        try:
+            pro = ts.pro_api(SETTINGS["datafeed.password"])
+        except Exception:
+            print("Warning: Tushare initialization failed. Check datafeed.password setting.")
+            return datetime.now()
+
+        now = datetime.now()
+        # Look back 30 days to cover long holidays
+        start_date = (now - timedelta(days=30)).strftime("%Y%m%d")
+        end_date = now.strftime("%Y%m%d")
+        
+        try:
+            df = pro.trade_cal(exchange='', start_date=start_date, end_date=end_date, is_open='1')
+        except Exception as e:
+            print(f"Warning: Failed to query trade_cal: {e}")
+            return now
+            
+        if df.empty:
+            return now
+            
+        # Ensure sorted
+        df = df.sort_values('cal_date')
+        trading_days = df['cal_date'].tolist()
+        today_str = now.strftime("%Y%m%d")
+        
+        if not trading_days:
+            return now
+
+        last_trading_day = trading_days[-1]
+        
+        target_date_str = last_trading_day
+        
+        if last_trading_day == today_str:
+            # Today is a trading day
+            if now.hour < 17:
+                # Return previous one if available
+                if len(trading_days) >= 2:
+                    target_date_str = trading_days[-2]
+                # else: keep today if we can't find previous
+        
+        return datetime.strptime(target_date_str, "%Y%m%d")

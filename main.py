@@ -1,330 +1,55 @@
 import uvicorn
-from fastapi import FastAPI, HTTPException, Request
-from fastapi.staticfiles import StaticFiles
-from fastapi.responses import FileResponse, StreamingResponse
-from pydantic import BaseModel
-from datetime import datetime
 import sys
 import os
-import threading
 import re
-import subprocess
-import asyncio
+from datetime import datetime
 from pathlib import Path
-from typing import List
-from contextlib import asynccontextmanager
-from vnpy.trader.logger import logger as td_logger
-from vnpy.alpha import logger
+from core.logger_writer import LoggerWriter
+from vnpy.alpha.logger import logger
 
 # Ensure project root is in path
-# core/main.py -> core -> root
 PROJECT_ROOT = Path(__file__).resolve().parent
+LOG_ROOT = PROJECT_ROOT / "log"
 
-from core.core_service import CoreService
-from core.trade_service import TradeService
-
-# --- Logger Redirection ---
-class LoggerWriter:
-    def __init__(self, writer, file):
-        self.writer = writer
-        self.file = file
-
-    def write(self, message):
-        if not message:
-            return
-        
-        if message == "^" or message == "\n" or message.strip() == "":
-            self.file.write(message)
-            return    
-        # If message already starts with a date (e.g. 2025-12-20 or [2025-12-20), don't add timestamp
-        if re.search(r'^\s*(\[)?\d{4}-\d{2}-\d{2}', message):
-            self.file.write(message)
-        else:
-            timestamp = datetime.now().strftime("[%Y-%m-%d %H:%M:%S] ")
-            self.file.write(timestamp + message)
-        self.file.flush()
-
-    def flush(self):
-        self.writer.flush()
-        self.file.flush()
-
-    def close(self):
-        self.file.close()
-
-    def isatty(self):
-        if hasattr(self.writer, "isatty"):
-            return self.writer.isatty()
-        return False
-
-    def fileno(self):
-        if hasattr(self.writer, "fileno"):
-            return self.writer.fileno()
-        raise OSError("LoggerWriter has no fileno")
-
-# Redirect stdout and stderr to web_ui.log
-# Check if already redirected to avoid double wrapping on reload
+# Redirect stdout and stderr
 if not hasattr(sys.stdout, 'file') or not isinstance(sys.stdout, LoggerWriter):
-    try:
-        # Clean up old logs (keep latest 3)
-        log_files = sorted(Path(PROJECT_ROOT).glob("web_ui_*.log"), key=lambda p: p.stat().st_mtime)
-        
-        while len(log_files) >= 3:
-            oldest_log = log_files.pop(0)
-            try:
-                oldest_log.unlink()
-                print(f"Deleted old log file: {oldest_log}")
-            except Exception as e:
-                print(f"Failed to delete old log file {oldest_log}: {e}")
 
-        # Create new log file with timestamp
-        timestamp = datetime.now().strftime("%Y%m%d_%H%M%S")
-        log_filename = f"{PROJECT_ROOT}/web_ui_{timestamp}.log"
+    try:
+        log_filename = os.environ.get("VNPY_WEB_UI_LOG_FILE")
         
+        print(f"Current log file from env: {log_filename}")
+        
+        if not log_filename:
+            log_files = sorted(Path(LOG_ROOT).glob("web_ui_*.log"), key=lambda p: p.stat().st_mtime)
+            
+            while len(log_files) >= 3:
+                oldest_log = log_files.pop(0)
+                try:
+                    oldest_log.unlink()
+                    print(f"Deleted old log file: {oldest_log}")
+                except Exception as e:
+                    print(f"Failed to delete old log file {oldest_log}: {e}")
+
+            timestamp = datetime.now().strftime("%Y%m%d_%H%M%S")
+            log_filename = f"{LOG_ROOT}/web_ui_{timestamp}.log"
+            os.environ["VNPY_WEB_UI_LOG_FILE"] = log_filename
+
         file = open(log_filename, "a", encoding="utf-8")
         sys.stdout = LoggerWriter(sys.stdout, file)
         sys.stderr = LoggerWriter(sys.stderr, file)
         
-
-        # Remove default output
         logger.remove()
-        td_logger.remove()
 
-        # Add terminal output (which now goes to file via LoggerWriter)
         fmt: str = "{time:YYYY-MM-DD HH:mm:ss} {message}"
         logger.add(sys.stdout, colorize=True, format=fmt)
-        td_logger.add(sys.stdout, colorize=True, format=fmt)
         print(f"Logging to {log_filename}")
     except Exception as e:
         print(f"Failed to setup logger redirection: {e}")
-        
-core_service = CoreService()
-trade_service = TradeService()
-
-
-@asynccontextmanager
-async def lifespan(app: FastAPI):
-    yield
-    trade_service.close()
-    print("Shut down TradeService...")
-
-app = FastAPI(lifespan=lifespan)
-
-# API Routes
-class BacktestRequest(BaseModel):
-    strategy_name: str
-    start_date: str
-    end_date: str
-    max_positions: int = 10  # Limit max concurrent positions
-    setting: dict = {}
-
-class PredictionRequest(BaseModel):
-    strategy_name: str
-    setting: dict = {}
-
-class SignalDataRequest(BaseModel):
-    signal_name: str
-    start_date: str
-    end_date: str
-    vt_symbols: List[str] = []
-
-async def ingest_alpha_data():
-    """
-    Generator that runs the data download script and yields output line by line.
-    """
-    # Use the same python executable as the current process
-    python_executable = sys.executable
-    script_path = os.path.join(PROJECT_ROOT, "data_download", "download_data.py")
-    
-    yield f"Starting data ingestion process using {python_executable}...\n"
-    yield f"Script: {script_path}\n"
-    
-    try:
-        process = await asyncio.create_subprocess_exec(
-            python_executable, script_path,
-            stdout=asyncio.subprocess.PIPE,
-            stderr=asyncio.subprocess.STDOUT,
-            cwd=str(PROJECT_ROOT)
-        )
-
-        while True:
-            line = await process.stdout.readline()
-            if not line:
-                break
-            yield line.decode('utf-8')
-
-        await process.wait()
-        yield f"Process finished with exit code {process.returncode}\n"
-        
-    except Exception as e:
-        yield f"Error during execution: {str(e)}\n"
-
-async def run_alpha_research_stream():
-    """
-    Generator that runs the alpha research script and yields output line by line.
-    """
-    python_executable = sys.executable
-    script_path = os.path.join(PROJECT_ROOT, "core", "training.py")
-    
-    yield f"Starting alpha calculation process...\n"
-    yield f"Script: {script_path}\n"
-    
-    try:
-        # Set PYTHONPATH to include project root so imports work
-        env = os.environ.copy()
-        env["PYTHONPATH"] = str(PROJECT_ROOT)
-        
-        process = await asyncio.create_subprocess_exec(
-            python_executable, script_path,
-            stdout=asyncio.subprocess.PIPE,
-            stderr=asyncio.subprocess.STDOUT,
-            cwd=str(PROJECT_ROOT),
-            env=env
-        )
-
-        while True:
-            line = await process.stdout.readline()
-            if not line:
-                break
-            yield line.decode('utf-8')
-
-        await process.wait()
-        yield f"Process finished with exit code {process.returncode}\n"
-        
-    except Exception as e:
-        yield f"Error during execution: {str(e)}\n"
-
-@app.post("/api/alpha/ingest")
-async def api_ingest_alpha():
-    return StreamingResponse(ingest_alpha_data(), media_type="text/plain")
-
-@app.post("/api/alpha/calculate")
-async def api_calculate_alpha():
-    return StreamingResponse(run_alpha_research_stream(), media_type="text/plain")
-
-@app.get("/strategies")
-def get_strategies():
-    return {"strategies": core_service.get_strategies()}
-
-@app.get("/factors")
-def get_factors():
-    return {"factors": core_service.get_signals()}
-
-@app.get("/api/data_range")
-def get_data_range():
-    start, end = core_service.get_data_range()
-    if start and end:
-        return {
-            "start": start.strftime("%Y%m%d"),
-            "end": end.strftime("%Y%m%d")
-        }
-    return {"start": "", "end": ""}
-
-@app.post("/api/backtest")
-def run_backtest(req: BacktestRequest):
-    try:
-        start = datetime.strptime(req.start_date, "%Y%m%d")
-        end = datetime.strptime(req.end_date, "%Y%m%d")
-        
-        result = core_service.run_backtest(
-            strategy_name=req.strategy_name,
-            start=start,
-            end=end,
-            setting=req.setting
-        )
-        return result
-    except Exception as e:
-        import traceback
-        traceback.print_exc()
-        raise HTTPException(status_code=500, detail=str(e))
-
-@app.get("/api/backtest/history")
-def get_backtest_history():
-    return {"history": core_service.get_backtest_history()}
-
-@app.get("/api/backtest/result/{filename}")
-def get_backtest_result(filename: str):
-    try:
-        return core_service.get_backtest_result(filename)
-    except FileNotFoundError:
-        raise HTTPException(status_code=404, detail="Backtest result not found")
-    except Exception as e:
-        raise HTTPException(status_code=500, detail=str(e))
-
-@app.post("/api/predict")
-def run_prediction(req: PredictionRequest):
-    try:
-        predictions = core_service.run_prediction(
-            strategy_name=req.strategy_name,
-            setting=req.setting
-        )
-        return {"results": predictions}
-    except Exception as e:
-        raise HTTPException(status_code=500, detail=str(e))
-
-@app.post("/api/signal_data")
-def get_signal_data(req: SignalDataRequest):
-    try:
-        start = datetime.strptime(req.start_date, "%Y%m%d")
-        end = datetime.strptime(req.end_date, "%Y%m%d")
-        result = core_service.get_signals_data(
-            signal_name=req.signal_name,
-            start_date=start,
-            end_date=end,
-            vt_symbols=req.vt_symbols
-        )
-        return result
-    except Exception as e:
-        import traceback
-        traceback.print_exc()
-        raise HTTPException(status_code=500, detail=str(e))
-
-@app.get("/api/symbols/search")
-def search_symbols(keyword: str):
-    return {"symbols": core_service.search_symbols(keyword)}
-
-# --- Trade API ---
-@app.post("/api/trade/connect")
-def connect_trade():
-    return trade_service.connect()
-
-@app.post("/api/trade/reset")
-def reset_trade():
-    trade_service.reset_connection()
-    return trade_service.connect()
-
-@app.get("/api/trade/accounts")
-def get_accounts():
-    return {"accounts": trade_service.get_accounts()}
-
-@app.get("/api/trade/positions")
-def get_positions():
-    return {"positions": trade_service.get_positions()}
-
-@app.get("/api/trade/orders")
-def get_orders():
-    return {"orders": trade_service.get_orders()}
-
-@app.get("/api/trade/trades")
-def get_trades():
-    return {"trades": trade_service.get_trades()}
-# -----------------
-
-# Static Files (React Frontend)
-# Mount assets first to avoid conflict with root catch-all
-if os.path.exists("core/web_ui/dist/assets"):
-    app.mount("/assets", StaticFiles(directory="core/web_ui/dist/assets"), name="assets")
-
-@app.get("/{full_path:path}")
-async def serve_react_app(full_path: str):
-    # Serve index.html for any path that isn't an API call or static asset
-    # This supports client-side routing if we add it later
-    if full_path.startswith("api/"):
-        raise HTTPException(status_code=404, detail="Not Found")
-    return FileResponse("core/web_ui/dist/index.html")
 
 if __name__ == "__main__":
+    print(f"Starting Uvicorn server for FastAPI app..., {PROJECT_ROOT}")
     # --------------------------
-    uvicorn.run("main:app", host="0.0.0.0", port=8000, reload=True, reload_dirs=[str(PROJECT_ROOT)])
-    # Force exit to ensure no dangling threads (e.g. from C++ extensions) keep the process alive
+    uvicorn.run("core.main_controller:app", host="0.0.0.0", port=8000, reload=True, reload_dirs=[str(PROJECT_ROOT)])
+    
     print("Forcing process exit...")
     os._exit(0)

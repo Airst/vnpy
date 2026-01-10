@@ -100,7 +100,27 @@ class V4FactorCalculator(FactorCalculator):
         cov_im = ts_cov(ret_1, mkt_ret_broad, 20)
         var_m = ts_std(mkt_ret_broad, 20) ** 2
         features["beta_20d"] = cov_im / (var_m + 1e-8)
+
+        # --- Regime Awareness (Market Stats) ---
+        # 1. Market Panic Index (Cross-Sectional Volatility of Returns)
+        # High cross-sectional volatility often indicates market divergence or panic.
+        # Var(X) = E[X^2] - (E[X])^2
+        ret_sq_sum = (ret_1_clean ** 2).sum(dim=0)
+        mkt_ret_sq_mean = ret_sq_sum / (valid_cnt + 1e-8)
+        mkt_var_cross = mkt_ret_sq_mean - mkt_ret_1d ** 2
+        mkt_std_cross = torch.sqrt(torch.clamp(mkt_var_cross, min=0))
+        # Broadcast to (Batch, Time)
+        features["market_panic_idx"] = mkt_std_cross.unsqueeze(0).expand_as(ret_1)
+
+        # 2. Market Trend & Volatility (Time Series)
+        # Gives the model context about the general market direction and risk environment.
+        features["market_ret_20d"] = ts_sum(mkt_ret_broad, 20)
+        features["market_vol_20d"] = ts_std(mkt_ret_broad, 20)
         
+        # 3. Relative Volatility (Stock Vol vs Market Vol)
+        # Is the stock more volatile than the market?
+        features["vol_rel_mkt_20d"] = features["volatility_20d"] / (features["market_vol_20d"] + 1e-8)
+
         # 3. Residual Volatility (Idiosyncratic Risk)
         # epsilon = R_i - (alpha + beta * R_m)
         # alpha = E[R_i] - beta * E[R_m]
@@ -131,6 +151,10 @@ class V4FactorCalculator(FactorCalculator):
         # Modified Sharpe (Slope / Volatility)
         features["trend_sharpe_20"] = features["trend_slope_20"] / (features["volatility_20d"] + 1e-8)
         
+        # Smart Momentum (Long-term 60d)
+        # Risk-adjusted momentum for longer cycles
+        features["trend_rsquare_60"] = ts_rsquare(C, 60)
+
         features["volatility_60d"] = ts_std(ret_1, 60)
         features["volatility_120d"] = ts_std(ret_1, 120) # Long term risk
         # features["std_20"] = ts_std(C, 20) / C
@@ -138,6 +162,7 @@ class V4FactorCalculator(FactorCalculator):
         # MAX factor (Lottery ticket effect - typically negative alpha in A-share)
         features["max_ret_20d"] = ts_max(ret_1, 20)
         features["min_ret_20d"] = ts_min(ret_1, 20) # Tail risk
+        features["trend_sharpe_60"] = (C / ts_delay(C, 60) - 1) / (features["volatility_60d"] + 1e-8)
 
         # features["drawdown_20d"] = (C / ts_max(C, 20)) - 1
         features["daily_range"] = H / L - 1
@@ -153,9 +178,9 @@ class V4FactorCalculator(FactorCalculator):
         
         # Trend Efficiency (Net Move / Total Path)
         # High efficiency = strong trend (less noise)
-        # net_move_20 = (C - ts_delay(C, 20)).abs()
-        # total_path_20 = ts_sum((C - ts_delay(C, 1)).abs(), 20)
-        # features["trend_efficiency_20"] = net_move_20 / (total_path_20 + 1e-8)
+        net_move_20 = (C - ts_delay(C, 20)).abs()
+        total_path_20 = ts_sum((C - ts_delay(C, 1)).abs(), 20)
+        features["trend_efficiency_20"] = net_move_20 / (total_path_20 + 1e-8)
 
         # Price-Volume Correlation (20d)
         # Correlation between Close and Volume. 
@@ -168,7 +193,7 @@ class V4FactorCalculator(FactorCalculator):
         
         # Alpha 13
         # -1 * cs_rank(ts_cov(cs_rank(close), cs_rank(volume), 5))
-        #features["alpha013"] = -1 * cs_rank(ts_cov(cs_rank(C), cs_rank(V), 5))
+        features["alpha013"] = -1 * cs_rank(ts_cov(cs_rank(C), cs_rank(V), 5))
 
         # Alpha 40
         # ((-1) * cs_rank(ts_std(high, 10))) * ts_corr(high, volume, 10)
@@ -182,6 +207,71 @@ class V4FactorCalculator(FactorCalculator):
         # Low beta/volatility stocks tend to outperform in bear/stable markets.
         inv_vol_60 = 1.0 / (features["volatility_60d"] + 1e-4)
         features["inv_vol_60"] = inv_vol_60
+
+        # Amihud Illiquidity (Price Impact)
+        # |Ret| / (Price * Volume) => |Ret| / Turnover
+        # High Illiquidity -> Low Volume for big move.
+        abs_ret = torch.abs(ret_1)
+        # Add epsilon to turnover to avoid div by zero
+        illiq = abs_ret / (T + 1e-1) * 1e8 # Scale up
+        features["illiquidity_20d"] = ts_mean(illiq, 20)
+
+        # --- New Factors (v4 Updates) ---
+        
+        # 1. Smart Money / Microstructure
+        # MFV (Money Flow Volume)
+        # ( (2*C - H - L) / (H - L) ) * V
+        mfv_multiplier = (2 * C - H - L) / (H - L + 1e-8)
+        features["mfv"] = mfv_multiplier * V
+        # Rolling MFV Ratio
+        features["mfv_ratio_20d"] = ts_sum(features["mfv"], 20) / (ts_sum(V, 20) + 1e-8)
+        
+        # VWAP Bias (Average Price of Order proxy)
+        # (Close - VWAP) / VWAP
+        features["vwap_bias"] = (C - vwap) / (vwap + 1e-8)
+        
+        # Illiquidity Enhanced (Turnover * MarketCap)
+        # Abs(Ret) / (TurnoverVal * MarketCap) -> Abs(Ret) / (Turnover_Amt * MV isn't quite right dimensions usually)
+        # Standard Amihud is |R| / (P*V).
+        # Advice: Abs(Ret) / (Turnover * MarketCap) -> penalize small cap illiquidity more?
+        # Or simply add MV to denominator to scale by size.
+        # Let's try: |Ret| / (TurnoverRate * MarketCap) ? 
+        # Actually, |Ret| / Amount is standard.
+        # Let's add 'illiquidity_mv' = illiq / MV. (Since illiq is already scaled).
+        features["illiquidity_mv_20d"] = features["illiquidity_20d"] / (MV + 1e-8)
+
+        # 2. Quality Momentum
+        # Residual Momentum (Cumulative Residuals)
+        features["resid_mom_20d"] = ts_sum(resid, 20)
+        
+        # 3. Hedge / Stability
+        # Risk Parity Momentum: Momentum / Volatility
+        features["risk_parity_mom_20d"] = features["mom_20d"] / (features["volatility_20d"] + 1e-8)
+        
+        # IVOL Ratio (Idiosyncratic Vol / Total Vol)
+        # High ratio = risk is driven by news/events specific to stock, not market.
+        features["ivol_ratio_20d"] = features["resid_vol_20d"] / (features["volatility_20d"] + 1e-8)
+
+        # 6. Fundamental / Daily Basic (Moved up for dependencies)
+        # Turnover Rate
+        features["turnover_mean_5d"] = ts_mean(TR, 5)
+        features["turnover_mean_20d"] = ts_mean(TR, 20)
+        features["turnover_std_20d"] = ts_std(TR, 20)
+
+        # Turnover Growth (Activity Change)
+        # TR / delay(TR, 20) - 1
+        features["fund_turnover_growth"] = TR / (ts_delay(TR, 20) + 1e-8) - 1
+        
+        # 4. Relative Turnover (Market Adjusted)
+        # Turnover Mean 20d / Market Mean Turnover 20d
+        # We need cross-sectional mean of turnover_mean_20d
+        # mkt_turnover_20d = features["turnover_mean_20d"].nanmean(dim=0, keepdim=True) # This is time-series mean if dim=0 is batch?
+        # Wait, shape is (Batch, Time). We want Market Mean at each Time step.
+        # So we want mean across Batch (dim=0).
+        # features["turnover_mean_20d"] has shape (Stocks, Days).
+        # We want mean across Stocks.
+        mkt_turnover_20d = torch.nanmean(features["turnover_mean_20d"], dim=0, keepdim=True)
+        features["rel_turnover_20d"] = features["turnover_mean_20d"] / (mkt_turnover_20d + 1e-8)
 
 
         # Return Skewness Proxy (Upside Vol / Downside Vol)
@@ -261,14 +351,6 @@ class V4FactorCalculator(FactorCalculator):
 
         # Coefficient of Variation of Turnover (Instability)
         features["turnover_cv_20d"] = ts_std(TR, 20) / (ts_mean(TR, 20) + 1e-8)
-        
-        # Amihud Illiquidity (Price Impact)
-        # |Ret| / (Price * Volume) => |Ret| / Turnover
-        # High Illiquidity -> Low Volume for big move.
-        abs_ret = torch.abs(ret_1)
-        # Add epsilon to turnover to avoid div by zero
-        illiq = abs_ret / (T + 1e-1) * 1e8 # Scale up
-        features["illiquidity_20d"] = ts_mean(illiq, 20)
 
         # Price Volume Divergence
         # (close > prev_close) & (volume < prev_volume)
@@ -280,8 +362,8 @@ class V4FactorCalculator(FactorCalculator):
         
         # 5. Money Flow
         # (((close - open) / (high - low + 0.0001)) * volume)
-        # mf_val = ((C - O) / (H - L + 0.0001)) * V
-        # features["money_flow_20d"] = mf_val / ts_mean(mf_val, 20)
+        mf_val = ((C - O) / (H - L + 0.0001)) * V
+        features["money_flow_20d"] = mf_val / (ts_mean(mf_val, 20) + 1e-8)
         
         # VWAP Dev
         # ts_sum(close * volume, 20) / ts_sum(volume, 20)
@@ -289,14 +371,6 @@ class V4FactorCalculator(FactorCalculator):
         features["vwap_dev_20"] = C / vwap_20 - 1
         
         # 6. Fundamental / Daily Basic
-        # Turnover Rate
-        features["turnover_mean_5d"] = ts_mean(TR, 5)
-        features["turnover_mean_20d"] = ts_mean(TR, 20)
-        features["turnover_std_20d"] = ts_std(TR, 20)
-
-        # Turnover Growth (Activity Change)
-        # TR / delay(TR, 20) - 1
-        features["fund_turnover_growth"] = TR / (ts_delay(TR, 20) + 1e-8) - 1
         
         # PE / Valuation
         # EP Ratio (Earnings Yield) = 1 / PE
@@ -353,6 +427,28 @@ class V4FactorCalculator(FactorCalculator):
         # Slope Divergence: Short term slope - Long term slope
         # If Long term is + (Up) and Short term is 0 (Flat) -> Negative divergence (Plateauing)
         features["slope_div_5_20"] = features["trend_slope_5"] - features["trend_slope_20"]
+
+        # --- Stability & Interaction Factors (Implemented per analysis) ---
+        
+        # 1. Market Environment Interaction (Market Panic Aware)
+        # Explicitly tell the model: High turnover/volatility means different things in panic vs normal.
+        features["turnover_x_panic"] = features["turnover_mean_20d"] * features["market_panic_idx"]
+        features["vol_x_panic"] = features["volatility_20d"] * features["market_panic_idx"]
+
+        # 2. Downside Beta Proxy (Tail Risk)
+        # Correlation with market when market is down.
+        # Proxy: Mean of (StockRet * MarketRet_Negative)
+        mkt_ret_neg = torch.clamp(mkt_ret_broad, max=0)
+        #features["downside_beta_proxy"] = ts_mean(ret_1 * mkt_ret_neg, 20)
+
+        # 3. Volatility Adjusted Bias (Rebound Quality)
+        # Large deviation with high volatility might be a falling knife.
+        #features["bias_vol_ratio"] = features["bias_20"] / (features["volatility_20d"] + 1e-8)
+
+        # 4. Churn Rate (Crowding/Exhaustion)
+        # High turnover with low absolute return -> Churning/Distribution
+        abs_ret_mean = ts_mean(torch.abs(ret_1), 20)
+        features["churn_rate"] = features["turnover_mean_20d"] / (abs_ret_mean + 1e-8)
         
         # Label: Next 5 days return (Market Neutral Rank)
         # Using cs_rank on the future return ensures we are learning to rank stocks,

@@ -6,6 +6,7 @@ import re
 import argparse
 
 from vnpy.alpha import logger
+from core.logger_writer import LoggerWriter
 from core.alpha.engine import AlphaEngine
 from core.alpha.mlp_signals import MLPSignals
 from core.selector.selector import FundamentalSelector
@@ -23,46 +24,8 @@ from data_manager.ts_downloader.stock_info_manager import StockInfoManager
 
 from core.core_service import CoreService
 
-# --- Logger Redirection ---
-class LoggerWriter:
-    def __init__(self, writer, file):
-        self.writer = writer
-        self.file = file
-
-    def write(self, message):
-        if not message:
-            return
-        
-        if message == "^" or message == "\n" or message.strip() == "":
-            self.file.write(message)
-            return    
-        # If message already starts with a date (e.g. 2025-12-20 or [2025-12-20), don't add timestamp
-        if re.search(r'^\s*(\[)?\d{4}-\d{2}-\d{2}', message):
-            self.file.write(message)
-        else:
-            timestamp = datetime.now().strftime("[%Y-%m-%d %H:%M:%S] ")
-            self.file.write(timestamp + message)
-        self.file.flush()
-
-    def flush(self):
-        self.writer.flush()
-        self.file.flush()
-
-    def close(self):
-        self.file.close()
-
-    def isatty(self):
-        if hasattr(self.writer, "isatty"):
-            return self.writer.isatty()
-        return False
-
-    def fileno(self):
-        if hasattr(self.writer, "fileno"):
-            return self.writer.fileno()
-        raise OSError("LoggerWriter has no fileno")
-
 def setup_logger(version: str):
-    log_filename = f"core/run_{version}.log"
+    log_filename = f"log/run_{version}.log"
     
     # Redirect stdout and stderr to log file
     if not hasattr(sys.stdout, 'file') or not isinstance(sys.stdout, LoggerWriter):
@@ -98,6 +61,8 @@ if __name__ == "__main__":
     parser.add_argument("-s", "--skip", action="store_true", help="Skip Sync data before running")
 
     parser.add_argument("-b", "--basic", action="store_true", help="Sync Stock Basic data before running")
+    
+    parser.add_argument("-f", "--force", action="store_true", help="Force Sync data to Alpha Lab")
 
     parser.add_argument("-vt", help="vt_symbol mode")
     
@@ -143,14 +108,17 @@ if __name__ == "__main__":
         print(f"Error: Unknown version '{version}'. Supported versions: v3, v4, v5")
         sys.exit(1)
 
-
+    selector=FundamentalSelector([args.vt]) if args.vt else FundamentalSelector()
+    earlest_date,latest_date = selector.get_data_range()
+    last_trading_date = selector.get_last_trading_day()
+    last_trading_date = last_trading_date if last_trading_date else datetime.now()
     engine = AlphaEngine(
         factor_calculator=calculator,
         mlp_signals=MLPSignals(),
-        selector=FundamentalSelector([args.vt]) if args.vt else FundamentalSelector(),
+        selector=selector,
         signal_name=signal_name if not args.vt else f"{signal_name}_{args.vt}",
         start_date="2019-12-28",
-        end_date=datetime.now().strftime("%Y-%m-%d")
+        end_date= last_trading_date.strftime("%Y-%m-%d")
     )
 
     if args.basic:
@@ -159,17 +127,21 @@ if __name__ == "__main__":
         stock_manager.download_all()
 
     manager = DailyBasicManager()
-    latest_date = manager.get_latest_date()
-    if latest_date < datetime.now().strftime("%Y%m%d") and not args.skip:
-        print("\n开始下载历史数据...")
-        download_data(end_date="latest")
+    if latest_date < last_trading_date and not args.skip:
+        print("开始下载历史数据...")
+        download_data(end_date=last_trading_date.strftime("%Y%m%d"))
 
-        print("\n开始更新每日指标数据...")
+        print("开始更新每日指标数据...")
         manager.download_all()
         
-        print("Syncing data from remote source...")
+        print("数据同步到alpha lab...")
         engine.sync_data()
-
+    else: 
+        print("数据已是最新...")
+    
+    if args.force: 
+        print("强制更新数据同步到alpha lab...")
+        engine.sync_data()
     
     signal_df = engine.calculate_factors()
 
@@ -178,16 +150,12 @@ if __name__ == "__main__":
     if not args.ans:
         signal_df = engine.calculate_signals(signal_df)
         engine.save_signals(signal_df)
-
-        start = datetime.strptime("20220101", "%Y%m%d")
-        end = datetime.now()
-        
         
         core_service = CoreService()
         result = core_service.run_backtest(
             strategy_name="MultiFactorStrategy",
-            start=start,
-            end=end,
+            start=datetime.strptime("2022-01-01", "%Y-%m-%d"),
+            end=last_trading_date,
             setting={
                 "max_holdings": 5,
                 "signal_name": signal_name,

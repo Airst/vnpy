@@ -48,6 +48,7 @@ class TradeService:
             self.main_engine.add_gateway(ToraStockGateway)
             
         self._connected = False
+
         return {"status": "success", "message": "Connection reset and data cleared"}
 
     def connect(self) -> Dict[str, Any]:
