@@ -354,6 +354,18 @@ class V5FactorCalculator(FactorCalculator):
         # If Long term is + (Up) and Short term is 0 (Flat) -> Negative divergence (Plateauing)
         features["slope_div_5_20"] = features["trend_slope_5"] - features["trend_slope_20"]
         
+        # --- V5 Optimization: Relative Strength Factors (Market Adjusted) ---
+        # 1. Relative Turnover (Market Adjusted)
+        # Turnover Mean 20d / Market Mean Turnover 20d (Cross-sectional mean)
+        # Shape: (Batch, Time) -> Mean over Batch (dim=0)
+        mkt_turnover_20d = torch.nanmean(features["turnover_mean_20d"], dim=0, keepdim=True)
+        features["rel_turnover_20d"] = features["turnover_mean_20d"] / (mkt_turnover_20d + 1e-8)
+        
+        # 2. Relative Momentum (Stock Mom - Market Mom)
+        # Market Momentum proxy: Mean of all stocks momentum
+        mkt_mom_20d = torch.nanmean(features["mom_20d"], dim=0, keepdim=True)
+        features["rel_mom_20d"] = features["mom_20d"] - mkt_mom_20d
+
         # Label: Next 5 days return (Market Neutral Rank)
         # Using cs_rank on the future return ensures we are learning to rank stocks,
         # which is regime-independent (works in both Bull and Bear markets).
