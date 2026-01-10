@@ -1,13 +1,10 @@
-import sys
-import os
-import asyncio
 from pathlib import Path
 from typing import List
 from contextlib import asynccontextmanager
 from datetime import datetime
 
 from fastapi import FastAPI, HTTPException, Request
-from fastapi.responses import StreamingResponse, FileResponse
+from fastapi.responses import FileResponse
 from fastapi.staticfiles import StaticFiles
 from pydantic import BaseModel
 
@@ -47,75 +44,7 @@ class SignalDataRequest(BaseModel):
     end_date: str
     vt_symbols: List[str] = []
 
-# Generators
-async def ingest_alpha_data():
-    python_executable = sys.executable
-    script_path = os.path.join(PROJECT_ROOT, "data_download", "download_data.py")
-    
-    yield f"Starting data ingestion process using {python_executable}...\n"
-    yield f"Script: {script_path}\n"
-    
-    try:
-        process = await asyncio.create_subprocess_exec(
-            python_executable, script_path,
-            stdout=asyncio.subprocess.PIPE,
-            stderr=asyncio.subprocess.STDOUT,
-            cwd=str(PROJECT_ROOT)
-        )
-
-        while True:
-            line = await process.stdout.readline()
-            if not line:
-                break
-            yield line.decode('utf-8')
-
-        await process.wait()
-        yield f"Process finished with exit code {process.returncode}\n"
-        
-    except Exception as e:
-        yield f"Error during execution: {str(e)}\n"
-
-async def run_alpha_research_stream():
-    python_executable = sys.executable
-    script_path = os.path.join(PROJECT_ROOT, "core", "training.py")
-    
-    yield f"Starting alpha calculation process...\n"
-    yield f"Script: {script_path}\n"
-    
-    try:
-        env = os.environ.copy()
-        env["PYTHONPATH"] = str(PROJECT_ROOT)
-        
-        process = await asyncio.create_subprocess_exec(
-            python_executable, script_path,
-            stdout=asyncio.subprocess.PIPE,
-            stderr=asyncio.subprocess.STDOUT,
-            cwd=str(PROJECT_ROOT),
-            env=env
-        )
-
-        while True:
-            line = await process.stdout.readline()
-            if not line:
-                break
-            yield line.decode('utf-8')
-
-        await process.wait()
-        yield f"Process finished with exit code {process.returncode}\n"
-        
-    except Exception as e:
-        yield f"Error during execution: {str(e)}\n"
-
-
 # API Routes
-@app.post("/api/alpha/ingest")
-async def api_ingest_alpha():
-    return StreamingResponse(ingest_alpha_data(), media_type="text/plain")
-
-@app.post("/api/alpha/calculate")
-async def api_calculate_alpha():
-    return StreamingResponse(run_alpha_research_stream(), media_type="text/plain")
-
 @app.get("/strategies")
 def get_strategies():
     return {"strategies": core_service.get_strategies()}

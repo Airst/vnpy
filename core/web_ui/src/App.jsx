@@ -1,9 +1,9 @@
-import React, { useState, useEffect, useRef } from 'react';
+import React, { useState, useEffect } from 'react';
 import {
     Layout, Menu, Button, Card, DatePicker, message, Select,
     Typography, Space, Spin, InputNumber
 } from 'antd';
-import { DashboardOutlined, BarChartOutlined, LineChartOutlined, TransactionOutlined } from '@ant-design/icons';
+import { BarChartOutlined, LineChartOutlined, TransactionOutlined } from '@ant-design/icons';
 import dayjs from 'dayjs';
 import BacktestResults from './components/BacktestResults';
 import SignalAnalysis from './components/SignalAnalysis';
@@ -29,21 +29,12 @@ const App = () => {
     const [btHistory, setBtHistory] = useState([]);
     const [loadingHistory, setLoadingHistory] = useState(false);
 
-    // Ingest State
-    const [ingestLoading, setIngestLoading] = useState(false);
-    const [ingestLogs, setIngestLogs] = useState([]);
-    const logsEndRef = useRef(null);
-
     useEffect(() => {
         loadStrategies();
         loadFactors();
         loadDataRange();
         loadBacktestHistory();
     }, []);
-
-    useEffect(() => {
-        logsEndRef.current?.scrollIntoView({ behavior: "smooth" });
-    }, [ingestLogs]);
 
     const loadDataRange = async () => {
         try {
@@ -114,30 +105,6 @@ const App = () => {
          }
     };
 
-    const handleIngest = async () => {
-        setIngestLoading(true);
-        setIngestLogs([]);
-        try {
-            const response = await fetch('/api/alpha/ingest', { method: 'POST' });
-            const reader = response.body.getReader();
-            const decoder = new TextDecoder();
-            
-            while (true) {
-                const { done, value } = await reader.read();
-                if (done) break;
-                const text = decoder.decode(value);
-                const lines = text.split('\n').filter(line => line.trim() !== '');
-                setIngestLogs(prev => [...prev, ...lines]);
-            }
-            message.success('Ingestion triggered successfully');
-        } catch (error) {
-            message.error('Ingestion failed');
-            console.error(error);
-        } finally {
-            setIngestLoading(false);
-        }
-    };
-
     const handleBacktest = async () => {
         if (!btStrategy || !btStart || !btEnd) {
             message.warning('Please fill in all backtest fields');
@@ -188,58 +155,7 @@ const App = () => {
             label: 'Signal Analysis',
             icon: <LineChartOutlined />
         },
-        {
-            key: 'system',
-            label: 'System Management',
-            icon: <DashboardOutlined />
-        },
     ];
-
-    // System Management Content
-    const renderSystemManagement = () => (
-        <div style={{ display: 'flex', flexDirection: 'column', gap: '20px', height: '100%' }}>
-            {/* 操作区 */}
-            <Card title="Operations" bordered={false}>
-                <Space direction="vertical" style={{ width: '100%' }}>
-                    <Space>
-                        <Button type="primary" onClick={handleIngest} loading={ingestLoading}>
-                            Ingest Factor Data
-                        </Button>
-                        <Button onClick={loadStrategies} loading={loadingStrategies}>
-                            Refresh Strategies
-                        </Button>
-                    </Space>
-                </Space>
-            </Card>
-
-            {/* 数据展示区 - 系统日志 */}
-            <Card title="System Logs" bordered={false} style={{ flex: 1, overflow: 'hidden', display: 'flex', flexDirection: 'column' }}>
-                <div style={{ 
-                    padding: 10, 
-                    background: '#1e1e1e', 
-                    color: '#00ff00', 
-                    fontFamily: 'monospace', 
-                    borderRadius: 4, 
-                    maxHeight: '100%', 
-                    overflowY: 'auto',
-                    flex: 1,
-                    minHeight: 300,
-                    fontSize: '12px'
-                }}>
-                    {ingestLogs.length === 0 ? (
-                        <Text style={{ color: '#666' }}>No logs yet...</Text>
-                    ) : (
-                        <>
-                            {ingestLogs.map((log, index) => (
-                                <div key={index} style={{ marginBottom: '4px' }}>{log}</div>
-                            ))}
-                            <div ref={logsEndRef} />
-                        </>
-                    )}
-                </div>
-            </Card>
-        </div>
-    );
 
     // Backtest Content
     const renderBacktest = () => (
@@ -337,8 +253,6 @@ const App = () => {
         switch (activeMenu) {
             case 'trade':
                 return <TradeDashboard />;
-            case 'system':
-                return renderSystemManagement();
             case 'backtest':
                 return renderBacktest();
             case 'signal':
