@@ -370,17 +370,21 @@ class V5FactorCalculator(FactorCalculator):
         # When Market is strong (mkt_mom > 0), stock momentum matters more.
         features["mom_x_mkt"] = features["mom_20d"] * mkt_mom_20d
         
-        # 2. Panic Defense (Bear Market Defense)
-        # Previous logic was flawed. Now: When Market Vol is High, we prize Low Stock Vol.
-        # inv_vol_20 = 1 / volatility.
-        features["panic_defense"] = (1.0 / (features["volatility_20d"] + 1e-4)) * mkt_vol_20d
+        # 2. Liquidity Defense (Defense against Liquidity Traps)
+        # Replaces panic_defense. Avoid shrinking volume (liquidity trap) + downside risk.
+        # High Turnover (Liquid) - High Downside Vol (Risk)
+        features["liquidity_defense"] = cs_rank(features["turnover_mean_20d"]) - cs_rank(features["downside_vol_20d"])
 
-        # 3. Technical Reversal (Oscillation Alpha)
-        # RSI based reversal. High RSI = Sell, Low RSI = Buy.
-        # Active mainly when Market Momentum is weak (Oscillation).
-        rsi_inv = 100.0 - features["rsi_14"]
-        # Weight scales up when mkt_mom is close to 0.
-        features["tech_reversal"] = rsi_inv * (1.0 / (mkt_mom_20d.abs() + 0.1))
+        # 3. Technical Reversal (Deep Value + Oversold)
+        # Enhanced to catch "Deep V" reversals.
+        # Deep Value: Price far below MA60 (Bias 60)
+        ma_60 = ts_mean(C, 60)
+        deep_value = (C - ma_60) / (ma_60 + 1e-8)
+        
+        # Combined Reversal: Low RSI (Oversold) + Low Bias (Deep Discount)
+        # Note: We want High Score for Reversal. 
+        # Low RSI -> High Rank(-RSI). Low Bias -> High Rank(-Bias).
+        features["tech_reversal"] = cs_rank(features["rsi_14"] * -1) + cs_rank(deep_value * -1)
 
         # === Direction 2: Industry Factors (Balanced) ===
         if IND is not None:
