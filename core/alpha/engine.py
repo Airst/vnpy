@@ -105,7 +105,7 @@ class AlphaEngine:
         Returns:
             pl.DataFrame: 返回包含所有因子的原始DataFrame（不进行剔除，防止Look-ahead Bias）
         """
-        print("\n=== 因子绩效分析 (Rolling Window: 200 Days) ===")
+        print("=== 因子绩效分析 (Rolling Window: 200 Days) ===")
         
         if factors_df.is_empty():
             print("无因子数据可分析")

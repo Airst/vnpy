@@ -3,6 +3,7 @@ import polars as pl
 import numpy as np
 from typing import Optional, List, Dict
 from tqdm import tqdm
+import concurrent.futures
 
 # Import vnpy alpha components
 # from vnpy.alpha.dataset.datasets.alpha_158 import Alpha158
@@ -29,6 +30,7 @@ class MLPSignals:
             "weight_decay": 0.0001,          # 添加轻微正则化
             "optimizer": "adam"             # 如果有的话
         }
+        self.n_jobs = 4  # 并行线程数，根据显存大小调整
 
 
     def generate_signals(self, dataset_df: pl.DataFrame, start_date: str) -> pl.DataFrame:
@@ -64,12 +66,9 @@ class MLPSignals:
             start_idx = 500
             
         all_predictions = []
+        tasks = []
         
-        # Rolling Loop
-        # Step: 1 month (approx 20 trading days or just calendar month check)
-        # We iterate by index, but we need to jump by month. 
-        # Easier: Iterate current_date from start to end by month, find indices.
-        
+        # Pre-calculate tasks
         curr_idx = start_idx
         total_dates = len(dates)
         
@@ -97,17 +96,10 @@ class MLPSignals:
             ps_str = pred_start_date.strftime("%Y-%m-%d") if hasattr(pred_start_date, "strftime") else str(pred_start_date)
             pe_str = pred_end_date.strftime("%Y-%m-%d") if hasattr(pred_end_date, "strftime") else str(pred_end_date)
             
-            print(f"[MLPSignals] Window: Train [500 days pre {ps_str}] -> Predict [{ps_str} to {pe_str}]")
-            
             # Define Training Window (Previous 500 indices)
             train_end_idx = curr_idx - 1
             # 500 days total (0 to 499)
             train_start_idx = max(0, train_end_idx - 499) 
-            
-            # Need at least some valid/test split inside training if we want early stopping?
-            # AlphaDataset splits by Train/Valid/Test periods provided.
-            # We use Train for Training, Valid for Early Stopping.
-            # Let's split the 500 days: 450 Train, 50 Valid?
             
             valid_len = 50
             train_period_end_idx = train_end_idx - valid_len
@@ -117,42 +109,35 @@ class MLPSignals:
             valid_period = (dates[train_period_end_idx + 1], dates[train_end_idx])
             test_period = (dates[curr_idx], dates[pred_end_idx])
             
-            # Construct Dataset for this window
-            # Note: passing the WHOLE dataset_df is fine, AlphaDataset filters by period
-            dataset = AlphaDataset(
-                df=dataset_df,
-                train_period=train_period,
-                valid_period=valid_period,
-                test_period=test_period
-            )
-
-            # Manual initialization since we skip prepare_data()
-            dataset.raw_df = dataset_df
-            dataset.infer_df = dataset_df
-            
-            # Add label cleaner (only for learning)
-            dataset.add_processor("learn", self._clean_label)
-            dataset.process_data()
-            
-            # Train Model
-            model = self._train_model(dataset)
-            
-            if model:
-                # Predict
-                try:
-                    preds = model.predict(dataset, Segment.TEST)
-                    meta = dataset.fetch_infer(Segment.TEST).select(["datetime", "vt_symbol"])
-                    
-                    if len(preds) == len(meta):
-                        meta = meta.with_columns(pl.Series(preds).alias("total_score"))
-                        all_predictions.append(meta)
-                    else:
-                         print(f"[MLPSignals] Mismatch in prediction length: {len(preds)} vs {len(meta)}")
-                except Exception as e:
-                    print(f"[MLPSignals] Prediction failed for window: {e}")
+            task_info = {
+                "train_period": train_period,
+                "valid_period": valid_period,
+                "test_period": test_period,
+                "ps_str": ps_str,
+                "pe_str": pe_str
+            }
+            tasks.append(task_info)
             
             # Move to next window
             curr_idx = next_idx
+
+        # Execute in parallel
+        print(f"[MLPSignals] Executing {len(tasks)} windows with {self.n_jobs} threads...")
+        with concurrent.futures.ThreadPoolExecutor(max_workers=self.n_jobs) as executor:
+            # Submit all tasks
+            future_to_task = {
+                executor.submit(self._train_and_predict_window, dataset_df, t): t 
+                for t in tasks
+            }
+            
+            for future in tqdm(concurrent.futures.as_completed(future_to_task), total=len(tasks)):
+                task = future_to_task[future]
+                try:
+                    result = future.result()
+                    if result is not None:
+                        all_predictions.append(result)
+                except Exception as exc:
+                    print(f"[MLPSignals] Task {task['ps_str']} generated an exception: {exc}")
 
         # 7. Concatenate and Post-process
         if not all_predictions:
@@ -167,6 +152,51 @@ class MLPSignals:
         
         # Post-process
         return self._post_process_signals(full_result)
+
+    def _train_and_predict_window(self, dataset_df: pl.DataFrame, task_info: Dict) -> Optional[pl.DataFrame]:
+        train_period = task_info["train_period"]
+        valid_period = task_info["valid_period"]
+        test_period = task_info["test_period"]
+        ps_str = task_info["ps_str"]
+        pe_str = task_info["pe_str"]
+        
+        print(f"[MLPSignals] Window: Train [500 days pre {ps_str}] -> Predict [{ps_str} to {pe_str}]")
+        
+        # Construct Dataset for this window
+        dataset = AlphaDataset(
+            df=dataset_df,
+            train_period=train_period,
+            valid_period=valid_period,
+            test_period=test_period
+        )
+
+        # Manual initialization since we skip prepare_data()
+        dataset.raw_df = dataset_df
+        dataset.infer_df = dataset_df
+        
+        # Add label cleaner (only for learning)
+        dataset.add_processor("learn", self._clean_label)
+        dataset.process_data()
+        
+        # Train Model
+        model = self._train_model(dataset)
+        
+        result_df = None
+        if model:
+            # Predict
+            try:
+                preds = model.predict(dataset, Segment.TEST)
+                meta = dataset.fetch_infer(Segment.TEST).select(["datetime", "vt_symbol"])
+                
+                if len(preds) == len(meta):
+                    meta = meta.with_columns(pl.Series(preds).alias("total_score"))
+                    result_df = meta
+                else:
+                    print(f"[MLPSignals] Mismatch in prediction length: {len(preds)} vs {len(meta)}")
+            except Exception as e:
+                print(f"[MLPSignals] Prediction failed for window {ps_str}: {e}")
+                
+        return result_df
     
     def _clean_label(self, df: pl.DataFrame) -> pl.DataFrame:
         return df.drop_nulls(subset=["label"])

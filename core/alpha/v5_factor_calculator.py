@@ -354,17 +354,58 @@ class V5FactorCalculator(FactorCalculator):
         # If Long term is + (Up) and Short term is 0 (Flat) -> Negative divergence (Plateauing)
         features["slope_div_5_20"] = features["trend_slope_5"] - features["trend_slope_20"]
         
-        # --- V5 Optimization: Relative Strength Factors (Market Adjusted) ---
+        # --- V5 Optimization: Relative Strength & Interaction Factors ---
         # 1. Relative Turnover (Market Adjusted)
-        # Turnover Mean 20d / Market Mean Turnover 20d (Cross-sectional mean)
-        # Shape: (Batch, Time) -> Mean over Batch (dim=0)
         mkt_turnover_20d = torch.nanmean(features["turnover_mean_20d"], dim=0, keepdim=True)
         features["rel_turnover_20d"] = features["turnover_mean_20d"] / (mkt_turnover_20d + 1e-8)
         
-        # 2. Relative Momentum (Stock Mom - Market Mom)
-        # Market Momentum proxy: Mean of all stocks momentum
+        # 2. Market Momentum & Volatility (Base Environment Vars)
         mkt_mom_20d = torch.nanmean(features["mom_20d"], dim=0, keepdim=True)
-        features["rel_mom_20d"] = features["mom_20d"] - mkt_mom_20d
+        mkt_vol_20d = torch.nanmean(features["volatility_20d"], dim=0, keepdim=True)
+        
+        # === Direction 1: Interaction Factors (Environment Perception) ===
+        # Fixed: Instead of scalar features, use interactions to activate specific factors in different regimes.
+        
+        # 1. Momentum x Market (Bull Market Amplifier)
+        # When Market is strong (mkt_mom > 0), stock momentum matters more.
+        features["mom_x_mkt"] = features["mom_20d"] * mkt_mom_20d
+        
+        # 2. Panic Defense (Bear Market Defense)
+        # Previous logic was flawed. Now: When Market Vol is High, we prize Low Stock Vol.
+        # inv_vol_20 = 1 / volatility.
+        features["panic_defense"] = (1.0 / (features["volatility_20d"] + 1e-4)) * mkt_vol_20d
+
+        # 3. Technical Reversal (Oscillation Alpha)
+        # RSI based reversal. High RSI = Sell, Low RSI = Buy.
+        # Active mainly when Market Momentum is weak (Oscillation).
+        rsi_inv = 100.0 - features["rsi_14"]
+        # Weight scales up when mkt_mom is close to 0.
+        features["tech_reversal"] = rsi_inv * (1.0 / (mkt_mom_20d.abs() + 0.1))
+
+        # === Direction 2: Industry Factors (Balanced) ===
+        if IND is not None:
+            # 1. Industry Relative Turnover (Activity vs Peers)
+            ind_turnover_20d = cs_group_mean(features["turnover_mean_20d"], IND)
+            features["ind_rel_turnover_20d"] = features["turnover_mean_20d"] / (ind_turnover_20d + 1e-8)
+            
+            # 2. Industry Relative Volatility (Risk vs Peers)
+            ind_vol_20d = cs_group_mean(features["volatility_20d"], IND)
+            features["ind_rel_vol_20d"] = features["volatility_20d"] / (ind_vol_20d + 1e-8)
+            
+            # 3. Relative Bias 
+            ind_bias_20 = cs_group_mean(features["bias_20"], IND)
+            features["ind_rel_bias_20"] = features["bias_20"] - ind_bias_20
+
+        # === Direction 3: Dragon Logic (Trend Following) ===
+        # Reverting to V3's core strength: High Turnover + High Momentum = Leader.
+        # Instead of penalizing "crowding", we explicitly reward "popularity" in uptrends.
+        
+        # Dragon Score: Combined strength of Price and Volume.
+        # Note: We let the model learn the weights, but providing this explicit sum helps.
+        features["dragon_score"] = cs_rank(features["mom_20d"]) + cs_rank(features["turnover_mean_20d"])
+        
+        # Low Volatility Anomaly (still useful for filtering garbage)
+        features["inv_vol_20"] = 1.0 / (features["volatility_20d"] + 1e-4)
 
         # Label: Next 5 days return (Market Neutral Rank)
         # Using cs_rank on the future return ensures we are learning to rank stocks,
