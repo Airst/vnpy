@@ -364,27 +364,35 @@ class V5FactorCalculator(FactorCalculator):
         mkt_vol_20d = torch.nanmean(features["volatility_20d"], dim=0, keepdim=True)
         
         # === Direction 1: Interaction Factors (Environment Perception) ===
-        # Fixed: Instead of scalar features, use interactions to activate specific factors in different regimes.
+        # V5.1 Upgrade: Dynamic Regime Weighting using Sigmoid gates.
         
-        # 1. Momentum x Market (Bull Market Amplifier)
-        # When Market is strong (mkt_mom > 0), stock momentum matters more.
-        features["mom_x_mkt"] = features["mom_20d"] * mkt_mom_20d
+        # Market Regime Probability (Bull Market Strength)
+        # Maps mkt_mom to [0, 1]. Scale factor 10 makes the transition steeper around 0.
+        # mkt_mom = 0.1 (10%) -> sigmoid(1.0) ~= 0.73
+        # mkt_mom = -0.1 (-10%) -> sigmoid(-1.0) ~= 0.27
+        bull_prob = torch.sigmoid(mkt_mom_20d * 10.0)
+
+        # 1. Momentum x Market (Bull Feature)
+        # Active mainly in Bull Markets.
+        # Logic: We trust Momentum when Market is Up.
+        features["mom_x_mkt"] = features["mom_20d"] * bull_prob
         
         # 2. Liquidity Defense (Defense against Liquidity Traps)
-        # Replaces panic_defense. Avoid shrinking volume (liquidity trap) + downside risk.
         # High Turnover (Liquid) - High Downside Vol (Risk)
         features["liquidity_defense"] = cs_rank(features["turnover_mean_20d"]) - cs_rank(features["downside_vol_20d"])
 
-        # 3. Technical Reversal (Deep Value + Oversold)
-        # Enhanced to catch "Deep V" reversals.
+        # 3. Technical Reversal (Bear Feature)
         # Deep Value: Price far below MA60 (Bias 60)
         ma_60 = ts_mean(C, 60)
         deep_value = (C - ma_60) / (ma_60 + 1e-8)
         
-        # Combined Reversal: Low RSI (Oversold) + Low Bias (Deep Discount)
-        # Note: We want High Score for Reversal. 
-        # Low RSI -> High Rank(-RSI). Low Bias -> High Rank(-Bias).
+        # Base Reversal Score: Low RSI + Deep Value
         features["tech_reversal"] = cs_rank(features["rsi_14"] * -1) + cs_rank(deep_value * -1)
+        
+        # Bear Reversal Interaction
+        # Active mainly in Bear Markets (1 - bull_prob).
+        # Logic: In Bear markets, we trust Reversal/Value more than Momentum.
+        features["bear_reversal"] = features["tech_reversal"] * (1.0 - bull_prob)
 
         # === Direction 2: Industry Factors (Balanced) ===
         if IND is not None:
@@ -401,12 +409,10 @@ class V5FactorCalculator(FactorCalculator):
             features["ind_rel_bias_20"] = features["bias_20"] - ind_bias_20
 
         # === Direction 3: Dragon Logic (Trend Following) ===
-        # Reverting to V3's core strength: High Turnover + High Momentum = Leader.
-        # Instead of penalizing "crowding", we explicitly reward "popularity" in uptrends.
-        
-        # Dragon Score: Combined strength of Price and Volume.
-        # Note: We let the model learn the weights, but providing this explicit sum helps.
-        features["dragon_score"] = cs_rank(features["mom_20d"]) + cs_rank(features["turnover_mean_20d"])
+        # V5.1 Smooth Dragon: Replaces hard Sign() with Tanh().
+        # This prevents "sawtooth" signals when momentum fluctuates around 0.
+        # Scale 5.0 ensures Tanh saturates reasonably fast (mom=0.2 -> tanh=0.76).
+        features["dragon_score"] = cs_rank(features["mom_20d"]) + cs_rank(features["turnover_mean_20d"]) * torch.tanh(features["mom_20d"] * 5.0)
         
         # Low Volatility Anomaly (still useful for filtering garbage)
         features["inv_vol_20"] = 1.0 / (features["volatility_20d"] + 1e-4)
