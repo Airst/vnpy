@@ -1,6 +1,6 @@
 import React, { useState, useEffect } from 'react';
 import { Card, Table, Button, Tabs, message, Tag, Space, Descriptions } from 'antd';
-import { ReloadOutlined, ApiOutlined, SyncOutlined } from '@ant-design/icons';
+import { ReloadOutlined, ApiOutlined, SyncOutlined, CloseCircleOutlined } from '@ant-design/icons';
 
 const TradeDashboard = () => {
     const [loading, setLoading] = useState(false);
@@ -61,6 +61,24 @@ const TradeDashboard = () => {
         } finally {
             setResetting(false);
         }
+    };
+
+    const handleCancelAll = async () => {
+         setLoading(true);
+         try {
+             const res = await fetch('/api/trade/orders/cancel_all', { method: 'POST' });
+             const data = await res.json();
+             message.success(data.message);
+             // Refresh data
+             setTimeout(() => {
+                 fetchData(true);
+             }, 1000);
+         } catch (error) {
+             console.error(error);
+             message.error('Failed to cancel orders');
+         } finally {
+             setLoading(false);
+         }
     };
 
     const fetchData = async (force = false) => {
@@ -195,6 +213,15 @@ const TradeDashboard = () => {
                         disabled={!connected}
                     >
                         Refresh
+                    </Button>
+                    <Button 
+                        danger
+                        icon={<CloseCircleOutlined />} 
+                        onClick={handleCancelAll} 
+                        loading={loading}
+                        disabled={!connected}
+                    >
+                        Cancel All
                     </Button>
                 </Space>
             </Card>

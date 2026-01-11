@@ -109,5 +109,16 @@ class TradeService:
         orders.sort(key=lambda x: x.datetime, reverse=True)
         return [self._to_dict(o) for o in orders]
 
+    def cancel_all_orders(self) -> Dict[str, Any]:
+        """
+        Cancel all active orders.
+        """
+        active_orders = self.main_engine.get_all_active_orders()
+        for order in active_orders:
+            req = order.create_cancel_request()
+            self.main_engine.cancel_order(req, order.gateway_name)
+        
+        return {"status": "success", "message": f"Sent cancel requests for {len(active_orders)} orders"}
+
     def close(self):
         self.main_engine.close()

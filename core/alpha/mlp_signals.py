@@ -30,7 +30,7 @@ class MLPSignals:
             "weight_decay": 0.0001,          # 添加轻微正则化
             "optimizer": "adam"             # 如果有的话
         }
-        self.n_jobs = 4  # 并行线程数，根据显存大小调整
+        self.n_jobs = 3  # 并行线程数，根据显存大小调整
 
 
     def generate_signals(self, dataset_df: pl.DataFrame, start_date: str) -> pl.DataFrame:

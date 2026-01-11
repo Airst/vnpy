@@ -153,9 +153,9 @@ class V5FactorCalculator(FactorCalculator):
         
         # Trend Efficiency (Net Move / Total Path)
         # High efficiency = strong trend (less noise)
-        # net_move_20 = (C - ts_delay(C, 20)).abs()
-        # total_path_20 = ts_sum((C - ts_delay(C, 1)).abs(), 20)
-        # features["trend_efficiency_20"] = net_move_20 / (total_path_20 + 1e-8)
+        net_move_20 = (C - ts_delay(C, 20)).abs()
+        total_path_20 = ts_sum((C - ts_delay(C, 1)).abs(), 20)
+        #features["trend_efficiency_20"] = net_move_20 / (total_path_20 + 1e-8)
 
         # Price-Volume Correlation (20d)
         # Correlation between Close and Volume. 
@@ -361,6 +361,7 @@ class V5FactorCalculator(FactorCalculator):
         
         # 2. Market Momentum & Volatility (Base Environment Vars)
         mkt_mom_20d = torch.nanmean(features["mom_20d"], dim=0, keepdim=True)
+        mkt_mom_60d = torch.nanmean(features["mom_60d"], dim=0, keepdim=True)
         mkt_vol_20d = torch.nanmean(features["volatility_20d"], dim=0, keepdim=True)
         
         # === Direction 1: Interaction Factors (Environment Perception) ===
@@ -370,16 +371,15 @@ class V5FactorCalculator(FactorCalculator):
         # Maps mkt_mom to [0, 1]. Scale factor 10 makes the transition steeper around 0.
         # mkt_mom = 0.1 (10%) -> sigmoid(1.0) ~= 0.73
         # mkt_mom = -0.1 (-10%) -> sigmoid(-1.0) ~= 0.27
-        bull_prob = torch.sigmoid(mkt_mom_20d * 10.0)
+        # Optimized: Use blended momentum (20d + 60d) AND Market Breadth (Bias > 0).
+        # Market Breadth: Average distance from MA20. Positive means healthy market structure.
+        mkt_breadth = torch.nanmean(features["bias_20"], dim=0, keepdim=True)
+        bull_prob = torch.sigmoid(((mkt_mom_20d + mkt_mom_60d + mkt_breadth) / 3.0) * 15.0)
 
         # 1. Momentum x Market (Bull Feature)
         # Active mainly in Bull Markets.
         # Logic: We trust Momentum when Market is Up.
         features["mom_x_mkt"] = features["mom_20d"] * bull_prob
-        
-        # 2. Liquidity Defense (Defense against Liquidity Traps)
-        # High Turnover (Liquid) - High Downside Vol (Risk)
-        features["liquidity_defense"] = cs_rank(features["turnover_mean_20d"]) - cs_rank(features["downside_vol_20d"])
 
         # 3. Technical Reversal (Bear Feature)
         # Deep Value: Price far below MA60 (Bias 60)
@@ -409,10 +409,11 @@ class V5FactorCalculator(FactorCalculator):
             features["ind_rel_bias_20"] = features["bias_20"] - ind_bias_20
 
         # === Direction 3: Dragon Logic (Trend Following) ===
-        # V5.1 Smooth Dragon: Replaces hard Sign() with Tanh().
-        # This prevents "sawtooth" signals when momentum fluctuates around 0.
-        # Scale 5.0 ensures Tanh saturates reasonably fast (mom=0.2 -> tanh=0.76).
-        features["dragon_score"] = cs_rank(features["mom_20d"]) + cs_rank(features["turnover_mean_20d"]) * torch.tanh(features["mom_20d"] * 5.0)
+        # V5.2 Fix: Decoupled Momentum Sign from Turnover Rank.
+        # Data shows High Turnover was POSITIVE (+0.30 IC) even in 2024 Bear Market.
+        # Old logic (Rank * Tanh(Mom)) penalized High Turnover when Mom < 0.
+        # New logic: Additive. High Turnover is always good.
+        features["dragon_score"] = cs_rank(features["mom_60d"]) + cs_rank(features["turnover_mean_20d"])
         
         # Low Volatility Anomaly (still useful for filtering garbage)
         features["inv_vol_20"] = 1.0 / (features["volatility_20d"] + 1e-4)

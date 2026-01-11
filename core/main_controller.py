@@ -141,6 +141,10 @@ def get_orders():
 def get_trades():
     return {"trades": trade_service.get_trades()}
 
+@app.post("/api/trade/orders/cancel_all")
+def cancel_all_orders():
+    return trade_service.cancel_all_orders()
+
 
 # Static Files Logic (Moved from controller)
 # PROJECT_ROOT is already defined above
