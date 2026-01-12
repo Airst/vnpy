@@ -15,6 +15,7 @@ from core.selector.selector import FundamentalSelector
 from core.alpha.v3_factor_calculator import V3FactorCalculator
 from core.alpha.v4_factor_calculator import V4FactorCalculator
 from core.alpha.v5_factor_calculator import V5FactorCalculator
+from core.alpha.v6_factor_calculator import V6FactorCalculator
 
 
 from data_manager.ts_downloader.download_daily import download_data
@@ -56,6 +57,7 @@ if __name__ == "__main__":
     parser.add_argument("-v3", action="store_true", help="Run V3")
     parser.add_argument("-v4", action="store_true", help="Run V4")
     parser.add_argument("-v5", action="store_true", help="Run V5")
+    parser.add_argument("-v6", action="store_true", help="Run V6")
     
     parser.add_argument("-a", "--ans", action="store_true", help="Only calculate factors (no signal model)")
     parser.add_argument("-s", "--skip", action="store_true", help="Skip Sync data before running")
@@ -78,6 +80,8 @@ if __name__ == "__main__":
         selected_version = "v4"
     elif args.v5:
         selected_version = "v5"
+    elif args.v6:
+        selected_version = "v6"
     
     if not selected_version:
         print("Error: Please specify a version using -v [version] or -v3/-v4/-v5 flags.")
@@ -104,8 +108,12 @@ if __name__ == "__main__":
         calculator = V5FactorCalculator()
         signal_name = "ashare_mlp_signal_v5"
         description = "V5 (Alpha158)"
+    elif version == "v6":
+        calculator = V6FactorCalculator()
+        signal_name = "ashare_mlp_signal_v6"
+        description = "V6 (Fusion)"
     else:
-        print(f"Error: Unknown version '{version}'. Supported versions: v3, v4, v5")
+        print(f"Error: Unknown version '{version}'. Supported versions: v3, v4, v5, v6")
         sys.exit(1)
 
     selector=FundamentalSelector([args.vt]) if args.vt else FundamentalSelector()

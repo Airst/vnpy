@@ -153,7 +153,7 @@ def download_data(config_path: str = "data_manager/ts_downloader/download_daily_
             "req_symbol": overview.symbol,
             "exchange": overview.exchange,
             "interval": overview.interval,
-            "start": start,
+            "start": start + timedelta(days=1),
             "end": end
         }
 
