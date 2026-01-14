@@ -66,6 +66,8 @@ if __name__ == "__main__":
     
     parser.add_argument("-f", "--force", action="store_true", help="Force Sync data to Alpha Lab")
 
+    parser.add_argument("-t", "--total", action="store_true", help="Force retrain all models (Total/Full Rolling)")
+
     parser.add_argument("-vt", help="vt_symbol mode")
     
     args = parser.parse_args()
@@ -120,11 +122,14 @@ if __name__ == "__main__":
     earlest_date,latest_date = selector.get_data_range()
     last_trading_date = selector.get_last_trading_day()
     last_trading_date = last_trading_date if last_trading_date else datetime.now()
+    
+    actual_signal_name = signal_name if not args.vt else f"{signal_name}_{args.vt}"
+    
     engine = AlphaEngine(
         factor_calculator=calculator,
-        mlp_signals=MLPSignals(),
+        mlp_signals=MLPSignals(signal_name=actual_signal_name, force_retrain=args.total),
         selector=selector,
-        signal_name=signal_name if not args.vt else f"{signal_name}_{args.vt}",
+        signal_name=actual_signal_name,
         start_date="2019-12-28",
         end_date= last_trading_date.strftime("%Y-%m-%d")
     )

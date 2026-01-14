@@ -278,7 +278,7 @@ class AlphaEngine:
         """
         Generate signals using ML models based on factor DataFrame.
         """
-        signal_df = self.mlp_signals.generate_signals(factor_df, self.start_date)
+        signal_df = self.mlp_signals.generate_signals(factor_df, self.start_date, self.lab)
         return signal_df
 
     def get_signal_df(self, name: str) -> Optional[pl.DataFrame]:
@@ -301,5 +301,32 @@ class AlphaEngine:
     def save_signals(self, signal_df):
         if signal_df is not None:
             print(f"[AlphaEngine] Saving signals to '{self.signal_name}'...")
+            
+            # Try to load existing signals
+            existing_df = self.lab.load_signal(self.signal_name)
+            
+            if existing_df is not None and not existing_df.is_empty():
+                print(f"[AlphaEngine] Found existing signals ({len(existing_df)} rows). Merging...")
+                
+                # Determine the start date of the new signals
+                if "datetime" in signal_df.columns and not signal_df.is_empty():
+                    new_start_dt = signal_df["datetime"].min()
+                    
+                    # Filter existing signals: keep those strictly before the new start date
+                    existing_kept = existing_df.filter(pl.col("datetime") < new_start_dt)
+                    
+                    print(f"[AlphaEngine] Kept {len(existing_kept)} existing rows (before {new_start_dt}).")
+                    
+                    # Concatenate
+                    signal_df = pl.concat([existing_kept, signal_df])
+                    
+                    # Sort by datetime and symbol
+                    if "vt_symbol" in signal_df.columns:
+                        signal_df = signal_df.sort(["datetime", "vt_symbol"])
+                    else:
+                        signal_df = signal_df.sort("datetime")
+                else:
+                    print("[AlphaEngine] New signal dataframe is empty or missing datetime. Skipping merge.")
+
             self.lab.save_signal(self.signal_name, signal_df)
             print("[AlphaEngine] Saved.")

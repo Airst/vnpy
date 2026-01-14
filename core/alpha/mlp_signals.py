@@ -4,15 +4,25 @@ import numpy as np
 from typing import Optional, List, Dict
 from tqdm import tqdm
 import concurrent.futures
+import os
+import glob
+import re
+import torch
+from pathlib import Path
 
 # Import vnpy alpha components
 # from vnpy.alpha.dataset.datasets.alpha_158 import Alpha158
 from vnpy.alpha.model.models.mlp_model import MlpModel
 from vnpy.alpha import Segment, AlphaDataset
+from vnpy.alpha.lab import AlphaLab
 
 class MLPSignals:
 
-    def __init__(self):
+    def __init__(self, signal_name: str = "mlp_signal", force_retrain: bool = False):
+        self.signal_name = signal_name
+        self.force_retrain = force_retrain
+        # self.model_dir = Path("core/alpha_db/model") # Managed by AlphaLab
+        
         #self.model_settings = {
         #    "hidden_sizes": (256, 128, 64),
         #    "n_epochs": 400,  # Adjustable based on needs
@@ -30,10 +40,10 @@ class MLPSignals:
             "weight_decay": 0.0001,          # 添加轻微正则化
             "optimizer": "adam"             # 如果有的话
         }
-        self.n_jobs = 3  # 并行线程数，根据显存大小调整
+        self.n_jobs = 2  # 并行线程数，根据显存大小调整
 
 
-    def generate_signals(self, dataset_df: pl.DataFrame, start_date: str) -> pl.DataFrame:
+    def generate_signals(self, dataset_df: pl.DataFrame, start_date: str, lab: AlphaLab) -> pl.DataFrame:
         # Drop 'industry' if present (MlpModel only supports numeric features)
         if "industry" in dataset_df.columns:
             print("[MLPSignals] Dropping 'industry' column for model training.")
@@ -114,35 +124,66 @@ class MLPSignals:
                 "valid_period": valid_period,
                 "test_period": test_period,
                 "ps_str": ps_str,
-                "pe_str": pe_str
+                "pe_str": pe_str,
+                "save_model": False
             }
             tasks.append(task_info)
             
             # Move to next window
             curr_idx = next_idx
 
-        # Execute in parallel
-        print(f"[MLPSignals] Executing {len(tasks)} windows with {self.n_jobs} threads...")
-        with concurrent.futures.ThreadPoolExecutor(max_workers=self.n_jobs) as executor:
-            # Submit all tasks
-            future_to_task = {
-                executor.submit(self._train_and_predict_window, dataset_df, t): t 
-                for t in tasks
-            }
+        # Mark the last task to save model
+        if tasks:
+            tasks[-1]["save_model"] = True
+
+        if not self.force_retrain:
+            # Incremental mode: Only process the last window
+            if not tasks:
+                 print("[MLPSignals] No tasks generated.")
+                 raise ValueError("No tasks generated.")
             
-            for future in tqdm(concurrent.futures.as_completed(future_to_task), total=len(tasks)):
-                task = future_to_task[future]
-                try:
-                    result = future.result()
-                    if result is not None:
-                        all_predictions.append(result)
-                except Exception as exc:
-                    print(f"[MLPSignals] Task {task['ps_str']} generated an exception: {exc}")
+            last_task = tasks[-1]
+            print(f"[MLPSignals] Incremental Mode: Processing only latest window ({last_task['ps_str']} - {last_task['pe_str']})")
+            
+            # Check for existing model
+            model_name = f"{self.signal_name}_{last_task['ps_str']}"
+            existing_models = lab.list_all_models()
+            
+            if model_name in existing_models:
+                print(f"[MLPSignals] Found existing model: {model_name}. Loading...")
+                result = self._predict_with_existing_model(dataset_df, last_task, lab)
+            else:
+                print(f"[MLPSignals] Model not found ({model_name}). Training new model...")
+                result = self._train_and_predict_window(dataset_df, last_task, lab)
+            
+            if result is not None:
+                all_predictions.append(result)
+                
+        else:
+            # Full Rolling Mode
+            print(f"[MLPSignals] Force Retrain Mode: Executing {len(tasks)} windows with {self.n_jobs} threads...")
+            with concurrent.futures.ThreadPoolExecutor(max_workers=self.n_jobs) as executor:
+                # Submit all tasks
+                future_to_task = {
+                    executor.submit(self._train_and_predict_window, dataset_df, t, lab): t 
+                    for t in tasks
+                }
+                
+                for future in tqdm(concurrent.futures.as_completed(future_to_task), total=len(tasks)):
+                    task = future_to_task[future]
+                    try:
+                        result = future.result()
+                        if result is not None:
+                            all_predictions.append(result)
+                    except Exception as exc:
+                        print(f"[MLPSignals] Task {task['ps_str']} generated an exception: {exc}")
 
         # 7. Concatenate and Post-process
         if not all_predictions:
             print("[MLPSignals] No predictions generated.")
-            raise ValueError("No predictions generated.")
+            # raise ValueError("No predictions generated.") 
+            # Allow empty if really nothing new
+            return pl.DataFrame()
             
         print("[MLPSignals] Aggregating results...")
         full_result = pl.concat(all_predictions)
@@ -153,12 +194,71 @@ class MLPSignals:
         # Post-process
         return self._post_process_signals(full_result)
 
-    def _train_and_predict_window(self, dataset_df: pl.DataFrame, task_info: Dict) -> Optional[pl.DataFrame]:
+    def _save_model(self, lab: AlphaLab, model: MlpModel, start_date_str: str, end_date_str: str):
+        model_name = f"{self.signal_name}_{start_date_str}"
+        print(f"[MLPSignals] Saving model {model_name}...")
+        try:
+            lab.save_model(model_name, model)
+        except Exception as e:
+            print(f"[MLPSignals] Failed to save model: {e}")
+
+    def _load_model(self, lab: AlphaLab, start_date_str: str, end_date_str: str) -> Optional[MlpModel]:
+        model_name = f"{self.signal_name}_{start_date_str}"
+        try:
+            model = lab.load_model(model_name)
+            return model
+        except Exception as e:
+            print(f"[MLPSignals] Failed to load model {model_name}: {e}")
+            return None
+
+    def _predict_with_existing_model(self, dataset_df: pl.DataFrame, task_info: Dict, lab: AlphaLab) -> Optional[pl.DataFrame]:
+        # Load model
+        ps_str = task_info["ps_str"]
+        pe_str = task_info["pe_str"]
+        
+        model = self._load_model(lab, ps_str, pe_str)
+        if not model:
+            return None
+            
+        test_period = task_info["test_period"]
+
+        print(f"[MLPSignals] Predicting with loaded model for [{ps_str} to {pe_str}]")
+        
+        # Construct Dataset (Only need test part really, but AlphaDataset needs periods)
+        # We can pass dummy train/valid periods if we don't call fit(), 
+        # but to be safe and use same structure:
+        dataset = AlphaDataset(
+            df=dataset_df,
+            train_period=task_info["train_period"], # Not used for predict but required by init
+            valid_period=task_info["valid_period"],
+            test_period=test_period
+        )
+        dataset.raw_df = dataset_df
+        dataset.infer_df = dataset_df
+        dataset.process_data() # Mainly to setup features if needed, though we manually set input_size in load
+        
+        result_df = None
+        try:
+            preds = model.predict(dataset, Segment.TEST)
+            meta = dataset.fetch_infer(Segment.TEST).select(["datetime", "vt_symbol"])
+            
+            if len(preds) == len(meta):
+                meta = meta.with_columns(pl.Series(preds).alias("total_score"))
+                result_df = meta
+            else:
+                print(f"[MLPSignals] Mismatch in prediction length: {len(preds)} vs {len(meta)}")
+        except Exception as e:
+            print(f"[MLPSignals] Prediction failed: {e}")
+            
+        return result_df
+
+    def _train_and_predict_window(self, dataset_df: pl.DataFrame, task_info: Dict, lab: AlphaLab) -> Optional[pl.DataFrame]:
         train_period = task_info["train_period"]
         valid_period = task_info["valid_period"]
         test_period = task_info["test_period"]
         ps_str = task_info["ps_str"]
         pe_str = task_info["pe_str"]
+        save_model = task_info.get("save_model", False)
         
         print(f"[MLPSignals] Window: Train [500 days pre {ps_str}] -> Predict [{ps_str} to {pe_str}]")
         
@@ -180,6 +280,9 @@ class MLPSignals:
         
         # Train Model
         model = self._train_model(dataset)
+        
+        if model and save_model:
+            self._save_model(lab, model, ps_str, pe_str)
         
         result_df = None
         if model:
