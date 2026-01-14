@@ -1,7 +1,7 @@
 import sys
 import os
 from pathlib import Path
-from typing import Dict, List, Any
+from typing import Dict, List, Any, Optional
 from datetime import datetime
 
 from vnpy.event import EventEngine
@@ -17,6 +17,15 @@ except ImportError:
     ToraStockGateway = None
     print("Warning: vnpy_tora not found. TradeService will not work properly.")
 
+# Try to import PortfolioStrategyApp
+try:
+    from vnpy_portfoliostrategy import PortfolioStrategyApp
+    from vnpy_portfoliostrategy.engine import StrategyEngine
+except ImportError:
+    PortfolioStrategyApp = None
+    StrategyEngine = None
+    print("Warning: vnpy_portfoliostrategy not found.")
+
 CONNECT_FILE = "connect_torastock.json"
 GATEWAY_NAME = "TORASTOCK"
 
@@ -25,13 +34,22 @@ class TradeService:
         self.event_engine = EventEngine()
         self.event_engine.register("eLog", self.process_log_event)
         self.main_engine = MainEngine(self.event_engine)
+        
         if ToraStockGateway:
             self.main_engine.add_gateway(ToraStockGateway)
+            
+        self.strategy_engine: Optional[StrategyEngine] = None
+        if PortfolioStrategyApp:
+            self.strategy_engine = self.main_engine.add_app(PortfolioStrategyApp)
+            
         self.gateway_name = GATEWAY_NAME
         self._connected = False
 
     def process_log_event(self, event):
         print(f"[Gateway Log] {event.data.msg}")
+        
+    def get_strategy_engine(self) -> Optional[StrategyEngine]:
+        return self.strategy_engine
 
     def reset_connection(self) -> Dict[str, Any]:
         """
@@ -46,6 +64,10 @@ class TradeService:
         self.main_engine = MainEngine(self.event_engine)
         if ToraStockGateway:
             self.main_engine.add_gateway(ToraStockGateway)
+            
+        self.strategy_engine = None
+        if PortfolioStrategyApp:
+            self.strategy_engine = self.main_engine.add_app(PortfolioStrategyApp)
             
         self._connected = False
 

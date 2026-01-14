@@ -1,7 +1,8 @@
 from pathlib import Path
 from typing import List
 from contextlib import asynccontextmanager
-from datetime import datetime
+from datetime import datetime, time
+import asyncio
 
 from fastapi import FastAPI, HTTPException, Request
 from fastapi.responses import FileResponse
@@ -10,6 +11,7 @@ from pydantic import BaseModel
 
 from core.core_service import CoreService
 from core.trade_service import TradeService
+from core.trade.daily_task import DailyTrader
 from core.logger_writer import LoggerWriter
 from vnpy.trader.logger import logger as ts_logger
 from vnpy.alpha.logger import logger
@@ -20,9 +22,44 @@ PROJECT_ROOT = Path(__file__).resolve().parent.parent
 core_service = CoreService()
 trade_service = TradeService()
 
+# Scheduler
+async def scheduler():
+    print("[Scheduler] Started. Waiting for 09:10...")
+    while True:
+        now = datetime.now()
+        target_time = time(9, 10)
+        
+        # Check if it's 09:10
+        if now.hour == target_time.hour and now.minute == target_time.minute:
+             print(f"[{now}] Triggering Daily Task...")
+             try:
+                 # Ensure trade service is connected (or try to connect)
+                 if not trade_service._connected:
+                     print("[Scheduler] TradeService not connected. Attempting connect...")
+                     trade_service.connect()
+                 
+                 trader = DailyTrader(trade_service.main_engine, trade_service.get_strategy_engine())
+                 # Run synchronously for now as vnpy is not async safe usually
+                 # Ideally, run in executor if it blocks too long, but for now direct call
+                 trader.run()
+             except Exception as e:
+                 print(f"[Scheduler] Error running daily task: {e}")
+                 import traceback
+                 traceback.print_exc()
+             
+             # Sleep for 61 seconds to avoid double trigger
+             await asyncio.sleep(61)
+        else:
+            # Sleep 30s
+            await asyncio.sleep(30)
+
 @asynccontextmanager
 async def lifespan(app: FastAPI):
+    # Start scheduler
+    task = asyncio.create_task(scheduler())
     yield
+    # Cleanup
+    task.cancel()
     trade_service.close()
     print("Shut down TradeService...")
 
