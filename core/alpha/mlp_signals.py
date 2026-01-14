@@ -44,6 +44,10 @@ class MLPSignals:
 
 
     def generate_signals(self, dataset_df: pl.DataFrame, start_date: str, lab: AlphaLab) -> pl.DataFrame:
+        if self.force_retrain:
+            print("[MLPSignals] force_retrain, remove old signals.")
+            lab.remove_signal(self.signal_name)
+        
         # Drop 'industry' if present (MlpModel only supports numeric features)
         if "industry" in dataset_df.columns:
             print("[MLPSignals] Dropping 'industry' column for model training.")

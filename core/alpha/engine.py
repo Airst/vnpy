@@ -310,15 +310,17 @@ class AlphaEngine:
                 
                 # Determine the start date of the new signals
                 if "datetime" in signal_df.columns and not signal_df.is_empty():
-                    new_start_dt = signal_df["datetime"].min()
+                    last_existing_dt = existing_df["datetime"].max()
                     
-                    # Filter existing signals: keep those strictly before the new start date
-                    existing_kept = existing_df.filter(pl.col("datetime") < new_start_dt)
-                    
-                    print(f"[AlphaEngine] Kept {len(existing_kept)} existing rows (before {new_start_dt}).")
-                    
-                    # Concatenate
-                    signal_df = pl.concat([existing_kept, signal_df])
+                    # Filter new signals: keep those strictly after the last existing date
+                    new_signals_to_append = signal_df.filter(pl.col("datetime") > last_existing_dt)
+
+                    if not new_signals_to_append.is_empty():
+                        print(f"[AlphaEngine] Appending {len(new_signals_to_append)} new rows (after {last_existing_dt}).")
+                        signal_df = pl.concat([existing_df, new_signals_to_append])
+                    else:
+                        print(f"[AlphaEngine] No new signals to append. Last existing: {last_existing_dt}.")
+                        signal_df = existing_df
                     
                     # Sort by datetime and symbol
                     if "vt_symbol" in signal_df.columns:
