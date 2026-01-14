@@ -3,6 +3,7 @@ from typing import List
 from contextlib import asynccontextmanager
 from datetime import datetime, time
 import asyncio
+import schedule
 
 from fastapi import FastAPI, HTTPException, Request
 from fastapi.responses import FileResponse
@@ -23,35 +24,30 @@ core_service = CoreService()
 trade_service = TradeService()
 
 # Scheduler
+def run_daily_task():
+    print(f"[{datetime.now()}] Triggering Daily Task...")
+    try:
+        # Ensure trade service is connected (or try to connect)
+        if not trade_service._connected:
+            print("[Scheduler] TradeService not connected. Attempting connect...")
+            trade_service.connect()
+        
+        trader = DailyTrader(trade_service.main_engine, trade_service.get_strategy_engine())
+        # Run synchronously for now as vnpy is not async safe usually
+        # Ideally, run in executor if it blocks too long, but for now direct call
+        trader.run()
+    except Exception as e:
+        print(f"[Scheduler] Error running daily task: {e}")
+        import traceback
+        traceback.print_exc()
+
 async def scheduler():
     print("[Scheduler] Started. Waiting for 09:10...")
+    schedule.every().day.at("09:10").do(run_daily_task)
+    
     while True:
-        now = datetime.now()
-        target_time = time(9, 10)
-        
-        # Check if it's 09:10
-        if now.hour == target_time.hour and now.minute == target_time.minute:
-             print(f"[{now}] Triggering Daily Task...")
-             try:
-                 # Ensure trade service is connected (or try to connect)
-                 if not trade_service._connected:
-                     print("[Scheduler] TradeService not connected. Attempting connect...")
-                     trade_service.connect()
-                 
-                 trader = DailyTrader(trade_service.main_engine, trade_service.get_strategy_engine())
-                 # Run synchronously for now as vnpy is not async safe usually
-                 # Ideally, run in executor if it blocks too long, but for now direct call
-                 trader.run()
-             except Exception as e:
-                 print(f"[Scheduler] Error running daily task: {e}")
-                 import traceback
-                 traceback.print_exc()
-             
-             # Sleep for 61 seconds to avoid double trigger
-             await asyncio.sleep(61)
-        else:
-            # Sleep 30s
-            await asyncio.sleep(30)
+        schedule.run_pending()
+        await asyncio.sleep(1)
 
 @asynccontextmanager
 async def lifespan(app: FastAPI):

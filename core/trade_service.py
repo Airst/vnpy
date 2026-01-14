@@ -68,6 +68,7 @@ class TradeService:
         self.strategy_engine = None
         if PortfolioStrategyApp:
             self.strategy_engine = self.main_engine.add_app(PortfolioStrategyApp)
+            self.strategy_engine.init_engine() # type: ignore
             
         self._connected = False
 

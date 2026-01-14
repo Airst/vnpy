@@ -32,7 +32,7 @@ class DailyTrader:
              self.strategy_engine.classes["MultiFactorStrategy"] = MultiFactorStrategy
 
         # 2. Init Engine (loads data)
-        self.strategy_engine.init_engine()
+        #self.strategy_engine.init_engine()
 
         # 3. Get or Add Strategy
         if STRATEGY_NAME not in self.strategy_engine.strategies:
@@ -47,7 +47,7 @@ class DailyTrader:
                     "capital": 5000000
                 }
             )
-            
+
         strategy = self.strategy_engine.strategies[STRATEGY_NAME]
         
         if not strategy.inited:
@@ -120,5 +120,7 @@ class DailyTrader:
             print(f"[DailyTrader] Strategy execution error: {e}")
             import traceback
             traceback.print_exc()
+
+        print(f"[{datetime.now()}] [DailyTrader] Stop strategy succeed.")
 
         print(f"[{datetime.now()}] [DailyTrader] Task Completed.")
