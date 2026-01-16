@@ -12,7 +12,6 @@ from pydantic import BaseModel
 
 from core.core_service import CoreService
 from core.trade_service import TradeService
-from core.trade.daily_task import DailyTrader
 from core.logger_writer import LoggerWriter
 from vnpy.trader.logger import logger as ts_logger
 from vnpy.alpha.logger import logger
@@ -31,11 +30,10 @@ def run_daily_task():
         if not trade_service._connected:
             print("[Scheduler] TradeService not connected. Attempting connect...")
             trade_service.connect()
-        
-        trader = DailyTrader(trade_service.main_engine, trade_service.get_strategy_engine())
+
         # Run synchronously for now as vnpy is not async safe usually
         # Ideally, run in executor if it blocks too long, but for now direct call
-        trader.run()
+        trade_service.run_daily_trade()
     except Exception as e:
         print(f"[Scheduler] Error running daily task: {e}")
         import traceback
@@ -43,7 +41,7 @@ def run_daily_task():
 
 async def scheduler():
     print("[Scheduler] Started. Waiting for 09:10...")
-    schedule.every().day.at("09:10").do(run_daily_task)
+    schedule.every().day.at("09:21").do(run_daily_task)
     
     while True:
         schedule.run_pending()
@@ -155,8 +153,7 @@ def connect_trade():
 
 @app.post("/api/trade/reset")
 def reset_trade():
-    trade_service.reset_connection()
-    return trade_service.connect()
+    return trade_service.reset_connection()
 
 @app.get("/api/trade/accounts")
 def get_accounts():

@@ -83,6 +83,7 @@ class MultiFactorStrategy(StrategyTemplate):
         
         if trade.direction == Direction.LONG:
             self.cash -= trade.price * trade.volume
+            print(f"[MultiFactorStrategy] updatye_trade, BUY. cash={self.cash}, {trade.price * trade.volume}, {trade.symbol}, {trade.price}, {trade.volume}")
             
             # Update Entry Price (Weighted Average)
             old_pos = self.get_pos(trade.vt_symbol)
@@ -130,6 +131,7 @@ class MultiFactorStrategy(StrategyTemplate):
         # Always deduct commission
         self.cash -= commission
         
+        print(f"[MultiFactorStrategy] updatye_trade, cash={self.cash}, {self.pos_entry_price}, {self.pos_high_price}")
         super().update_trade(trade)
 
     def load_signals(self):
