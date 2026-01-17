@@ -26,7 +26,8 @@ class V7FactorCalculator(V6FactorCalculator):
         concept_cols = [
             "concept_mom_5d", "concept_mom_10d", "concept_mom_20d", "concept_mom_20d_max", 
             "concept_mom_20d_min", "concept_mom_20d_std",
-            "concept_turnover_20d", "concept_vol_20d", "concept_count", "concept_daily_ret"
+            "concept_turnover_20d", "concept_vol_20d", "concept_count", "concept_daily_ret",
+            "concept_hot_ratio", "concept_top3_mean", "concept_cohesion"
         ]
         # Ensure they exist (DataLoader fills with 0 if missing, but check to be safe)
         existing_concept_cols = [c for c in concept_cols if c in df.columns]
@@ -563,10 +564,10 @@ class V7FactorCalculator(V6FactorCalculator):
         con_mom_20_max = padded_raw[:, :, con_start_idx+3]
         con_mom_20_min = padded_raw[:, :, con_start_idx+4]
         con_mom_20_std = padded_raw[:, :, con_start_idx+5]
-        con_turnover_20 = padded_raw[:, :, con_start_idx+6]
-        con_vol_20 = padded_raw[:, :, con_start_idx+7]
-        con_count = padded_raw[:, :, con_start_idx+8]
-        con_daily_ret = padded_raw[:, :, con_start_idx+9]
+        #con_turnover_20 = padded_raw[:, :, con_start_idx+6]
+        #con_vol_20 = padded_raw[:, :, con_start_idx+7]
+        #con_count = padded_raw[:, :, con_start_idx+8]
+        #con_daily_ret = padded_raw[:, :, con_start_idx+9]
         
         # Add to features
         features["con_mom_5d"] = con_mom_5
@@ -575,64 +576,60 @@ class V7FactorCalculator(V6FactorCalculator):
         features["con_mom_20d_max"] = con_mom_20_max
         features["con_mom_20d_min"] = con_mom_20_min
         features["con_mom_20d_std"] = con_mom_20_std
-        features["con_turnover_20d"] = con_turnover_20
-        features["con_vol_20d"] = con_vol_20
+        #features["con_turnover_20d"] = con_turnover_20
+        #features["con_vol_20d"] = con_vol_20
         
         # New Correlation Factors
-        features["con_corr_20"] = ts_corr(ret_1, con_daily_ret, 20)
+        #features["con_corr_20"] = ts_corr(ret_1, con_daily_ret, 20)
         
         # Beta of Stock to Concept
-        con_var = ts_std(con_daily_ret, 20) ** 2
-        features["con_beta_20"] = ts_cov(ret_1, con_daily_ret, 20) / (con_var + 1e-8)
+        #con_var = ts_std(con_daily_ret, 20) ** 2
+        #features["con_beta_20"] = ts_cov(ret_1, con_daily_ret, 20) / (con_var + 1e-8)
 
         # Boost dragon score with Concept Correlation (User Request: Reflect correlation)
         # If stock is highly correlated with its concept, and concept is moving, it's a safer bet.
-        if "dragon_score" in features:
-             features["dragon_score"] = features["dragon_score"] + cs_rank(features["con_corr_20"]) * 0.3
+        #if "dragon_score" in features:
+             #features["dragon_score"] = features["dragon_score"] + cs_rank(features["con_corr_20"]) * 0.3
         
         # Interaction Factors
         # 1. Relative Momentum
-        if "mom_20d" in features:
-            features["rel_con_mom_20d"] = features["mom_20d"] - con_mom_20
+        #if "mom_20d" in features:
+            #features["rel_con_mom_20d"] = features["mom_20d"] - con_mom_20
             
         # 2. Concept Alignment
-        if "mom_20d" in features:
-            features["con_align_20d"] = torch.sign(features["mom_20d"]) * torch.sign(con_mom_20)
+        #if "mom_20d" in features:
+            #features["con_align_20d"] = torch.sign(features["mom_20d"]) * torch.sign(con_mom_20)
             
         # 3. Concept Efficiency
-        features["con_sharpe_20"] = con_mom_20 / (con_vol_20 + 1e-8)
+        #features["con_sharpe_20"] = con_mom_20 / (con_vol_20 + 1e-8)
         
         # 4. Relative Volatility
-        if "volatility_20d" in features:
-            features["rel_con_vol_20d"] = features["volatility_20d"] / (con_vol_20 + 1e-8)
+        #if "volatility_20d" in features:
+            #features["rel_con_vol_20d"] = features["volatility_20d"] / (con_vol_20 + 1e-8)
             
         # 5. Concept Potential (Upside to Max Concept)
         # If I am in a concept that is doing great (Max is high), but Average is low, 
         # maybe I have potential to catch up? Or maybe I am the laggard.
-        features["con_mom_potential"] = con_mom_20_max - con_mom_20
-        
-        # 6. Concept Divergence
-        # If std is high, concepts are disagreeing.
-        features["con_divergence"] = con_mom_20_std
+        #features["con_mom_potential"] = con_mom_20_max - con_mom_20
         
         # 7. Strongest Concept Exposure
         # How close is the stock to its best performing concept?
         # If Stock Mom ~= Max Concept Mom, it is a leader.
-        if "mom_20d" in features:
-             features["is_concept_leader"] = features["mom_20d"] - con_mom_20_max
+        #if "mom_5d" in features:
+             #features["is_concept_leader"] = features["mom_5d"] - con_mom_5
         
         # 8. Concept Correction Risk (New)
         # If 10d trend is high (positive) but 5d is lower (fading)
         # Value is high when correction is happening.
-        features["con_correction_risk"] = con_mom_10 - con_mom_5
+        #features["con_correction_risk"] = con_mom_10 - con_mom_5
 
         # 9. Concept Monthly Breakout (Aggressive Bull Signal)
         # If 5d momentum is higher than 20d momentum, concept is accelerating monthly.
-        features["con_monthly_breakout"] = con_mom_5 - con_mom_20
+        #features["con_monthly_breakout"] = con_mom_5 - con_mom_20
 
         # 10. Concept Trend Acceleration (Short-term vs Medium-term)
         # Explicit acceleration feature to capture aggressive moves.
-        features["con_trend_acceleration"] = con_mom_5 - con_mom_10
+        #features["con_trend_acceleration"] = con_mom_5 - con_mom_10
         
 
         # Label: Next 5 days return (Market Neutral Rank)

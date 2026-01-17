@@ -51,3 +51,6 @@ node_modules/
 # Logs
 *.log
 log/
+
+# history
+.history
