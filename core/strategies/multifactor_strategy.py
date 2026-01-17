@@ -45,7 +45,7 @@ class MultiFactorStrategy(StrategyTemplate):
         self.signal_name = setting.get("signal_name", "ashare_multi_factor")
         self.max_holdings = setting.get("max_holdings", 5)
         self.capital = setting.get("capital", 1_000_000)
-        self.sell_threshold = setting.get("sell_threshold", 1.5)
+        self.sell_threshold = setting.get("sell_threshold", 1.54)
         self.buy_threshold = setting.get("buy_threshold", 1)
         self.stop_loss_pct = setting.get("stop_loss_pct", 0.05)
         self.trailing_stop_pct = setting.get("trailing_stop_pct", 0.15)
@@ -83,7 +83,6 @@ class MultiFactorStrategy(StrategyTemplate):
         
         if trade.direction == Direction.LONG:
             self.cash -= trade.price * trade.volume
-            print(f"[MultiFactorStrategy] updatye_trade, BUY. cash={self.cash}, {trade.price * trade.volume}, {trade.symbol}, {trade.price}, {trade.volume}")
             
             # Update Entry Price (Weighted Average)
             old_pos = self.get_pos(trade.vt_symbol)
@@ -131,7 +130,6 @@ class MultiFactorStrategy(StrategyTemplate):
         # Always deduct commission
         self.cash -= commission
         
-        print(f"[MultiFactorStrategy] updatye_trade, cash={self.cash}, {self.pos_entry_price}, {self.pos_high_price}")
         super().update_trade(trade)
 
     def load_signals(self):

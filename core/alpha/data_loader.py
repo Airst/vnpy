@@ -4,6 +4,7 @@ from datetime import datetime
 from vnpy.alpha.lab import AlphaLab
 from data_manager.ts_downloader.daily_basic_manager import DailyBasicManager
 from data_manager.ts_downloader.stock_info_manager import StockInfoManager
+from core.alpha.concept_embedding import ConceptEmbedding
 
 class DataLoader:
     def __init__(self, lab: AlphaLab):
@@ -158,6 +159,40 @@ class DataLoader:
                 pl.col(col).forward_fill().over("vt_symbol")
                 for col in financial_df.columns if col not in ["vt_symbol", "datetime"]
             ])
+
+        # 6. 加载概念因子数据 (Concept Embedding)
+        print("加载概念因子数据 (Concept Embedding)...")
+        try:
+            ce = ConceptEmbedding()
+            concept_df = ce.get_concept_features(start_date, end_date)
+            
+            if not concept_df.is_empty():
+                # Align datetime precision
+                if "datetime" in concept_df.columns:
+                     concept_df = concept_df.with_columns(pl.col("datetime").cast(pl.Datetime("us")))
+                
+                price_df = price_df.join(
+                    concept_df,
+                    on=["vt_symbol", "datetime"],
+                    how="left"
+                )
+                
+                # Fill nulls (stocks with no concepts or missing concept data) with 0
+                cols_to_fill = [
+                    "concept_mom_5d", "concept_mom_10d", "concept_mom_20d", "concept_turnover_20d", "concept_vol_20d", "concept_count",
+                    "concept_mom_20d_max", "concept_mom_20d_min", "concept_mom_20d_std"
+                ]
+                # Only fill columns that exist
+                cols_to_fill = [c for c in cols_to_fill if c in price_df.columns]
+                
+                price_df = price_df.with_columns([
+                    pl.col(c).fill_null(0).fill_nan(0) for c in cols_to_fill
+                ])
+                print("概念因子数据加载完成")
+            else:
+                print("未生成概念因子数据")
+        except Exception as e:
+            print(f"加载概念因子数据失败: {e}")
         
         return price_df
 

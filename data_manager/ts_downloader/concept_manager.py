@@ -132,23 +132,112 @@ class ConceptManager:
         finally:
             conn.close()
 
-    def _fetch_members_by_date(self, trade_date):
-        """Worker to fetch members for all concepts on a specific date."""
-        self.limiter.wait()
-        try:
-            # Using dc_member API
-            df = self.pro.dc_member(trade_date=trade_date)
-            return trade_date, df
-        except Exception as e:
-            print(f"Error fetching members for {trade_date}: {e}")
-            return trade_date, None
-
     def download_members(self, max_workers=4):
         """
-        Incremental download of concept members data.
+        Incremental download of concept members data (Monthly - First Trading Day).
         """
-        print("Starting Incremental Concept Members Download...")
-        self._incremental_download("dc_member", self._fetch_members_by_date, self._save_members_date, max_workers)
+        print("Starting Incremental Concept Members Download (Monthly)...")
+        
+        # 1. Determine Dates
+        # Get max date from DB
+        conn = self._get_connection()
+        db_max_date = None
+        try:
+            with conn.cursor() as cursor:
+                # Check if table exists and has data
+                try:
+                    cursor.execute("SELECT MAX(trade_date) as max_date FROM dc_member")
+                    res = cursor.fetchone()
+                    if res:
+                        db_max_date = res['max_date']
+                except Exception:
+                    pass
+        finally:
+            conn.close()
+
+        # Get last trading day from core
+        selector = FundamentalSelector(None)
+        last_day_dt = selector.get_last_trading_day()
+        last_day_str = last_day_dt.strftime("%Y%m%d")
+
+        # Start from a safe past date to find monthly firsts
+        start_cal_date = "20241220"
+        
+        # Fetch calendar
+        try:
+            self.limiter.wait()
+            cal_df = self.pro.trade_cal(start_date=start_cal_date, 
+                                        end_date=last_day_str, is_open='1')
+        except Exception as e:
+            print(f"Error fetching calendar: {e}")
+            return
+
+        if cal_df.empty:
+            print("No trading days found.")
+            return
+
+        # Filter for 1st trading day of each month
+        cal_df['month'] = cal_df['cal_date'].str.slice(0, 6)
+        # Group by month, take first (min)
+        all_monthly_dates = cal_df.groupby('month')['cal_date'].min().tolist()
+        
+        # Filter dates > db_max_date
+        if db_max_date:
+            target_dates = [d for d in all_monthly_dates if d > db_max_date]
+        else:
+            target_dates = all_monthly_dates
+
+        if not target_dates:
+            print("dc_member is already up to date (Monthly).")
+            return
+
+        print(f"Need to download for {len(target_dates)} months: {target_dates[0]} to {target_dates[-1]}")
+
+        # 2. Download
+        for trade_date in target_dates:
+            # Get concept codes from dc_daily for this date
+            conn = self._get_connection()
+            ts_codes = []
+            try:
+                with conn.cursor() as cursor:
+                    sql = "SELECT DISTINCT ts_code FROM dc_daily WHERE trade_date = %s"
+                    cursor.execute(sql, (trade_date,))
+                    results = cursor.fetchall()
+                    ts_codes = [row['ts_code'] for row in results]
+            except Exception as e:
+                print(f"Error fetching concepts from dc_daily for {trade_date}: {e}")
+            finally:
+                conn.close()
+
+            if not ts_codes:
+                print(f"No concept data found in dc_daily for {trade_date}. Skipping.")
+                continue
+
+            print(f"Processing {trade_date} ({len(ts_codes)} concepts)...")
+            
+            with ThreadPoolExecutor(max_workers=max_workers) as executor:
+                # Submit all concepts for this date
+                future_to_code = {
+                    executor.submit(self._fetch_concept_member, code, trade_date): code 
+                    for code in ts_codes
+                }
+                
+                saved_count = 0
+                for future in as_completed(future_to_code):
+                    df = future.result()
+                    if df is not None and not df.empty:
+                        self._save_members_date(df)
+                        saved_count += 1
+                
+                print(f"Finished {trade_date}. Saved data for {saved_count} concepts.")
+
+    def _fetch_concept_member(self, ts_code, trade_date):
+        """Worker to fetch members for a specific concept and date."""
+        self.limiter.wait()
+        try:
+            return self.pro.dc_member(ts_code=ts_code, trade_date=trade_date)
+        except Exception:
+            return None
 
     def _save_members_date(self, df):
         """Save members data to DB."""
@@ -244,6 +333,58 @@ class ConceptManager:
                 else:
                     print(f"[{completed_count+1}/{len(dates_to_fetch)}] No data for {date}.")
                 completed_count += 1
+
+    def load_daily_data(self, start_date: str, end_date: str) -> pd.DataFrame:
+        """
+        Load concept daily data from DB.
+        """
+        conn = self._get_connection()
+        try:
+            # Use SQL to filter by date
+            # format date to match DB (assuming DB uses YYYYMMDD based on download_daily)
+            # Input start_date is usually YYYY-MM-DD or YYYYMMDD.
+            s_date = start_date.replace("-", "")
+            e_date = end_date.replace("-", "")
+            
+            sql = f"""
+            SELECT ts_code, trade_date, close, pct_change, turnover_rate 
+            FROM dc_daily 
+            WHERE trade_date >= '{s_date}' AND trade_date <= '{e_date}'
+            """
+            with conn.cursor() as cursor:
+                cursor.execute(sql)
+                results = cursor.fetchall()
+            return pd.DataFrame(results)
+        except Exception as e:
+            print(f"Error loading concept daily data: {e}")
+            return pd.DataFrame()
+        finally:
+            conn.close()
+
+    def load_member_data(self) -> pd.DataFrame:
+        """
+        Load all concept member data.
+        Returns: DataFrame with [ts_code, con_code]
+        """
+        conn = self._get_connection()
+        try:
+            # We want the latest mapping or historical?
+            # dc_member has trade_date. It seems to be a snapshot per date?
+            # Or is it "Joined Date"?
+            # Tushare dc_member doc: "Concept Board Detail".
+            # Usually it returns the *current* members or members at a date.
+            # If we downloaded historical, we might have multiple entries.
+            # Let's load all and let the consumer handle it.
+            sql = "SELECT ts_code, con_code, trade_date FROM dc_member"
+            with conn.cursor() as cursor:
+                cursor.execute(sql)
+                results = cursor.fetchall()
+            return pd.DataFrame(results)
+        except Exception as e:
+            print(f"Error loading concept member data: {e}")
+            return pd.DataFrame()
+        finally:
+            conn.close()
 
 if __name__ == "__main__":
     manager = ConceptManager()

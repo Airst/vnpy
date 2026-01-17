@@ -16,11 +16,13 @@ from core.alpha.v3_factor_calculator import V3FactorCalculator
 from core.alpha.v4_factor_calculator import V4FactorCalculator
 from core.alpha.v5_factor_calculator import V5FactorCalculator
 from core.alpha.v6_factor_calculator import V6FactorCalculator
+from core.alpha.v7_factor_calculator import V7FactorCalculator
 
 
 from data_manager.ts_downloader.download_daily import download_data
 from data_manager.ts_downloader.daily_basic_manager import DailyBasicManager
 from data_manager.ts_downloader.stock_info_manager import StockInfoManager
+from data_manager.ts_downloader.concept_manager import ConceptManager
 
 
 from core.core_service import CoreService
@@ -48,16 +50,24 @@ def setup_logger(version: str):
 # --------------------------
 
 if __name__ == "__main__":
+    
+    # Configuration Map
+    VERSION_CONFIG = {
+        "v3": (V3FactorCalculator, "V3"),
+        "v4": (V4FactorCalculator, "V4 (Alpha101)"),
+        "v5": (V5FactorCalculator, "V5 (Alpha158)"),
+        "v6": (V6FactorCalculator, "V6 (Fusion)"),
+        "v7": (V7FactorCalculator, "V7 (Concept Embedding)"),
+    }
+    
     parser = argparse.ArgumentParser(description="Unified Alpha Run Script")
     
     # Version argument: allow -v v3 or -v 3
-    parser.add_argument("-v", "--version", required=False, help="Alpha version (e.g., v3, v4, v5)")
+    parser.add_argument("-v", "--version", required=False, help=f"Alpha version (e.g., {', '.join(VERSION_CONFIG.keys())})")
     
-    # Support direct flags like -v3, -v4, -v5 for convenience/backward compatibility requests
-    parser.add_argument("-v3", action="store_true", help="Run V3")
-    parser.add_argument("-v4", action="store_true", help="Run V4")
-    parser.add_argument("-v5", action="store_true", help="Run V5")
-    parser.add_argument("-v6", action="store_true", help="Run V6")
+    # Dynamic flags for backward compatibility
+    for ver in VERSION_CONFIG:
+        parser.add_argument(f"-{ver}", action="store_true", help=f"Run {ver.upper()}")
     
     parser.add_argument("-a", "--ans", action="store_true", help="Only calculate factors (no signal model)")
     parser.add_argument("-s", "--skip", action="store_true", help="Skip Sync data before running")
@@ -73,50 +83,35 @@ if __name__ == "__main__":
     args = parser.parse_args()
     
     # Determine version
-    selected_version = None
-    if args.version:
-        selected_version = args.version
-    elif args.v3:
-        selected_version = "v3"
-    elif args.v4:
-        selected_version = "v4"
-    elif args.v5:
-        selected_version = "v5"
-    elif args.v6:
-        selected_version = "v6"
+    selected_version = args.version
+    if not selected_version:
+        for ver in VERSION_CONFIG:
+            if getattr(args, ver):
+                selected_version = ver
+                break
     
     if not selected_version:
-        print("Error: Please specify a version using -v [version] or -v3/-v4/-v5 flags.")
+        print(f"Error: Please specify a version using -v [version] or -{ '/-'.join(VERSION_CONFIG.keys())} flags.")
         sys.exit(1)
         
     # Normalize version string
     version = selected_version.lower()
     if not version.startswith("v"):
         version = "v" + version
+        
+    if version not in VERSION_CONFIG:
+        print(f"Error: Unknown version '{version}'. Supported versions: {', '.join(VERSION_CONFIG.keys())}")
+        sys.exit(1)
     
     setup_logger(version)
     
     print(f"Initializing Alpha Engine for {version.upper()}...")
     
-    if version == "v3":
-        calculator = V3FactorCalculator()
-        signal_name = "ashare_mlp_signal_v3"
-        description = "V3"
-    elif version == "v4":
-        calculator = V4FactorCalculator()
-        signal_name = "ashare_mlp_signal_v4"
-        description = "V4 (Alpha101)"
-    elif version == "v5":
-        calculator = V5FactorCalculator()
-        signal_name = "ashare_mlp_signal_v5"
-        description = "V5 (Alpha158)"
-    elif version == "v6":
-        calculator = V6FactorCalculator()
-        signal_name = "ashare_mlp_signal_v6"
-        description = "V6 (Fusion)"
-    else:
-        print(f"Error: Unknown version '{version}'. Supported versions: v3, v4, v5, v6")
-        sys.exit(1)
+    CalcClass, description = VERSION_CONFIG[version]
+    calculator = CalcClass()
+    signal_name = f"ashare_mlp_signal_{version}"
+    
+    print(f"Mode: {description}")
 
     selector=FundamentalSelector([args.vt]) if args.vt else FundamentalSelector()
     earlest_date,latest_date = selector.get_data_range()
@@ -146,6 +141,11 @@ if __name__ == "__main__":
 
         print("开始更新每日指标数据...")
         manager.download_all()
+        
+        print("开始更新概念板块信息...")
+        concept_manager = ConceptManager()
+        concept_manager.download_daily()
+        concept_manager.download_members()
         
         print("数据同步到alpha lab...")
         engine.sync_data()
