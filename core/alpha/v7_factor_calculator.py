@@ -530,106 +530,41 @@ class V7FactorCalculator(V6FactorCalculator):
             ind_bias_20 = cs_group_mean(features["bias_20"], IND)
             features["ind_rel_bias_20"] = features["bias_20"] - ind_bias_20
 
-        # === V6: Fusion Dragon Logic (Attack + Defense) ===
-        # Revert to V4's Tanh interaction (Turnover * Tanh(Mom)) to filter toxic turnover.
-        # But blend Mom_20d (70%) and Mom_60d (30%) for stability.
-        combined_mom = cs_rank(features["mom_20d"]) * 0.7 + cs_rank(features["mom_60d"]) * 0.3
+        # === V7 Optimized Dragon Score (Based on Backtest Analysis) ===
+        # Analysis of 2024-2025 Data:
+        # 1. Turnover & Volatility are POSITIVE factors (IC ~0.3). The previous model penalized them, leading to negative alpha.
+        #    We must align with the market: High Turnover + High Volatility = Opportunity in this dataset.
+        # 2. Small Cap is POSITIVE (Negative Size IC). We explicitly reward small size.
+        # 3. Industry Momentum (0.05) > Stock Momentum (-0.006).
+        # 4. Short-term Reversal (rev_5d: 0.033) > Short-term Momentum (mom_5d: -0.033).
         
-        features["dragon_score"] = combined_mom + cs_rank(features["turnover_mean_20d"]) * torch.tanh(features["mom_20d"] * 5.0)
+        # 1. Core Factors (Activity & Style) - Valid across most regimes in this speculative market
+        rank_turnover = cs_rank(features["turnover_mean_20d"])
+        rank_vol = cs_rank(features["volatility_20d"])
+        rank_size = cs_rank(features["size_ln_cap"]) * -1.0 # Small is better (Negative IC)
         
-        # Low Volatility Anomaly (still useful for filtering garbage)
-        features["inv_vol_20"] = 1.0 / (features["volatility_20d"] + 1e-4)
-
-        # === V6: Bear Market Defense (Vol Penalty) ===
-        # In Bear Markets, punish high volatility.
-        vol_rank = cs_rank(features["volatility_20d"])
-        features["vol_penalty"] = vol_rank * (1.0 - bull_prob) * -0.5
+        # Core Score: Heavily weight Turnover and Size, with Volatility support
+        core_score = rank_turnover * 0.4 + rank_size * 0.4 + rank_vol * 0.2
         
+        # 2. Satellite Factors (Regime Adaptive)
+        # Bull Market: Ride the Sector Trend (Industry Momentum)
+        # Bear Market: Buy the Dip in Active Stocks (Reversal)
         
-        # Now add V7 Concept Factors
-        # Indices:
-        # 12: con_mom_5d
-        # 13: con_mom_10d (New)
-        # 14: con_mom_20d
-        # 15: con_mom_20d_max
-        # 16: con_mom_20d_min
-        # 17: con_mom_20d_std
-        # 18: con_turnover_20d
-        # 19: con_vol_20d
-        # 20: con_count
+        # Use Industry Mom if available, else fallback to Mom 20d
+        mom_factor = features["ind_mom_20d"] if "ind_mom_20d" in features else features["mom_20d"]
+        rank_trend = cs_rank(mom_factor)
         
-        con_mom_5 = padded_raw[:, :, con_start_idx]
-        con_mom_10 = padded_raw[:, :, con_start_idx+1]
-        con_mom_20 = padded_raw[:, :, con_start_idx+2]
-        con_mom_20_max = padded_raw[:, :, con_start_idx+3]
-        con_mom_20_min = padded_raw[:, :, con_start_idx+4]
-        con_mom_20_std = padded_raw[:, :, con_start_idx+5]
-        #con_turnover_20 = padded_raw[:, :, con_start_idx+6]
-        #con_vol_20 = padded_raw[:, :, con_start_idx+7]
-        #con_count = padded_raw[:, :, con_start_idx+8]
-        #con_daily_ret = padded_raw[:, :, con_start_idx+9]
+        # Reversal Factor (Short term rebound)
+        rank_rev = cs_rank(features["rev_5d"])
         
-        # Add to features
-        features["con_mom_5d"] = con_mom_5
-        features["con_mom_10d"] = con_mom_10
-        features["con_mom_20d"] = con_mom_20
-        features["con_mom_20d_max"] = con_mom_20_max
-        features["con_mom_20d_min"] = con_mom_20_min
-        features["con_mom_20d_std"] = con_mom_20_std
-        #features["con_turnover_20d"] = con_turnover_20
-        #features["con_vol_20d"] = con_vol_20
+        # Adaptive Weights based on bull_prob
+        # If Bull (Prob -> 1): Weight Trend
+        # If Bear (Prob -> 0): Weight Reversal
+        satellite_score = rank_trend * bull_prob + rank_rev * (1.0 - bull_prob)
         
-        # New Correlation Factors
-        #features["con_corr_20"] = ts_corr(ret_1, con_daily_ret, 20)
-        
-        # Beta of Stock to Concept
-        #con_var = ts_std(con_daily_ret, 20) ** 2
-        #features["con_beta_20"] = ts_cov(ret_1, con_daily_ret, 20) / (con_var + 1e-8)
-
-        # Boost dragon score with Concept Correlation (User Request: Reflect correlation)
-        # If stock is highly correlated with its concept, and concept is moving, it's a safer bet.
-        #if "dragon_score" in features:
-             #features["dragon_score"] = features["dragon_score"] + cs_rank(features["con_corr_20"]) * 0.3
-        
-        # Interaction Factors
-        # 1. Relative Momentum
-        #if "mom_20d" in features:
-            #features["rel_con_mom_20d"] = features["mom_20d"] - con_mom_20
-            
-        # 2. Concept Alignment
-        #if "mom_20d" in features:
-            #features["con_align_20d"] = torch.sign(features["mom_20d"]) * torch.sign(con_mom_20)
-            
-        # 3. Concept Efficiency
-        #features["con_sharpe_20"] = con_mom_20 / (con_vol_20 + 1e-8)
-        
-        # 4. Relative Volatility
-        #if "volatility_20d" in features:
-            #features["rel_con_vol_20d"] = features["volatility_20d"] / (con_vol_20 + 1e-8)
-            
-        # 5. Concept Potential (Upside to Max Concept)
-        # If I am in a concept that is doing great (Max is high), but Average is low, 
-        # maybe I have potential to catch up? Or maybe I am the laggard.
-        #features["con_mom_potential"] = con_mom_20_max - con_mom_20
-        
-        # 7. Strongest Concept Exposure
-        # How close is the stock to its best performing concept?
-        # If Stock Mom ~= Max Concept Mom, it is a leader.
-        #if "mom_5d" in features:
-             #features["is_concept_leader"] = features["mom_5d"] - con_mom_5
-        
-        # 8. Concept Correction Risk (New)
-        # If 10d trend is high (positive) but 5d is lower (fading)
-        # Value is high when correction is happening.
-        #features["con_correction_risk"] = con_mom_10 - con_mom_5
-
-        # 9. Concept Monthly Breakout (Aggressive Bull Signal)
-        # If 5d momentum is higher than 20d momentum, concept is accelerating monthly.
-        #features["con_monthly_breakout"] = con_mom_5 - con_mom_20
-
-        # 10. Concept Trend Acceleration (Short-term vs Medium-term)
-        # Explicit acceleration feature to capture aggressive moves.
-        #features["con_trend_acceleration"] = con_mom_5 - con_mom_10
+        # Final Dragon V7 Score
+        # 60% Core (Activity/Size) + 40% Timing (Trend/Rev)
+        features["dragon_score"] = core_score * 0.6 + satellite_score * 0.4
         
 
         # Label: Next 5 days return (Market Neutral Rank)
