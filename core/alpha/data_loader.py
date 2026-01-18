@@ -180,7 +180,7 @@ class DataLoader:
                 # Fill nulls (stocks with no concepts or missing concept data) with 0
                 cols_to_fill = [
                     "concept_mom_5d", "concept_mom_10d", "concept_mom_20d", "concept_turnover_20d", "concept_vol_20d", "concept_count",
-                    "concept_mom_20d_max", "concept_mom_20d_min", "concept_mom_20d_std"
+                    "concept_mom_20d_max", "concept_mom_20d_min", "concept_mom_20d_std", "concept_turnover_20d_max"
                 ]
                 # Only fill columns that exist
                 cols_to_fill = [c for c in cols_to_fill if c in price_df.columns]

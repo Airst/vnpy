@@ -16,6 +16,30 @@ from vnpy.alpha.model.models.mlp_model import MlpModel
 from vnpy.alpha import Segment, AlphaDataset
 from vnpy.alpha.lab import AlphaLab
 
+def set_seed(seed: int = 42):
+    import random
+    import numpy as np
+    import torch
+    import os
+    
+    # Required for deterministic algorithms in CuBLAS
+    os.environ["CUBLAS_WORKSPACE_CONFIG"] = ":4096:8"
+    
+    random.seed(seed)
+    np.random.seed(seed)
+    torch.manual_seed(seed)
+    torch.cuda.manual_seed(seed)
+    torch.cuda.manual_seed_all(seed)
+    torch.backends.cudnn.deterministic = True
+    torch.backends.cudnn.benchmark = False
+    
+    try:
+        torch.use_deterministic_algorithms(True)
+    except Exception as e:
+        print(f"[MLPSignals] Warning: Could not enable deterministic algorithms: {e}")
+        
+    print(f"[MLPSignals] Random seed set to {seed} (Deterministic Mode)")
+
 class MLPSignals:
 
     def __init__(self, signal_name: str = "mlp_signal", force_retrain: bool = False):
@@ -40,10 +64,12 @@ class MLPSignals:
             "weight_decay": 0.0001,          # 添加轻微正则化
             "optimizer": "adam"             # 如果有的话
         }
-        self.n_jobs = 2  # 并行线程数，根据显存大小调整
+        self.n_jobs = 1  # 改为单线程以保证结果可复现 (多线程下全局Seed会被频繁重置导致随机性)
 
 
     def generate_signals(self, dataset_df: pl.DataFrame, start_date: str, lab: AlphaLab) -> pl.DataFrame:
+        set_seed(42)  # Ensure reproducibility
+        
         if self.force_retrain:
             print("[MLPSignals] force_retrain, remove old signals.")
             lab.remove_signal(self.signal_name)
@@ -257,6 +283,8 @@ class MLPSignals:
         return result_df
 
     def _train_and_predict_window(self, dataset_df: pl.DataFrame, task_info: Dict, lab: AlphaLab) -> Optional[pl.DataFrame]:
+        set_seed(42)  # Reset seed for this window (Deterministic)
+        
         train_period = task_info["train_period"]
         valid_period = task_info["valid_period"]
         test_period = task_info["test_period"]

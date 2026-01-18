@@ -159,6 +159,7 @@ class ConceptEmbedding:
                     pl.col("con_mom_20").min().alias("concept_mom_20d_min"),
                     pl.col("con_mom_20").std().alias("concept_mom_20d_std"),
                     pl.col("con_turnover_20").mean().alias("concept_turnover_20d"),
+                    pl.col("con_turnover_20").max().alias("concept_turnover_20d_max"),
                     pl.col("con_vol_20").mean().alias("concept_vol_20d"),
                     pl.len().alias("concept_count"),
                     # New Features
@@ -192,6 +193,7 @@ class ConceptEmbedding:
                     pl.col("con_mom_20").min().alias("concept_mom_20d_min"),
                     pl.col("con_mom_20").std().alias("concept_mom_20d_std"),
                     pl.col("con_turnover_20").mean().alias("concept_turnover_20d"),
+                    pl.col("con_turnover_20").max().alias("concept_turnover_20d_max"),
                     pl.col("con_vol_20").mean().alias("concept_vol_20d"),
                     pl.len().alias("concept_count"),
                     # New Features

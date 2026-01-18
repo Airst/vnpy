@@ -27,7 +27,8 @@ class V7FactorCalculator(V6FactorCalculator):
             "concept_mom_5d", "concept_mom_10d", "concept_mom_20d", "concept_mom_20d_max", 
             "concept_mom_20d_min", "concept_mom_20d_std",
             "concept_turnover_20d", "concept_vol_20d", "concept_count", "concept_daily_ret",
-            "concept_hot_ratio", "concept_top3_mean", "concept_cohesion"
+            "concept_hot_ratio", "concept_top3_mean", "concept_cohesion",
+            "concept_turnover_20d_max"
         ]
         # Ensure they exist (DataLoader fills with 0 if missing, but check to be safe)
         existing_concept_cols = [c for c in concept_cols if c in df.columns]
@@ -530,50 +531,88 @@ class V7FactorCalculator(V6FactorCalculator):
             ind_bias_20 = cs_group_mean(features["bias_20"], IND)
             features["ind_rel_bias_20"] = features["bias_20"] - ind_bias_20
 
-        # === V7 Optimized Dragon Score (Based on Backtest Analysis) ===
-        # Analysis of 2024-2025 Data:
-        # 1. Turnover & Volatility are POSITIVE factors (IC ~0.3). The previous model penalized them, leading to negative alpha.
-        #    We must align with the market: High Turnover + High Volatility = Opportunity in this dataset.
-        # 2. Small Cap is POSITIVE (Negative Size IC). We explicitly reward small size.
-        # 3. Industry Momentum (0.05) > Stock Momentum (-0.006).
-        # 4. Short-term Reversal (rev_5d: 0.033) > Short-term Momentum (mom_5d: -0.033).
+        # === V7 Optimized Dragon Score (Based on Backtest Analysis - Round 3) ===
+        # Update 2026-01-18:
+        # 1. Base (70%): Turnover (Liquidity) + Concept/Industry (Relative Strength) + Small Cap (Size).
+        # 2. Dynamic (30%): Bull -> Volatility; Bear -> Reversal + Low Vol.
         
-        # 1. Core Factors (Activity & Style) - Valid across most regimes in this speculative market
-        rank_turnover = cs_rank(features["turnover_mean_20d"])
-        rank_vol = cs_rank(features["volatility_20d"])
-        rank_size = cs_rank(features["size_ln_cap"]) * -1.0 # Small is better (Negative IC)
-        
-        # Core Score: Heavily weight Turnover and Size, with Volatility support
-        core_score = rank_turnover * 0.4 + rank_size * 0.4 + rank_vol * 0.2
-        
-        # 2. Satellite Factors (Regime Adaptive)
-        # Bull Market: Ride the Sector Trend (Industry Momentum)
-        # Bear Market: Buy the Dip in Active Stocks (Reversal)
-        
-        # Use Industry Mom if available, else fallback to Mom 20d
-        mom_factor = features["ind_mom_20d"] if "ind_mom_20d" in features else features["mom_20d"]
-        rank_trend = cs_rank(mom_factor)
-        
-        # Reversal Factor (Short term rebound)
-        rank_rev = cs_rank(features["rev_5d"])
-        
-        # Adaptive Weights based on bull_prob
-        # If Bull (Prob -> 1): Weight Trend
-        # If Bear (Prob -> 0): Weight Reversal
-        satellite_score = rank_trend * bull_prob + rank_rev * (1.0 - bull_prob)
-        
-        # Final Dragon V7 Score
-        # 60% Core (Activity/Size) + 40% Timing (Trend/Rev)
-        features["dragon_score"] = core_score * 0.6 + satellite_score * 0.4
-        
+        # Extract Concept Features (Lazy extraction)
+        # 6: concept_turnover_20d
+        # 13: concept_turnover_20d_max
+        if padded_raw.shape[2] >= con_start_idx + 14:
+             features["con_turnover_20d"] = padded_raw[:, :, con_start_idx + 6]
+             features["con_turnover_20d_max"] = padded_raw[:, :, con_start_idx + 13]
+        else:
+             # Fallback
+             features["con_turnover_20d"] = features["turnover_mean_20d"] # Self as fallback
+             features["con_turnover_20d_max"] = features["turnover_mean_20d"] # Self as fallback
 
-        # Label: Next 5 days return (Market Neutral Rank)
-        raw_ret_5 = ts_delay(C, -5) / C - 1
+        # 1. Base Components
+        # Liquidity (Core Driver, IC ~0.33)
+        rank_turnover = cs_rank(features["turnover_mean_20d"])
+        
+        # Quality: Price-Volume Correlation (Avoid "Pump and Dump")
+        # High Turnover with Positive Price Correlation -> Healthy Trend.
+        rank_price_vol_corr = cs_rank(features["price_vol_corr_20"])
+        
+        # Relative Strength
+        # Industry
+        if "ind_rel_turnover_20d" in features:
+            rank_ind_turnover = cs_rank(features["ind_rel_turnover_20d"])
+        else:
+            rank_ind_turnover = torch.zeros_like(rank_turnover)
+        
+        # Concept (Fine-grained Theme)
+        # Address coarse Industry issue by looking at specific Concept/Theme relative strength.
+        features["con_rel_turnover_20d"] = features["turnover_mean_20d"] / (features["con_turnover_20d_max"] + 1e-8)
+        rank_con_turnover = cs_rank(features["con_rel_turnover_20d"])
+
+        # Small Cap (Size Factor)
+        # Backtest shows significant negative IC for size (Small Cap Premium).
+        rank_small_cap = cs_rank(features["size_ln_cap"] * -1)
+
+        # 2. Dynamic Components
+        # Bull: Volatility (High Elasticity)
+        rank_vol = cs_rank(features["volatility_20d"])
+        
+        # Bear: Defense (Small Cap + Reversal)
+        # 1. Small Cap (Liquidity Hug)
+        # 2. Tech Reversal (RSI/Deep Value)
+        # 3. Bias Reversal (Short-term Mean Reversion - Bias 10)
+        rank_bias_reversal = cs_rank(features["bias_10"] * -1)
+        
+        # 3. Score Construction
+        # Base Weight: 0.80 
+        # Turnover 0.30 (Reduced from 0.40 to reduce noise)
+        # PriceVolCorr 0.10 (Added to improve quality/win rate)
+        # Con 0.20, Ind 0.10, SmallCap 0.10
+        score_base = (
+            rank_turnover * 0.30 + 
+            rank_price_vol_corr * 0.10 + 
+            rank_con_turnover * 0.20 + 
+            rank_ind_turnover * 0.10 + 
+            rank_small_cap * 0.10
+        )
+        
+        # Dynamic Weight: 0.20
+        # Bull Mode: Volatility * 0.20
+        # Bear Mode: Small Cap * 0.10 + Tech Reversal * 0.05 + Bias Reversal * 0.10 = 0.25 (Slightly boosted)
+        # The equation balances via (1-prob).
+        
+        features["dragon_score"] = (
+            score_base + 
+            bull_prob * rank_vol * 0.20 + 
+            (1.0 - bull_prob) * (rank_small_cap * 0.10 + features["tech_reversal"] * 0.05 + rank_bias_reversal * 0.10)
+        )
+
+        # Label: Next 10 days return (Market Neutral Rank)
+        # Shifted from 5d to 10d to improve stability and win rate for monthly-updated models.
+        raw_ret_10 = ts_delay(C, -10) / C - 1
         
         # Penalize low liquidity stocks (Turnover < 1%)
         low_liq_penalty = (features["turnover_mean_20d"] < 1.0).float() * 0.05
-        raw_ret_5 = raw_ret_5 - low_liq_penalty
+        raw_ret_10 = raw_ret_10 - low_liq_penalty
 
-        features["label"] = cs_rank(raw_ret_5)
+        features["label"] = cs_rank(raw_ret_10)
 
         return features
