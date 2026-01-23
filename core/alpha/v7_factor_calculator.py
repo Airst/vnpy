@@ -573,30 +573,57 @@ class V7FactorCalculator(V6FactorCalculator):
         # con_cohesion = padded_raw[:, :, con_start_idx+12]
         
         # Add to features
-        # features["con_mom_5d"] = con_mom_5
-        # features["con_mom_20d"] = con_mom_20
-        # features["con_mom_20d_max"] = con_mom_20_max
-        # features["con_turnover_20d"] = con_turnover_20
-        # features["con_hot_ratio"] = con_hot_ratio
+        features["con_mom_5d"] = con_mom_5
+        features["con_mom_20d"] = con_mom_20
+        features["con_mom_20d_max"] = con_mom_20_max
+        features["con_turnover_20d"] = con_turnover_20
+        features["con_hot_ratio"] = con_hot_ratio
         
-        # # === Concept Relative Strength (Alpha vs Concept) ===
-        # # 1. Relative Momentum (Mean): Is the stock stronger than its average concept?
-        # features["rel_con_mom_20d"] = features["mom_20d"] - con_mom_20
+        # === Concept Relative Strength (Alpha vs Concept) ===
+        # 1. Relative Momentum (Mean): Is the stock stronger than its average concept?
+        features["rel_con_mom_20d"] = features["mom_20d"] - con_mom_20
         
-        # # 2. Leader Distance (Max): How far is the stock from its strongest concept's performance?
-        # # If close to 0 (or positive), it's likely a leader/beneficiary of the hot theme.
-        # # If very negative, it's lagging its best story.
-        # features["rel_con_mom_max_20d"] = features["mom_20d"] - con_mom_20_max
+        # 2. Leader Distance (Max): How far is the stock from its strongest concept's performance?
+        # If close to 0 (or positive), it's likely a leader/beneficiary of the hot theme.
+        # If very negative, it's lagging its best story.
+        features["rel_con_mom_max_20d"] = features["mom_20d"] - con_mom_20_max
         
-        # # 3. Concept Divergence
-        # # High std means the stock belongs to some hot and some cold concepts. 
-        # # Market might be confused about which logic to trade.
-        # features["con_divergence_20d"] = con_mom_20_std
+        # 3. Concept Divergence
+        # High std means the stock belongs to some hot and some cold concepts. 
+        # Market might be confused about which logic to trade.
+        features["con_divergence_20d"] = con_mom_20_std
 
-        # # Boost dragon score with Concept Relative Strength (User Request)
-        # # If stock is outperforming its concept, it's a stronger signal.
-        # if "dragon_score" in features:
-        #      features["dragon_score"] = features["dragon_score"] + cs_rank(features["rel_con_mom_20d"]) * 0.3
+        # === V7 Optimized Dragon Score (Liquidity + Structure + Theme) ===
+        # Rationale:
+        # 1. Turnover is the strongest signal (IC > 0.3). Keep it as base.
+        # 2. Mom_20d has weak IC (~0). Replace with Price-Vol Correlation (IC ~0.08) for trend confirmation.
+        # 3. Add Concept Relative Strength to filter "Solo Pumps" (improve Win Rate).
+        
+        # Components Rank
+        rank_turnover = cs_rank(features["turnover_mean_20d"])
+        rank_pv_corr = cs_rank(features["price_vol_corr_20"])
+        rank_rel_con = cs_rank(features["rel_con_mom_20d"])
+        rank_mom_20d = cs_rank(features["mom_20d"])
+        
+        # New Dragon Score (Dynamic)
+        # 1. Base: Liquidity is King (Always valid in A-share)
+        # 2. Offense: Momentum + Concept + Volume Structure
+        # 3. Bull Multiplier: In Bull markets (bull_prob > 0.5), we trust Momentum/Concept more.
+        
+        offensive_score = (rank_mom_20d * 0.4 + rank_rel_con * 0.4 + rank_pv_corr * 0.2)
+        
+        # Dynamic Weighting:
+        # Bear/Oscillation (bull_prob ~ 0): Score = Turnover + 0.5 * Offense
+        # Bull (bull_prob ~ 1): Score = Turnover + 1.5 * Offense
+        features["dragon_score"] = rank_turnover + offensive_score * (0.5 + bull_prob)
+        
+        # Dynamic Penalty for Short-term Overheating (mom_5d)
+        # Bear Market: Penalty if > 20% (False Breakout risk)
+        # Bull Market: Penalty if > 40% (Allow strong trend acceleration)
+        overheat_threshold = 0.2 + bull_prob * 0.2
+        
+        # Apply Penalty
+        features["dragon_score"] = features["dragon_score"] - (features["mom_5d"] > overheat_threshold).float() * 1.0
         
 
         # Label: Next 5 days return (Market Neutral Rank)

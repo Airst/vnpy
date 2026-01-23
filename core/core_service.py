@@ -2,7 +2,7 @@ import os
 import json
 import importlib
 import inspect
-from datetime import datetime, date
+from datetime import datetime, date, timedelta
 from typing import List, Dict, Type
 import numpy as np
 import pandas as pd
@@ -195,6 +195,40 @@ class CoreService:
                     "balance": float(row["balance"]),
                     "drawdown": float(row["drawdown"]),
                 })
+
+            # Calculate and log 90-day return
+            print("-" * 30)
+            print("90-Day Return Analysis:")
+            dates = df.index.tolist()
+            balances = df["balance"].tolist()
+            if dates:
+                start_idx = 0
+                total_days = len(dates)
+                while start_idx < total_days:
+                    current_date = dates[start_idx]
+                    target_date = current_date + timedelta(days=90)
+                    end_idx = -1
+                    for i in range(start_idx, total_days):
+                        if dates[i] >= target_date:
+                            end_idx = i
+                            break
+                    
+                    if end_idx == -1:
+                        end_idx = total_days - 1
+                        
+                    start_balance = balances[start_idx]
+                    end_balance = balances[end_idx]
+                    
+                    if start_balance > 0:
+                        ret = (end_balance / start_balance) - 1
+                        start_str = dates[start_idx].strftime("%Y-%m-%d")
+                        end_str = dates[end_idx].strftime("%Y-%m-%d")
+                        print(f"[{start_str} to {end_str}]: {ret:.2%}")
+                    
+                    if start_idx == end_idx:
+                        break
+                    start_idx = end_idx
+            print("-" * 30)
 
         # Extract trades for table
         trades = []
