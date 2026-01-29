@@ -20,7 +20,8 @@ from vnpy.alpha.logger import logger
 PROJECT_ROOT = Path(__file__).resolve().parent.parent
 
 core_service = CoreService()
-trade_service = TradeService()
+trade_service = None
+#trade_service = TradeService()
 
 # Scheduler
 def run_daily_task():
@@ -50,16 +51,17 @@ async def scheduler():
 @asynccontextmanager
 async def lifespan(app: FastAPI):
     # Start scheduler
-    task = asyncio.create_task(scheduler())
+    #task = asyncio.create_task(scheduler())
     yield
     # Cleanup
-    task.cancel()
+    #task.cancel()
     trade_service.close()
     print("Shut down TradeService...")
 
 app = FastAPI(lifespan=lifespan)
 
-trade_service.connect()
+if trade_service is not None:
+    trade_service.connect()
 
 # API Models
 class BacktestRequest(BaseModel):

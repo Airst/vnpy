@@ -1,6 +1,7 @@
+from core.alpha.v6_factor_calculator import V6FactorCalculator
 from core.alpha.factor_calculator import FactorCalculator, device, torch, np, pl, cs_rank, ts_corr, cs_zscore, ts_delay, ts_mean, ts_min, ts_max, ts_quantile, ts_std, ts_sum, ts_rsquare, ts_slope, ta_atr, ta_rsi, cs_group_mean, ts_kdj, ts_cov
 
-class V4FactorCalculator(FactorCalculator):
+class V8FactorCalculator(V6FactorCalculator):
     def __init__(self):
         super().__init__()
 
@@ -625,15 +626,13 @@ class V4FactorCalculator(FactorCalculator):
         features["dragon_score"] = features["dragon_score"] - (features["mom_5d"] > overheat_threshold).float() * 1.0
         
 
-        # Label: Next 5 days return (Probability of Rise)
+        # Label: Next 5 days return (Market Neutral Rank)
         raw_ret_5 = ts_delay(C, -5) / C - 1
         
         # Penalize low liquidity stocks (Turnover < 1%)
         low_liq_penalty = (features["turnover_mean_20d"] < 1.0).float() * 0.05
         raw_ret_5 = raw_ret_5 - low_liq_penalty
 
-        # Binary Label: 1.0 if Return > 0 (Rise), 0.0 if Return <= 0 (Fall)
-        # The MLP (Regression) will learn to predict P(Label=1) i.e., Probability of Rise.
-        features["label"] = (raw_ret_5 > 0.0).float()
+        features["label"] = cs_rank(raw_ret_5)
 
         return features

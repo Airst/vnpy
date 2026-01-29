@@ -17,6 +17,7 @@ from core.alpha.v4_factor_calculator import V4FactorCalculator
 from core.alpha.v5_factor_calculator import V5FactorCalculator
 from core.alpha.v6_factor_calculator import V6FactorCalculator
 from core.alpha.v7_factor_calculator import V7FactorCalculator
+from core.alpha.v8_factor_calculator import V8FactorCalculator
 
 
 from data_manager.ts_downloader.download_daily import download_data
@@ -58,6 +59,7 @@ if __name__ == "__main__":
         "v5": (V5FactorCalculator, "V5 (Alpha158)"),
         "v6": (V6FactorCalculator, "V6 (Fusion)"),
         "v7": (V7FactorCalculator, "V7 (Concept Embedding)"),
+        "v8": (V8FactorCalculator, "V8 (Stacking V4)"),
     }
     
     parser = argparse.ArgumentParser(description="Unified Alpha Run Script")
