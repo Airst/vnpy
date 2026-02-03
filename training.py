@@ -1,5 +1,6 @@
 import sys
 import os
+os.environ['CUDA_LAUNCH_BLOCKING'] = '1'
 from datetime import datetime
 from pathlib import Path
 import re
@@ -47,6 +48,84 @@ def setup_logger(version: str):
             logger.add(sys.stdout, colorize=True, format=fmt)
         except Exception as e:
             print(f"Failed to setup logger redirection: {e}")
+
+def save_log_dump(version: str):
+    log_filename = f"log/run_{version}.log"
+    output_filename = f"traning{version.upper()}.txt"
+    
+    if not os.path.exists(log_filename):
+        print(f"Log file {log_filename} not found.")
+        return
+
+    try:
+        with open(log_filename, 'r', encoding='utf-8') as f:
+            content = f.read()
+        
+        parts = []
+        
+        # 1. Extract Factor Performance
+        # Find the LAST occurrence of the Factor Analysis Header
+        start_marker = "=== 因子绩效分析"
+        start_marker_idx = content.rfind(start_marker)
+        
+        if start_marker_idx != -1:
+            # Find the start of the line (to include timestamp)
+            section_start = content.rfind('\n', 0, start_marker_idx) + 1
+            
+            # Find the end: after "Top 5 Factors" block
+            top5_marker = "[Top 5 Factors"
+            top5_idx = content.find(top5_marker, start_marker_idx)
+            
+            section_end = -1
+            if top5_idx != -1:
+                # Top 5 block usually has 6 lines (Header + 5 factors)
+                # scan for 6 newlines
+                curr = top5_idx
+                for _ in range(6):
+                    next_nl = content.find('\n', curr + 1)
+                    if next_nl == -1:
+                        curr = len(content)
+                        break
+                    curr = next_nl
+                section_end = curr + 1 # Include the newline
+            else:
+                # Fallback if Top 5 not found, take until next double newline or some limit
+                section_end = content.find('\n\n', start_marker_idx)
+                if section_end == -1: section_end = min(len(content), start_marker_idx + 5000)
+
+            parts.append(content[section_start:section_end])
+        
+        # 2. Extract Backtest Statistics
+        # Look for the start of the stats section
+        stats_markers = ["历史数据回放结束", "开始计算逐日盯市盈亏", "开始计算策略统计指标"]
+        stats_start_idx = -1
+        
+        for marker in stats_markers:
+            idx = content.rfind(marker)
+            if idx != -1:
+                stats_start_idx = idx
+                break
+        
+        if stats_start_idx != -1:
+            # Find the start of the line
+            stats_section_start = content.rfind('\n', 0, stats_start_idx) + 1
+            # Add a separator if we have previous parts
+            # (Usually logs are contiguous, but we can verify)
+            if parts:
+                # Check if last part ends with newline, if not add one
+                if not parts[-1].endswith('\n'):
+                    parts.append("\n")
+            parts.append(content[stats_section_start:])
+            
+        if parts:
+            with open(output_filename, 'w', encoding='utf-8') as f:
+                f.write("".join(parts))
+            print(f"Log dump saved to {output_filename}")
+        else:
+            print("No relevant log sections found to dump.")
+            
+    except Exception as e:
+        print(f"Failed to save log dump: {e}")
 
 # --------------------------
 
@@ -176,4 +255,6 @@ if __name__ == "__main__":
                 "signal_name": signal_name,
             }
         )
+    
+    save_log_dump(version)
 

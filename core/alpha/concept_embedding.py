@@ -74,6 +74,20 @@ class ConceptEmbedding:
              pl.col("pct_change").rolling_std(20).over("ts_code").alias("con_vol_20")
         ])
         
+        # === New Features for Rotation & Rank ===
+        # 1. Concept Acceleration (Change in Momentum)
+        # Did the concept speed up in the last week?
+        concept_df = concept_df.with_columns([
+            (pl.col("con_mom_5") - pl.col("con_mom_5").shift(5).over("ts_code")).alias("con_mom_5_acc")
+        ])
+        
+        # 2. Cross-Sectional Rank (Relative Strength among Concepts)
+        # We need to rank concepts by mom_20 for each DATE.
+        # Note: 'over("datetime")' groups by date.
+        concept_df = concept_df.with_columns([
+            (pl.col("con_mom_20").rank(descending=False).over("datetime") / pl.count("con_mom_20").over("datetime")).alias("con_rank_score")
+        ])
+
         # Filter range back to requested start_date
         req_start_dt = datetime.strptime(start_date, "%Y-%m-%d")
         concept_df = concept_df.filter(pl.col("datetime") >= req_start_dt)
@@ -166,7 +180,11 @@ class ConceptEmbedding:
                     (pl.col("pct_change") / 100.0).mean().alias("concept_daily_ret"),
                     (pl.col("pct_change") > 3.0).mean().alias("concept_hot_ratio"),
                     pl.col("pct_change").top_k(3).mean().alias("concept_top3_mean"),
-                    pl.col("pct_change").std().alias("concept_cohesion")
+                    pl.col("pct_change").std().alias("concept_cohesion"),
+                    # New Aggregations for Rotation
+                    pl.col("con_mom_5_acc").mean().alias("concept_acc_5_mean"),
+                    pl.col("con_rank_score").mean().alias("concept_rank_score_mean"),
+                    pl.col("con_rank_score").max().alias("concept_rank_score_max")
                 ]).collect()
                 features_list.append(feat_hist)
                 del merged_hist # Free memory
@@ -200,7 +218,11 @@ class ConceptEmbedding:
                     (pl.col("pct_change") / 100.0).mean().alias("concept_daily_ret"),
                     (pl.col("pct_change") > 3.0).mean().alias("concept_hot_ratio"),
                     pl.col("pct_change").top_k(3).mean().alias("concept_top3_mean"),
-                    pl.col("pct_change").std().alias("concept_cohesion")
+                    pl.col("pct_change").std().alias("concept_cohesion"),
+                    # New Aggregations for Rotation
+                    pl.col("con_mom_5_acc").mean().alias("concept_acc_5_mean"),
+                    pl.col("con_rank_score").mean().alias("concept_rank_score_mean"),
+                    pl.col("con_rank_score").max().alias("concept_rank_score_max")
                 ]).collect()
                 features_list.append(feat_recent)
                 del merged_recent

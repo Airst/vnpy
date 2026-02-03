@@ -9,7 +9,7 @@ class V8FactorCalculator(V6FactorCalculator):
         """
         Overridden to include Concept columns in tensor construction.
         """
-        print("[V7FactorCalculator] Preparing data for GPU (Including Concept Data)...")
+        print("[V8FactorCalculator] Preparing data for GPU (Including Concept Data)...")
         
         df = df.sort(["vt_symbol", "datetime"])
         
@@ -17,6 +17,7 @@ class V8FactorCalculator(V6FactorCalculator):
         
         # Check for industry
         if "industry" in df.columns:
+            print("[V8FactorCalculator] Found 'industry' column. Adding 'industry_code'.")
             df = df.with_columns(
                 pl.col("industry").fill_null("Unknown").cast(pl.Categorical).to_physical().alias("industry_code")
             )
@@ -27,13 +28,14 @@ class V8FactorCalculator(V6FactorCalculator):
             "concept_mom_5d", "concept_mom_10d", "concept_mom_20d", "concept_mom_20d_max", 
             "concept_mom_20d_min", "concept_mom_20d_std",
             "concept_turnover_20d", "concept_vol_20d", "concept_count", "concept_daily_ret",
-            "concept_hot_ratio", "concept_top3_mean", "concept_cohesion"
+            "concept_hot_ratio", "concept_top3_mean", "concept_cohesion",
+            "concept_acc_5_mean", "concept_rank_score_mean"
         ]
         # Ensure they exist (DataLoader fills with 0 if missing, but check to be safe)
         existing_concept_cols = [c for c in concept_cols if c in df.columns]
         
         if len(existing_concept_cols) < len(concept_cols):
-            print(f"[V7FactorCalculator] Warning: Some concept columns missing. Found: {existing_concept_cols}")
+            print(f"[V8FactorCalculator] Warning: Some concept columns missing. Found: {existing_concept_cols}")
             # Add missing as 0
             for c in concept_cols:
                 if c not in df.columns:
@@ -49,9 +51,9 @@ class V8FactorCalculator(V6FactorCalculator):
         num_stocks = len(unique_symbols)
         max_len = counts.max()
         
-        print(f"[V7FactorCalculator] Stocks: {num_stocks}, Max Len: {max_len}")
+        print(f"[V8FactorCalculator] Stocks: {num_stocks}, Max Len: {max_len}")
         
-        print("[V7FactorCalculator] Creating padded tensors...")
+        print("[V8FactorCalculator] Creating padded tensors...")
         df_idx = df.select(["vt_symbol"]).with_columns([
             pl.int_range(0, pl.len()).over("vt_symbol").alias("t_idx")
         ])
@@ -66,10 +68,10 @@ class V8FactorCalculator(V6FactorCalculator):
         
         padded_raw[s_indices_t, t_indices_t, :] = raw_tensor
         
-        print("[V7FactorCalculator] Calculating features...")
+        print("[V8FactorCalculator] Calculating features...")
         features = self.build_features(padded_raw)
         
-        print("[V7FactorCalculator] reconstructing dataframe...")
+        print("[V8FactorCalculator] reconstructing dataframe...")
         feature_cols = []
         feature_names = []
         
@@ -85,7 +87,7 @@ class V8FactorCalculator(V6FactorCalculator):
         
         df_features = df.with_columns(new_cols)
 
-        print("[V7FactorCalculator] Pre-processing data...")
+        print("[V8FactorCalculator] Pre-processing data...")
         try:
             exclude_cols = {"datetime", "vt_symbol", "label", "industry"}
             # All raw cols including concept cols should be dropped from final features
@@ -122,7 +124,7 @@ class V8FactorCalculator(V6FactorCalculator):
             
             return dataset_df
         except Exception as e:
-            print(f"[V7FactorCalculator] Data pre-processing error: {e}")
+            print(f"[V8FactorCalculator] Data pre-processing error: {e}")
             import traceback
             traceback.print_exc()
             raise e
@@ -138,6 +140,8 @@ class V8FactorCalculator(V6FactorCalculator):
         # 8:pb, 9:ps, 10:dv_ratio, 11:total_mv
         
         # Let's keep (Batch, Time) for basic ops
+        print(f"[DEBUG] padded_raw.shape: {padded_raw.shape}")
+        
         O = padded_raw[:, :, 0]
         H = padded_raw[:, :, 1]
         L = padded_raw[:, :, 2]
@@ -154,8 +158,17 @@ class V8FactorCalculator(V6FactorCalculator):
         # Industry Code (if available, index 12)
         IND = None
         con_start_idx = 12
-        if padded_raw.shape[2] > 22:
+        if padded_raw.shape[2] > 25:
             IND = padded_raw[:, :, 12]
+            print(f"[DEBUG] IND extracted. Shape: {IND.shape}")
+            # Debug IND values
+            mask_ind = ~torch.isnan(IND)
+            if mask_ind.any():
+                print(f"[DEBUG] IND stats - Min: {torch.min(IND[mask_ind])}, Max: {torch.max(IND[mask_ind])}")
+                print(f"[DEBUG] IND NaNs: {(~mask_ind).sum()}, Infs: {torch.isinf(IND).sum()}")
+            else:
+                 print("[DEBUG] IND all NaNs!")
+            
             con_start_idx = 13
         
         # 保留V6因子
@@ -557,6 +570,12 @@ class V8FactorCalculator(V6FactorCalculator):
         # 18: con_turnover_20d
         # 19: con_vol_20d
         # 20: con_count
+        # 21: con_daily_ret
+        # 22: con_hot_ratio
+        # 23: con_top3_mean
+        # 24: con_cohesion
+        # 25: con_acc_5_mean
+        # 26: con_rank_score_mean
         
         con_mom_5 = padded_raw[:, :, con_start_idx]
         con_mom_10 = padded_raw[:, :, con_start_idx+1]
@@ -571,13 +590,16 @@ class V8FactorCalculator(V6FactorCalculator):
         con_hot_ratio = padded_raw[:, :, con_start_idx+10]
         # con_top3_mean = padded_raw[:, :, con_start_idx+11]
         # con_cohesion = padded_raw[:, :, con_start_idx+12]
+        con_acc_5 = padded_raw[:, :, con_start_idx+13]
+        con_rank_score = padded_raw[:, :, con_start_idx+14]
         
         # Add to features
         features["con_mom_5d"] = con_mom_5
         features["con_mom_20d"] = con_mom_20
         features["con_mom_20d_max"] = con_mom_20_max
         features["con_turnover_20d"] = con_turnover_20
-        features["con_hot_ratio"] = con_hot_ratio
+        # features["con_acc_5_mean"] = con_acc_5
+        # features["con_rank_score_mean"] = con_rank_score
         
         # === Concept Relative Strength (Alpha vs Concept) ===
         # 1. Relative Momentum (Mean): Is the stock stronger than its average concept?
@@ -593,38 +615,204 @@ class V8FactorCalculator(V6FactorCalculator):
         # Market might be confused about which logic to trade.
         features["con_divergence_20d"] = con_mom_20_std
 
-        # === V7 Optimized Dragon Score (Liquidity + Structure + Theme) ===
-        # Rationale:
-        # 1. Turnover is the strongest signal (IC > 0.3). Keep it as base.
-        # 2. Mom_20d has weak IC (~0). Replace with Price-Vol Correlation (IC ~0.08) for trend confirmation.
-        # 3. Add Concept Relative Strength to filter "Solo Pumps" (improve Win Rate).
+        # === V8.8: Reconstructed Rebound Strategy (User Request: "Fast Rise Fast Fall" + "Support" + "Head-Lift") ===
         
-        # Components Rank
+        # 1. Characteristic: "Fast Rise Fast Fall" (Elasticity)
+        # Stocks that have history of big moves (High Vol Range) but are currently oversold.
+        # Vol Range 20d: (Max - Min) / Min
+        # Re-calculate Price Base/Peak for 20d first as they are needed
+        price_base_20 = ts_min(L, 20)
+        price_peak_20 = ts_max(H, 20)
+        price_base_60 = ts_min(L, 60)
+        price_peak_60 = ts_max(H, 60)
+        
+        features["vol_range_20d"] = (price_peak_20 - price_base_20) / (price_base_20 + 1e-8)
+        elasticity_rank = cs_rank(features["vol_range_20d"])
+        
+        # 2. Status: "Deep Oversold" (Fast Fall)
+        # Bias 10d: Distance from 10-day MA. Negative = Oversold.
+        # RSI 14: < 30 = Oversold.
+        # We want NEGATIVE bias and LOW RSI.
+        oversold_score = cs_rank(features["bias_10"] * -1) + cs_rank(features["rsi_14"] * -1)
+        
+        # 3. Location: "Near Support"
+        # Explicit Support/Resistance Distance
+        features["dist_support_20"] = (C - price_base_20) / (price_base_20 + 1e-8)
+        features["dist_support_60"] = (C - price_base_60) / (price_base_60 + 1e-8)
+        
+        features["dist_pressure_20"] = (price_peak_20 - C) / (C + 1e-8)
+        features["dist_pressure_60"] = (price_peak_60 - C) / (C + 1e-8)
+        
+        features["rr_ratio_20"] = features["dist_pressure_20"] / (features["dist_support_20"] + 1e-4)
+        features["rr_ratio_60"] = features["dist_pressure_60"] / (features["dist_support_60"] + 1e-4)
+        
+        # We want dist_support to be SMALL (Near 0).
+        support_score = 1.0 - torch.clamp(features["dist_support_20"] / 0.15, 0, 1) # Linear decay from 0% to 15% distance
+        
+        # 4. Trigger: "Head-Lifting Signal" (Momentum Ignition)
+        # A. Price Action: Close > MA5 AND Price Crossed MA5 Upwards (or just solid red bar from low)
+        ma_5 = ts_mean(C, 5)
+        ma_5_prev = ts_delay(ma_5, 1)
+        c_prev = ts_delay(C, 1)
+        
+        # Condition 1: Cross Up MA5 (Classic Reversal)
+        cross_up_ma5 = (C > ma_5) & (c_prev < ma_5_prev)
+        
+        # Condition 2: Big Yang Candle (Strong buying today)
+        is_big_red = (C / O - 1) > 0.025
+        
+        # Condition 3: Reversal from Low (Intraday or Day-to-Day)
+        # Close is significantly higher than recent low
+        reversal_strength = (C - ts_min(L, 5)) / (ts_min(L, 5) + 1e-8)
+        
+        # Condition 4: Volume Pickup (Ignition)
+        vol_ma_5 = ts_mean(V, 5)
+        vol_ignition = V > vol_ma_5 * 1.2
+        
+        # Composite Head-Lift Signal
+        # Strongest: Cross MA5 + Big Candle + Volume
+        head_lift_signal = (cross_up_ma5.float() * 0.4 + is_big_red.float() * 0.4) * vol_ignition.float()
+        features["head_lift_signal"] = head_lift_signal
+        
+        # === Redefine Camel Hump: Now "Elastic Oversold Support" ===
+        # It's no longer just a "hump", it's a "Loaded Spring" (Compressed at support).
+        features["camel_hump_score"] = (
+            elasticity_rank * 0.3 +       # Must be active stock
+            oversold_score * 0.3 +        # Must be beaten down
+            support_score * 0.4           # Must be at support
+        )
+        
+        # === V8.2: Resonance Trigger (Group Ignition) ===
+        # Logic: A stock at the bottom (Camel) is only a buy if its SECTOR/THEME is moving.
+        
+        # 1. Concept Momentum (5d) - Theme Trigger
+        rank_con_mom = cs_rank(features["con_mom_5d"])
+        
+        # 2. Industry Momentum (5d) - Sector Trigger
+        if IND is not None:
+             rank_ind_mom = cs_rank(features["ind_mom_5d"])
+        else:
+             rank_ind_mom = rank_con_mom # Fallback if no industry data
+             
+        # Resonance Score: Blend of Concept and Industry Momentum
+        features["resonance_signal"] = (rank_con_mom + rank_ind_mom) / 2.0
+        
+        # === V8.3: Meta-Features for MLP Learning ===
+        # Explicitly export Regime Indicators so the MLP can learn "When to use what".
+        features["meta_bull_prob"] = bull_prob.expand_as(C)
+        
+        # Explicit Interactions
+        # 1. Bull Attack: Resonance works best when Market is Bullish.
+        features["inter_res_bull"] = features["resonance_signal"] * bull_prob
+        
+        # 2. Bear Defense: Camel/Reversion works best when Market is Bearish/Oscillating.
+        bear_prob = 1.0 - bull_prob
+        features["inter_camel_bear"] = features["camel_hump_score"] * bear_prob
+
+        # === Helper: ZT Count (Needed for Dragon Score) ===
+        is_zt = (ret_1 > 0.095).float()
+        features["zt_count_20d"] = ts_sum(is_zt, 20)
+
+        # === V9: Adaptive Dragon Score (Hybrid Logic) ===
+        # Rationale: Dynamically shift focus based on Market Regime.
+        # Bull Market: Chase Leaders & Trend (Attack)
+        # Bear Market: Buy Structure & Reversion (Defense)
+        
         rank_turnover = cs_rank(features["turnover_mean_20d"])
         rank_pv_corr = cs_rank(features["price_vol_corr_20"])
-        rank_rel_con = cs_rank(features["rel_con_mom_20d"])
         rank_mom_20d = cs_rank(features["mom_20d"])
+        rank_rel_con = cs_rank(features["rel_con_mom_20d"])
         
-        # New Dragon Score (Dynamic)
-        # 1. Base: Liquidity is King (Always valid in A-share)
-        # 2. Offense: Momentum + Concept + Volume Structure
-        # 3. Bull Multiplier: In Bull markets (bull_prob > 0.5), we trust Momentum/Concept more.
+        rank_camel = cs_rank(features["camel_hump_score"])
+        rank_resonance = cs_rank(features["resonance_signal"])
+        rank_rr = cs_rank(features["rr_ratio_20"])
         
-        offensive_score = (rank_mom_20d * 0.4 + rank_rel_con * 0.4 + rank_pv_corr * 0.2)
+        # New Ranks
+        rank_zt = cs_rank(features["zt_count_20d"])
+        # rank_low_price = cs_rank(features["low_price_factor"])
+        rank_elasticity = cs_rank(features["vol_range_20d"])
         
-        # Dynamic Weighting:
-        # Bear/Oscillation (bull_prob ~ 0): Score = Turnover + 0.5 * Offense
-        # Bull (bull_prob ~ 1): Score = Turnover + 1.5 * Offense
-        features["dragon_score"] = rank_turnover + offensive_score * (0.5 + bull_prob)
+        # Strategy A: Bull Market (Trend + Leaders + Ignition + Explosive)
+        # Reverted to V8.8: Focus on Head-Lift and Elasticity
+        score_bull = (
+            rank_mom_20d * 0.2 + 
+            rank_rel_con * 0.2 + 
+            rank_resonance * 0.2 +
+            features["head_lift_signal"] * 0.2 + # Direct signal boost
+            rank_zt * 0.1 +              
+            rank_elasticity * 0.1
+        )
         
-        # Dynamic Penalty for Short-term Overheating (mom_5d)
-        # Bear Market: Penalty if > 20% (False Breakout risk)
-        # Bull Market: Penalty if > 40% (Allow strong trend acceleration)
+        # Strategy B: Bear/Oscillating Market (Structure + Reversion + Trigger)
+        # Reverted to V8.8: Focus on Camel Hump (Structure) and Resonance
+        score_bear = (
+            rank_camel * 0.5 +       # Structural Bottom (Primary Defense)
+            rank_rel_con * 0.2 +     # Concept Leader (Flight to Safety)
+            rank_rr * 0.2 +          # High Reward/Risk
+            rank_resonance * 0.1     # Validated by Group
+        )
+        
+        # === Inflection Point Bonus (Fix Lag) ===
+        # Reward the "First Day" of the turn.
+        # Logic: Today is UP, Trend was DOWN, and we are LOW.
+        # This catches the turn BEFORE momentum turns positive.
+        inflection_bonus = (ret_1 > 0.0).float() * (features["mom_5d"] < -0.03).float() * (features["dist_support_20"] < 0.08).float()
+        
+        # Dynamic Blending
+        offensive_score = score_bull * bull_prob + score_bear * bear_prob
+        
+        # Add Inflection Bonus (Aggressive booster for early entry)
+        offensive_score = offensive_score + inflection_bonus * 0.3
+        
+        # Final Dragon Score
+        # Adjust aggression based on regime
+        aggression = 0.8 + bull_prob * 0.4 # 0.8 (Bear) -> 1.2 (Bull)
+        features["dragon_score"] = rank_turnover + offensive_score * aggression
+        
+        # Penalty 1: Short term overheat (Velocity too fast)
+        # Relax penalty if ZT count is high (Dragons are allowed to be overheated)
         overheat_threshold = 0.2 + bull_prob * 0.2
+        is_dragon_mode = (features["zt_count_20d"] > 0).float()
         
-        # Apply Penalty
-        features["dragon_score"] = features["dragon_score"] - (features["mom_5d"] > overheat_threshold).float() * 1.0
+        # Only penalize if NOT in Dragon Mode (Normal overheat is bad, Dragon overheat is good)
+        features["dragon_score"] = features["dragon_score"] - (features["mom_5d"] > overheat_threshold).float() * (1.0 - is_dragon_mode) * 1.0
+
+        # Penalty 2: "At Ceiling" Penalty
+        # In Bear Markets, hitting resistance is a sell signal.
+        at_ceiling = (features["dist_pressure_20"] < 0.01).float()
+        features["dragon_score"] = features["dragon_score"] - at_ceiling * bear_prob * 0.5
         
+        # Penalty 3: Bear Trap / False Stabilization (Downtrend Trap)
+        # Identifies "Falling Knife Pause": Downtrend + Consolidation + Not at Bottom.
+        features["bear_trap_score"] = (features["mom_20d"] * -1).clamp(min=0) * (1.0 - features["vol_ratio_5_20"]).clamp(min=0) * features["dist_support_20"] * 2.0
+        
+        # FIX: If Head Lift is present, this is NOT a bear trap, it's a reversal.
+        features["bear_trap_score"] = features["bear_trap_score"] * (1.0 - features["head_lift_signal"]).clamp(min=0)
+
+        # Penalty 4: Pullback Trap (Uptrend Trap)
+        # Identifies "Incomplete Pullback": Uptrend (Mom20>0) + Pullback (Mom5<0) + Not at Support.
+        # User request: "If it's a pullback to halfway I don't want to select it."
+        # We penalize if dist_support > 0.10 (still 10% room to fall to support).
+        pullback_trap = (features["mom_20d"] > 0).float() * (features["mom_5d"] < -0.02).float() * (features["dist_support_20"] > 0.10).float()
+        
+        # === V8.6: ST and Dead Stock Filter (User Request) ===
+        # Filter 1: ST Stock Proxy
+        # ST stocks usually have 5% limit. If max daily range over 20 days is < 5.5%, it's likely ST or very low elasticity.
+        max_range_20 = ts_max(features["daily_range"], 20)
+        is_likely_st = (max_range_20 < 0.055).float()
+        
+        # Filter 2: Dead/Flat Phase ("One-character" distribution)
+        # If daily range is < 1.2%, it's too flat for a volatility-based strategy.
+        # This prevents buying during "suspiciously stable" periods in a downtrend.
+        # FIX: If we are AT SUPPORT, low volatility is good (Base Building).
+        is_dead_flat = (features["daily_range"] < 0.012).float() * (features["dist_support_20"] > 0.05).float()
+        
+        # Penalize Dragon Score
+        # Reduced bear_trap penalty weight from 0.5 to 0.3
+        features["dragon_score"] = features["dragon_score"] - cs_rank(features["bear_trap_score"]) * 0.3 - pullback_trap * 0.5
+        
+        # Apply ST/Flat Penalties (Severe)
+        features["dragon_score"] = features["dragon_score"] - is_likely_st * 2.0 - is_dead_flat * 2.0
 
         # Label: Next 5 days return (Market Neutral Rank)
         raw_ret_5 = ts_delay(C, -5) / C - 1
