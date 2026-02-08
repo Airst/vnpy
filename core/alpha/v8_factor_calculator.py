@@ -732,42 +732,78 @@ class V8FactorCalculator(V6FactorCalculator):
         # rank_low_price = cs_rank(features["low_price_factor"])
         rank_elasticity = cs_rank(features["vol_range_20d"])
         
-        # Strategy A: Bull Market (Trend + Leaders + Ignition + Explosive)
-        # Reverted to V8.8: Focus on Head-Lift and Elasticity
+        # === V9.3: Triple-Regime Adaptive Logic (Bull, Bear, Chaos) ===
+        # Backtest Analysis: In 2023-2024 "Choppy Bear", both Momentum and Reversion failed.
+        # Only Turnover (Liquidity) worked. We need to detect "Chaos" and hide in Liquidity.
+        
+        # 1. Define Regimes
+        # Bull: Momentum is Up.
+        # Bear: Momentum is Down.
+        # Chaos: Volatility is High (Panic/Choppy).
+        
+        # Volatility Rank (Market Level)
+        # If Market Volatility is in the top 80%, we are in Chaos Mode.
+        # Normalized Volatility: 0.0 = Low, 1.0 = High
+        vol_regime = torch.sigmoid((mkt_vol_20d - 0.015) * 100.0)
+        
+        # Regime Probability Matrix
+        # P(Bull) = bull_prob
+        # P(Bear) = (1 - bull_prob) * (1 - vol_regime)  -> Grinding Down (Safe for Reversion)
+        # P(Chaos) = (1 - bull_prob) * vol_regime       -> Crashing/Choppy (Unsafe for Reversion)
+        
+        prob_bull = bull_prob
+        prob_bear = (1.0 - bull_prob) * (1.0 - vol_regime)
+        prob_chaos = (1.0 - bull_prob) * vol_regime
+        
+        # 2. Strategy Compositions
+        
+        # A. Bull Strategy: Momentum + Resonance (Attack)
         score_bull = (
             rank_mom_20d * 0.2 + 
             rank_rel_con * 0.2 + 
             rank_resonance * 0.2 +
-            features["head_lift_signal"] * 0.2 + # Direct signal boost
+            features["head_lift_signal"] * 0.2 + 
             rank_zt * 0.1 +              
             rank_elasticity * 0.1
         )
         
-        # Strategy B: Bear/Oscillating Market (Structure + Reversion + Trigger)
-        # Reverted to V8.8: Focus on Camel Hump (Structure) and Resonance
+        # B. Bear Strategy: Reversion + Structure (Defense)
+        # Works well in low-volatility downtrends (Grinding bear)
         score_bear = (
-            rank_camel * 0.5 +       # Structural Bottom (Primary Defense)
-            rank_rel_con * 0.2 +     # Concept Leader (Flight to Safety)
-            rank_rr * 0.2 +          # High Reward/Risk
-            rank_resonance * 0.1     # Validated by Group
+            rank_camel * 0.4 +       
+            rank_rel_con * 0.2 +     
+            rank_rr * 0.1 +          
+            rank_resonance * 0.3     
         )
         
-        # === Inflection Point Bonus (Fix Lag) ===
-        # Reward the "First Day" of the turn.
-        # Logic: Today is UP, Trend was DOWN, and we are LOW.
-        # This catches the turn BEFORE momentum turns positive.
-        inflection_bonus = (ret_1 > 0.0).float() * (features["mom_5d"] < -0.03).float() * (features["dist_support_20"] < 0.08).float()
+        # C. Chaos Strategy: Liquidity + Low Volatility (Survival)
+        # In High Vol crashes, Alpha fails. Stick to high liquidity.
+        score_chaos = rank_turnover # Pure Liquidity
         
-        # Dynamic Blending
-        offensive_score = score_bull * bull_prob + score_bear * bear_prob
+        # 3. Dynamic Blending
+        # Base Score is always anchored by Turnover (The only all-weather factor)
+        # We blend the "Alpha Component" based on regime.
         
-        # Add Inflection Bonus (Aggressive booster for early entry)
-        offensive_score = offensive_score + inflection_bonus * 0.3
+        alpha_component = (
+            score_bull * prob_bull + 
+            score_bear * prob_bear + 
+            score_chaos * prob_chaos
+        )
         
         # Final Dragon Score
-        # Adjust aggression based on regime
-        aggression = 0.8 + bull_prob * 0.4 # 0.8 (Bear) -> 1.2 (Bull)
-        features["dragon_score"] = rank_turnover + offensive_score * aggression
+        # In Chaos, we boost the weight of the Base Turnover significantly.
+        # Normal: 50% Turnover + 50% Alpha
+        # Chaos:  80% Turnover + 20% Alpha (Survival Mode)
+        
+        turnover_weight = 0.5 + prob_chaos * 0.3 # 0.5 -> 0.8
+        alpha_weight = 1.0 - turnover_weight
+        
+        features["dragon_score"] = rank_turnover * turnover_weight + alpha_component * alpha_weight
+        
+        # Add Inflection Bonus (Aggressive booster for early entry)
+        # Only apply in Bull or Bear regimes, NOT in Chaos (Too risky)
+        inflection_bonus = (ret_1 > 0.0).float() * (features["mom_5d"] < -0.03).float() * (features["dist_support_20"] < 0.08).float()
+        features["dragon_score"] = features["dragon_score"] + inflection_bonus * 0.3 * (1.0 - prob_chaos)
         
         # Penalty 1: Short term overheat (Velocity too fast)
         # Relax penalty if ZT count is high (Dragons are allowed to be overheated)
