@@ -190,8 +190,8 @@ def download_data(config_path: str = "data_manager/ts_downloader/download_daily_
         max_symbols_per_call = int(5000 / days)
         if max_symbols_per_call < 1:
             max_symbols_per_call = 1
-        if max_symbols_per_call > 100: # 限制URL长度/参数过多
-            max_symbols_per_call = 100
+        if max_symbols_per_call > 200: # 限制URL长度/参数过多
+            max_symbols_per_call = 200
             
         print(f"处理时间段 {start_str} - {end_str}, 天数: {days}, 批次大小: {max_symbols_per_call}, 总股票数: {len(ts_codes)}")
 

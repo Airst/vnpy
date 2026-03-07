@@ -1,165 +1,30 @@
-from core.alpha.v6_factor_calculator import V6FactorCalculator
 from core.alpha.factor_calculator import FactorCalculator, device, torch, np, pl, cs_rank, ts_corr, cs_zscore, ts_delay, ts_mean, ts_min, ts_max, ts_quantile, ts_std, ts_sum, ts_rsquare, ts_slope, ta_atr, ta_rsi, cs_group_mean, ts_kdj, ts_cov
 
-class V8FactorCalculator(V6FactorCalculator):
+class V8FactorCalculator(FactorCalculator):
     def __init__(self):
         super().__init__()
 
-    def calculate_features(self, df: pl.DataFrame) -> pl.DataFrame:
-        """
-        Overridden to include Concept columns in tensor construction.
-        """
-        print("[V8FactorCalculator] Preparing data for GPU (Including Concept Data)...")
-        
-        df = df.sort(["vt_symbol", "datetime"])
-        
-        cols = ["open", "high", "low", "close", "volume", "turnover", "turnover_rate", "pe", "pb", "ps", "dv_ratio", "total_mv"]
-        
-        # Check for industry
-        if "industry" in df.columns:
-            print("[V8FactorCalculator] Found 'industry' column. Adding 'industry_code'.")
-            df = df.with_columns(
-                pl.col("industry").fill_null("Unknown").cast(pl.Categorical).to_physical().alias("industry_code")
-            )
-            cols.append("industry_code")
-
-        # Add Concept Columns if present
-        concept_cols = [
-            "concept_mom_5d", "concept_mom_10d", "concept_mom_20d", "concept_mom_20d_max", 
-            "concept_mom_20d_min", "concept_mom_20d_std",
-            "concept_turnover_20d", "concept_vol_20d", "concept_count", "concept_daily_ret",
-            "concept_hot_ratio", "concept_top3_mean", "concept_cohesion",
-            "concept_acc_5_mean", "concept_rank_score_mean"
-        ]
-        # Ensure they exist (DataLoader fills with 0 if missing, but check to be safe)
-        existing_concept_cols = [c for c in concept_cols if c in df.columns]
-        
-        if len(existing_concept_cols) < len(concept_cols):
-            print(f"[V8FactorCalculator] Warning: Some concept columns missing. Found: {existing_concept_cols}")
-            # Add missing as 0
-            for c in concept_cols:
-                if c not in df.columns:
-                    df = df.with_columns(pl.lit(0.0).alias(c))
-        
-        # Add to columns to extract
-        cols.extend(concept_cols)
-        
-        raw_data = df.select(cols).to_numpy().astype(np.float32)
-        
-        symbols = df["vt_symbol"].to_numpy()
-        unique_symbols, inverse_indices, counts = np.unique(symbols, return_inverse=True, return_counts=True)
-        num_stocks = len(unique_symbols)
-        max_len = counts.max()
-        
-        print(f"[V8FactorCalculator] Stocks: {num_stocks}, Max Len: {max_len}")
-        
-        print("[V8FactorCalculator] Creating padded tensors...")
-        df_idx = df.select(["vt_symbol"]).with_columns([
-            pl.int_range(0, pl.len()).over("vt_symbol").alias("t_idx")
-        ])
-        t_indices = df_idx["t_idx"].to_numpy()
-        s_indices = inverse_indices
-        
-        padded_raw = torch.full((num_stocks, max_len, len(cols)), float('nan'), device=device, dtype=torch.float32)
-        
-        raw_tensor = torch.from_numpy(raw_data.copy()).to(device)
-        t_indices_t = torch.from_numpy(t_indices.copy()).to(device)
-        s_indices_t = torch.from_numpy(s_indices.copy()).to(device)
-        
-        padded_raw[s_indices_t, t_indices_t, :] = raw_tensor
-        
-        print("[V8FactorCalculator] Calculating features...")
-        features = self.build_features(padded_raw)
-        
-        print("[V8FactorCalculator] reconstructing dataframe...")
-        feature_cols = []
-        feature_names = []
-        
-        for name, tensor in features.items():
-            flat_vals = tensor[s_indices_t, t_indices_t]
-            feature_cols.append(flat_vals.cpu().numpy())
-            feature_names.append(name)
-            
-        new_cols = [
-            pl.Series(name, vals).fill_nan(None) 
-            for name, vals in zip(feature_names, feature_cols)
-        ]
-        
-        df_features = df.with_columns(new_cols)
-
-        print("[V8FactorCalculator] Pre-processing data...")
-        try:
-            exclude_cols = {"datetime", "vt_symbol", "label", "industry"}
-            # All raw cols including concept cols should be dropped from final features
-            raw_cols_to_drop = ["open", "high", "low", "close", "volume", "turnover", "open_interest", "turnover_rate", "pe", "pb", "ps", "dv_ratio", "total_mv", "industry_code"]
-            raw_cols_to_drop.extend(concept_cols)
-            
-            existing_raw = [c for c in raw_cols_to_drop if c in df_features.columns]
-            dataset_df = df_features.drop(existing_raw)
-            
-            if "label" not in dataset_df.columns:
-                 # If label not computed, maybe calculate it? V6 calculates it.
-                 # Assuming V6 build_features adds "label".
-                 pass
-
-            feature_cols = [c for c in dataset_df.columns if c not in exclude_cols]
-            feature_cols.sort()
-            
-            base_cols = ["datetime", "vt_symbol"]
-            if "industry" in dataset_df.columns:
-                base_cols.append("industry")
-                
-            final_cols = base_cols + feature_cols
-            if "label" in dataset_df.columns:
-                final_cols.append("label")
-                
-            dataset_df = dataset_df.select(final_cols)
-            
-            # Normalize
-            cols_to_norm = feature_cols
-            if "label" in final_cols:
-                cols_to_norm.append("label")
-                
-            dataset_df = self._normalize_data(dataset_df, cols_to_norm)
-            
-            return dataset_df
-        except Exception as e:
-            print(f"[V8FactorCalculator] Data pre-processing error: {e}")
-            import traceback
-            traceback.print_exc()
-            raise e
-
-    def build_features(self, padded_raw) -> dict[str, torch.Tensor]:
-        # 1. Call Super V6 to get all V6 features
-        # Layout:
-        # 0-11: Basic (12 cols)
-        # 12-20: Concept (9 cols) -> Added 10d
-        # 21: Industry (1 col, optional)
-        # Unpack
-        # 0:open, 1:high, 2:low, 3:close, 4:volume, 5:turnover, 6:turnover_rate, 7:pe
-        # 8:pb, 9:ps, 10:dv_ratio, 11:total_mv
-        
+    def build_features(self, padded_raw, col_map) -> dict[str, torch.Tensor]:
         # Let's keep (Batch, Time) for basic ops
         print(f"[DEBUG] padded_raw.shape: {padded_raw.shape}")
         
-        O = padded_raw[:, :, 0]
-        H = padded_raw[:, :, 1]
-        L = padded_raw[:, :, 2]
-        C = padded_raw[:, :, 3]
-        V = padded_raw[:, :, 4]
-        T = padded_raw[:, :, 5] # Turnover (Amount)
-        TR = padded_raw[:, :, 6] # Turnover Rate
-        PE = padded_raw[:, :, 7] # PE Ratio
-        PB = padded_raw[:, :, 8] # PB Ratio
-        PS = padded_raw[:, :, 9] # PS Ratio
-        DV = padded_raw[:, :, 10] # Dividend Ratio
-        MV = padded_raw[:, :, 11] # Total Market Value
+        O = padded_raw[:, :, col_map['open']]
+        H = padded_raw[:, :, col_map['high']]
+        L = padded_raw[:, :, col_map['low']]
+        C = padded_raw[:, :, col_map['close']]
+        V = padded_raw[:, :, col_map['volume']]
+        T = padded_raw[:, :, col_map['turnover']] # Turnover (Amount)
+        TR = padded_raw[:, :, col_map['turnover_rate']] # Turnover Rate
+        PE = padded_raw[:, :, col_map['pe']] # PE Ratio
+        PB = padded_raw[:, :, col_map['pb']] # PB Ratio
+        PS = padded_raw[:, :, col_map['ps']] # PS Ratio
+        DV = padded_raw[:, :, col_map['dv_ratio']] # Dividend Ratio
+        MV = padded_raw[:, :, col_map['total_mv']] # Total Market Value
         
-        # Industry Code (if available, index 12)
+        # Industry Code
         IND = None
-        con_start_idx = 12
-        if padded_raw.shape[2] > 25:
-            IND = padded_raw[:, :, 12]
+        if 'industry' in col_map and col_map['industry'] < padded_raw.shape[2]:
+            IND = padded_raw[:, :, col_map['industry']]
             print(f"[DEBUG] IND extracted. Shape: {IND.shape}")
             # Debug IND values
             mask_ind = ~torch.isnan(IND)
@@ -168,8 +33,6 @@ class V8FactorCalculator(V6FactorCalculator):
                 print(f"[DEBUG] IND NaNs: {(~mask_ind).sum()}, Infs: {torch.isinf(IND).sum()}")
             else:
                  print("[DEBUG] IND all NaNs!")
-            
-            con_start_idx = 13
         
         # 保留V6因子
         # Helper vars
@@ -560,38 +423,21 @@ class V8FactorCalculator(V6FactorCalculator):
         
         
         # Now add V7 Concept Factors
-        # Indices:
-        # 12: con_mom_5d
-        # 13: con_mom_10d (New)
-        # 14: con_mom_20d
-        # 15: con_mom_20d_max
-        # 16: con_mom_20d_min
-        # 17: con_mom_20d_std
-        # 18: con_turnover_20d
-        # 19: con_vol_20d
-        # 20: con_count
-        # 21: con_daily_ret
-        # 22: con_hot_ratio
-        # 23: con_top3_mean
-        # 24: con_cohesion
-        # 25: con_acc_5_mean
-        # 26: con_rank_score_mean
-        
-        con_mom_5 = padded_raw[:, :, con_start_idx]
-        con_mom_10 = padded_raw[:, :, con_start_idx+1]
-        con_mom_20 = padded_raw[:, :, con_start_idx+2]
-        con_mom_20_max = padded_raw[:, :, con_start_idx+3]
-        con_mom_20_min = padded_raw[:, :, con_start_idx+4]
-        con_mom_20_std = padded_raw[:, :, con_start_idx+5]
-        con_turnover_20 = padded_raw[:, :, con_start_idx+6]
-        con_vol_20 = padded_raw[:, :, con_start_idx+7]
-        con_count = padded_raw[:, :, con_start_idx+8]
-        # con_daily_ret = padded_raw[:, :, con_start_idx+9]
-        con_hot_ratio = padded_raw[:, :, con_start_idx+10]
-        # con_top3_mean = padded_raw[:, :, con_start_idx+11]
-        # con_cohesion = padded_raw[:, :, con_start_idx+12]
-        con_acc_5 = padded_raw[:, :, con_start_idx+13]
-        con_rank_score = padded_raw[:, :, con_start_idx+14]
+        con_mom_5 = padded_raw[:, :, col_map['concept_mom_5d']]
+        con_mom_10 = padded_raw[:, :, col_map['concept_mom_10d']]
+        con_mom_20 = padded_raw[:, :, col_map['concept_mom_20d']]
+        con_mom_20_max = padded_raw[:, :, col_map['concept_mom_20d_max']]
+        con_mom_20_min = padded_raw[:, :, col_map['concept_mom_20d_min']]
+        con_mom_20_std = padded_raw[:, :, col_map['concept_mom_20d_std']]
+        con_turnover_20 = padded_raw[:, :, col_map['concept_turnover_20d']]
+        con_vol_20 = padded_raw[:, :, col_map['concept_vol_20d']]
+        con_count = padded_raw[:, :, col_map['concept_count']]
+        # con_daily_ret = padded_raw[:, :, col_map['concept_daily_ret']]
+        con_hot_ratio = padded_raw[:, :, col_map['concept_hot_ratio']]
+        # con_top3_mean = padded_raw[:, :, col_map['concept_top3_mean']]
+        # con_cohesion = padded_raw[:, :, col_map['concept_cohesion']]
+        con_acc_5 = padded_raw[:, :, col_map['concept_acc_5_mean']]
+        con_rank_score = padded_raw[:, :, col_map['concept_rank_score_mean']]
         
         # Add to features
         features["con_mom_5d"] = con_mom_5

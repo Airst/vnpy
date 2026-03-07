@@ -13,11 +13,6 @@ from core.alpha.mlp_signals import MLPSignals
 from core.selector.selector import FundamentalSelector
 
 # Import Calculators
-from core.alpha.v3_factor_calculator import V3FactorCalculator
-from core.alpha.v4_factor_calculator import V4FactorCalculator
-from core.alpha.v5_factor_calculator import V5FactorCalculator
-from core.alpha.v6_factor_calculator import V6FactorCalculator
-from core.alpha.v7_factor_calculator import V7FactorCalculator
 from core.alpha.v8_factor_calculator import V8FactorCalculator
 
 
@@ -25,6 +20,7 @@ from data_manager.ts_downloader.download_daily import download_data
 from data_manager.ts_downloader.daily_basic_manager import DailyBasicManager
 from data_manager.ts_downloader.stock_info_manager import StockInfoManager
 from data_manager.ts_downloader.concept_manager import ConceptManager
+from data_manager.ts_downloader.fina_indicator_manager import FinaIndicatorManager
 
 
 from core.core_service import CoreService
@@ -133,11 +129,6 @@ if __name__ == "__main__":
     
     # Configuration Map
     VERSION_CONFIG = {
-        "v3": (V3FactorCalculator, "V3"),
-        "v4": (V4FactorCalculator, "V4 (Alpha101)"),
-        "v5": (V5FactorCalculator, "V5 (Alpha158)"),
-        "v6": (V6FactorCalculator, "V6 (Fusion)"),
-        "v7": (V7FactorCalculator, "V7 (Concept Embedding)"),
         "v8": (V8FactorCalculator, "V8 (Stacking V4)"),
     }
     
@@ -227,6 +218,11 @@ if __name__ == "__main__":
         concept_manager = ConceptManager()
         concept_manager.download_daily()
         concept_manager.download_members()
+
+        
+        print("\n开始更新财务指标数据...")
+        fina_manager = FinaIndicatorManager()
+        fina_manager.download_all()
         
         print("数据同步到alpha lab...")
         engine.sync_data()
@@ -237,7 +233,8 @@ if __name__ == "__main__":
         print("强制更新数据同步到alpha lab...")
         engine.sync_data()
     
-    signal_df = engine.calculate_factors()
+    data_df = engine.load_data()
+    signal_df = engine.calculate_factors(data_df)
 
     signal_df = engine.analyze_factor_performance(signal_df)
 

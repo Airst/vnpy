@@ -68,29 +68,44 @@ class AlphaEngine:
         
         print("[AlphaEngine] Data sync complete.")
 
-    def calculate_factors(self) -> pl.DataFrame:
+    def load_data(self) -> pl.DataFrame:
         """
-        Calculate factors and save them as signals/datasets.
-        This is a placeholder for the actual research workflow.
+        Load market data for A-share symbols.
+        
+        Returns:
+            pl.DataFrame: Market data DataFrame with columns like datetime, vt_symbol, open, high, low, close, volume
         """
-
         print(f"[AlphaEngine] Range: {self.start_date} to {self.end_date}")
 
-        # 2. Get Symbols
+        # 1. Get Symbols
         symbols = self._get_ashare_symbols()
         if not symbols:
             print("[AlphaEngine] No symbols found.")
             raise ValueError("No A-share symbols found.")
         print(f"[AlphaEngine] Symbols: {len(symbols)}")
         
-        # 3. Load Data
+        # 2. Load Data
         df = self.data_loader.load_ashare_data(symbols, self.start_date, self.end_date)
         if df.is_empty():
             print("[AlphaEngine] No data loaded.")
             raise ValueError("No data loaded.")
 
+        return df
 
-        factor_df = self.factor_calculator.calculate_features(df)
+    def calculate_factors(self, data_df: Optional[pl.DataFrame] = None) -> pl.DataFrame:
+        """
+        Calculate factors based on market data.
+        
+        Args:
+            data_df: Optional market data DataFrame. If None, will load data internally.
+            
+        Returns:
+            pl.DataFrame: Factor DataFrame
+        """
+        if data_df is None:
+            data_df = self.load_data()
+
+        factor_df = self.factor_calculator.calculate_features(data_df)
 
         return factor_df
 

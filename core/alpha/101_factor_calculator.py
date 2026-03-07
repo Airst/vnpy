@@ -11,17 +11,18 @@ class Factor101Calculator(FactorCalculator):
     def __init__(self):
         super().__init__()
 
-    def build_features(self, padded_raw) -> dict[str, torch.Tensor]:
-        # Unpack
-        # 0:open, 1:high, 2:low, 3:close, 4:volume, 5:turnover, 6:turnover_rate, 7:pe
-        O = padded_raw[:, :, 0]
-        H = padded_raw[:, :, 1]
-        L = padded_raw[:, :, 2]
-        C = padded_raw[:, :, 3]
-        V = padded_raw[:, :, 4]
-        T = padded_raw[:, :, 5] # Turnover (Amount)
-        TR = padded_raw[:, :, 6] # Turnover Rate
-        PE = padded_raw[:, :, 7] # PE Ratio
+    def build_features(self, padded_raw: torch.Tensor, col_map: dict) -> dict[str, torch.Tensor]:
+        def get_col(name: str) -> torch.Tensor:
+            return padded_raw[:, :, col_map[name]] if name in col_map else None
+
+        O = get_col("open")
+        H = get_col("high")
+        L = get_col("low")
+        C = get_col("close")
+        V = get_col("volume")
+        T = get_col("turnover") # Turnover (Amount)
+        TR = get_col("turnover_rate") # Turnover Rate
+        PE = get_col("pe") # PE Ratio
         
         # Helper vars
         # VWAP = Turnover / Volume. 

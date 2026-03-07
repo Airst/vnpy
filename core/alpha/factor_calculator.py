@@ -13,6 +13,7 @@ class FactorCalculator:
     Base class for A-Share Factor Calculators.
     Provides common methods for symbol retrieval and data loading.
     """
+    BASE_COLS = ["open", "high", "low", "close", "volume", "turnover", "turnover_rate", "pe", "pb", "ps", "dv_ratio", "total_mv"]
 
     def __init__(self) -> None:
         print(f"[FactorCalculator] Using device: {device}")
@@ -25,88 +26,38 @@ class FactorCalculator:
         print("[FactorCalculator] Preparing data for GPU...")
         
         # 1. Encode Symbols and Sort
-        # We need to process by symbol.
-        # Ideally, we pad sequences to the max length.
-        
-        # Ensure sorted
         df = df.sort(["vt_symbol", "datetime"])
         
-        # Convert to numpy/torch
-        # We need to handle the grouping.
-        # Strategy:
-        # 1. Get unique symbols and their counts/indices.
-        # 2. Create padded tensor (Batch, Time, Features).
-        
-        # Extract columns
-        dates = df["datetime"].to_numpy()
-        symbols = df["vt_symbol"].to_numpy()
-        
-        # Numerical columns needed
-        cols = ["open", "high", "low", "close", "volume", "turnover", "turnover_rate", "pe", "pb", "ps", "dv_ratio", "total_mv"]
-        
-        # Check for industry
-        if "industry" in df.columns:
-            print("[FactorCalculator] Found 'industry' column. Encoding...")
-            # Encode industry to integer
-            # Cast to Categorical and then to Physical (Integer ID)
-            # Handle nulls
-            df = df.with_columns(
-                pl.col("industry").fill_null("Unknown").cast(pl.Categorical).to_physical().alias("industry_code")
-            )
-            cols.append("industry_code")
+        # Ensure BASE_COLS exist in DF
+        for c in self.BASE_COLS:
+            if c not in df.columns:
+                df = df.with_columns(pl.lit(float('nan')).alias(c))
 
-        # Check if columns exist, if not, fill with NaN
-        # Ideally AlphaEngine provides them. If not, we might crash or should handle gracefully.
-        # Assuming they exist for now as per previous step.
+        # Dynamically map ALL columns present in the DataFrame (except index columns)
+        exclude_from_tensors = {"datetime", "vt_symbol", "industry"}
+        cols = [c for c in df.columns if c not in exclude_from_tensors]
+        
+        # Create column map for build_features
+        col_map = {name: i for i, name in enumerate(cols)}
+
         raw_data = df.select(cols).to_numpy().astype(np.float32)
         
         # Group info
+        symbols = df["vt_symbol"].to_numpy()
         unique_symbols, inverse_indices, counts = np.unique(symbols, return_inverse=True, return_counts=True)
         num_stocks = len(unique_symbols)
         max_len = counts.max()
         
         print(f"[FactorCalculator] Stocks: {num_stocks}, Max Len: {max_len}")
         
-        # Prepare Tensors
-        # Shape: (Batch, Time) for each feature
-        # We will pad with NaNs.
-        
-        # Create a mask for valid data
-        # To do this efficiently in numpy/torch:
-        # We can construct the padded array.
-        
-        # Fast construction of padded array:
-        # We know the start index of each group (cumsum of counts)
-        # But `np.unique` returns counts in sorted order of unique_symbols.
-        # Since `df` is sorted by `vt_symbol`, `unique_symbols` should match the order in `df` (if sorted).
-        # Let's verify `df` sort order matches `np.unique` output order. Yes, if strings.
-        
-        # Calculate split indices
-        # split_indices = np.cumsum(counts)[:-1]
-        # split_arrays = np.split(raw_data, split_indices)
-        # This is slow if 5000 stocks.
-        
-        # Optimized Padded Construction:
-        # Create a flat index array that maps to (Batch, Time)
-        # 1. Create 'time_idx' for each row: 0, 1, 2... for each stock
-        #    We can do this by `df.with_columns(pl.int_range(0, pl.len()).over("vt_symbol").alias("t_idx"))`
-        #    Then `t_idx` and `symbol_idx` (from inverse_indices) give coordinates.
-        
         print("[FactorCalculator] Creating padded tensors...")
-        # Add indexers in Polars (fast)
         df_idx = df.select(["vt_symbol"]).with_columns([
             pl.int_range(0, pl.len()).over("vt_symbol").alias("t_idx")
         ])
         t_indices = df_idx["t_idx"].to_numpy()
-        s_indices = inverse_indices # Already 0..N-1 maps to symbols
+        s_indices = inverse_indices
         
-        # Create Empty Tensor (Batch, MaxLen, NumCols) filled with NaN
         padded_raw = torch.full((num_stocks, max_len, len(cols)), float('nan'), device=device, dtype=torch.float32)
-        
-        # Fill data
-        # Use simple indexing: padded[s_idx, t_idx] = raw_val
-        # Move raw_data to GPU first if VRAM allows, else loop?
-        # A-share daily data ~3000 days * 5000 stocks * 5 cols * 4 bytes ~ 300MB. Fits easily.
         
         raw_tensor = torch.from_numpy(raw_data.copy()).to(device)
         t_indices_t = torch.from_numpy(t_indices.copy()).to(device)
@@ -116,31 +67,19 @@ class FactorCalculator:
         
         # --- Feature Calculation ---
         print("[FactorCalculator] Calculating features...")
-        features = self.build_features(padded_raw)
+        features = self.build_features(padded_raw, col_map)
         
         # --- Flatten and Merge ---
         print("[FactorCalculator] reconstructing dataframe...")
-        
-        # We have tensors (Batch, Time).
-        # We need to extract values corresponding to valid data points (not padding).
-        # We can use `s_indices_t` and `t_indices_t` to gather results if we kept the mapping?
-        # Actually `s_indices_t` and `t_indices_t` map from Raw 1D to Padded 2D.
-        # So `padded[s_indices_t, t_indices_t]` extracts the values back to 1D aligned with `df`.
         
         feature_cols = []
         feature_names = []
         
         for name, tensor in features.items():
-            # Extract
             flat_vals = tensor[s_indices_t, t_indices_t]
-            # To CPU numpy
             feature_cols.append(flat_vals.cpu().numpy())
             feature_names.append(name)
             
-        # Add to original DF
-        # df is already sorted by vt_symbol, datetime
-        
-        # Create polars series
         new_cols = [
             pl.Series(name, vals).fill_nan(None) 
             for name, vals in zip(feature_names, feature_cols)
@@ -150,22 +89,33 @@ class FactorCalculator:
 
         print("[FactorCalculator] Pre-processing data (Global Cross-Sectional Normalization)...")
         try:
-            # Identify feature columns
+            # Identify feature columns to keep
             exclude_cols = {"datetime", "vt_symbol", "label", "industry"}
-            raw_cols = ["open", "high", "low", "close", "volume", "turnover", "open_interest", "turnover_rate", "pe"]
-            existing_raw = [c for c in raw_cols if c in df_features.columns]
             
-            # Keep features and label, drop raw columns
-            dataset_df = df_features.drop(existing_raw)
+            # Drop raw input columns to keep only features + label. 
+            # Note: We should NOT drop 'label' if it was part of `cols` (e.g., if it was already in the dataframe)
+            # However, `build_features` computes the new label, so it's a feature.
+            # Let's drop columns that were strictly input (from `cols`), but preserve 'label' if it was overwritten.
+            # Better approach: explicitly select what we need. 
+            # df_features contains original columns + new feature columns.
+            # We want to keep ONLY the base index columns AND the features generated by `build_features` (which includes 'label').
             
-            if "label" not in dataset_df.columns:
+            generated_feature_names = set(feature_names)
+            if "label" not in generated_feature_names:
                  print("[FactorCalculator] Error: 'label' column missing in features.")
                  raise ValueError("'label' column missing in features.")
+                 
+            # Columns to keep
+            base_cols = ["datetime", "vt_symbol"]
+            if "industry" in df_features.columns:
+                base_cols.append("industry")
+                
+            cols_to_keep = base_cols + list(generated_feature_names)
+            dataset_df = df_features.select(cols_to_keep)
 
             feature_cols = [c for c in dataset_df.columns if c not in exclude_cols]
             feature_cols.sort()
             
-            # Final column order
             base_cols = ["datetime", "vt_symbol"]
             if "industry" in dataset_df.columns:
                 base_cols.append("industry")
@@ -173,8 +123,7 @@ class FactorCalculator:
             final_cols = base_cols + feature_cols + ["label"]
             dataset_df = dataset_df.select(final_cols)
             
-            # Apply Normalization Globally
-            # Normalize label as well to remove Market Beta and focus on Alpha (ranking)
+            # Normalize
             cols_to_norm = feature_cols + ["label"]
             dataset_df = self._normalize_data(dataset_df, cols_to_norm)
             
@@ -214,7 +163,7 @@ class FactorCalculator:
             .collect()
         )
 
-    def build_features(self, padded_raw) -> dict[str, torch.Tensor]: #type: ignore
+    def build_features(self, padded_raw: torch.Tensor, col_map: dict) -> dict[str, torch.Tensor]: #type: ignore
         pass
 
 # Helper: Rolling Ops

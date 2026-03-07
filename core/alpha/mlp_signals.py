@@ -42,9 +42,11 @@ def set_seed(seed: int = 42):
 
 class MLPSignals:
 
-    def __init__(self, signal_name: str = "mlp_signal", force_retrain: bool = False):
+    def __init__(self, signal_name: str = "mlp_signal", force_retrain: bool = False, retrain_days: int = 90, ensemble_size: int = 1):
         self.signal_name = signal_name
         self.force_retrain = force_retrain
+        self.retrain_days = retrain_days
+        self.ensemble_size = ensemble_size  # Number of models for ensemble
         # self.model_dir = Path("core/alpha_db/model") # Managed by AlphaLab
         
         #self.model_settings = {
@@ -56,13 +58,14 @@ class MLPSignals:
         #    "device": "auto"  # Will detect GPU
         #}
         self.model_settings = {
-            "hidden_sizes": (256, 128, 64),  # 保持结构
-            "n_epochs": 800,                  # 增加训练轮数
-            "batch_size": 2048,              # 减小批量大小
-            "lr": 0.0005,                    # 降低学习率（微调）
-            "early_stop_rounds": 30,         # 增加早停耐心
-            "weight_decay": 0.0001,          # 添加轻微正则化
-            "optimizer": "adam"             # 如果有的话
+            # Smaller network with stronger regularization for stability
+            "hidden_sizes": (64, 32, 16),
+            "n_epochs": 1000,
+            "batch_size": 2048,
+            "lr": 0.001,
+            "early_stop_rounds": 40,
+            "weight_decay": 0.001,
+            "optimizer": "adam"
         }
         self.n_jobs = 1  # 改为单线程以保证结果可复现 (多线程下全局Seed会被频繁重置导致随机性)
 
@@ -116,13 +119,13 @@ class MLPSignals:
             # Define Prediction Window
             pred_start_date = dates[curr_idx]
             
-            # Next month date
-            next_month_date = pred_start_date + timedelta(days=30)
+            # Next window date
+            next_window_date = pred_start_date + timedelta(days=self.retrain_days)
             
-            # Find index for next month (end of this prediction window)
+            # Find index for next window (end of this prediction window)
             next_idx = total_dates # Default to end
             for i in range(curr_idx, total_dates):
-                if dates[i] >= next_month_date:
+                if dates[i] >= next_window_date:
                     next_idx = i
                     break
             

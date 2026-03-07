@@ -15,15 +15,15 @@ class Factor158Calculator(FactorCalculator):
     def __init__(self):
         super().__init__()
 
-    def build_features(self, padded_raw) -> dict[str, torch.Tensor]:
-        # Unpack
-        # 0:open, 1:high, 2:low, 3:close, 4:volume, 5:turnover, 6:turnover_rate, 7:pe
-        
-        O = padded_raw[:, :, 0]
-        H = padded_raw[:, :, 1]
-        L = padded_raw[:, :, 2]
-        C = padded_raw[:, :, 3]
-        V = padded_raw[:, :, 4]
+    def build_features(self, padded_raw: torch.Tensor, col_map: dict) -> dict[str, torch.Tensor]:
+        def get_col(name: str) -> torch.Tensor:
+            return padded_raw[:, :, col_map[name]] if name in col_map else None
+
+        O = get_col("open")
+        H = get_col("high")
+        L = get_col("low")
+        C = get_col("close")
+        V = get_col("volume")
         # Turnover (Amount) is 5, but Alpha158 uses VWAP from Qlib which is Amount/Volume usually.
         # We can calculate VWAP from Turnover / Volume.
         # However, Alpha158 source code (qlib) often provides VWAP as a column.
@@ -31,7 +31,7 @@ class Factor158Calculator(FactorCalculator):
         # vwap = Turnover / (Volume + 1e-8)
         # Note: if Volume is 0, VWAP is usually Close or NaN.
         
-        T = padded_raw[:, :, 5] 
+        T = get_col("turnover") 
         vwap = T / (V + 1e-8)
         vwap = torch.where(V < 1e-5, C, vwap)
 
