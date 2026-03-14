@@ -4,6 +4,7 @@ class V8FactorCalculator(FactorCalculator):
     def __init__(self):
         super().__init__()
 
+    # col_map结构可参考 core/alpha/data_columns_info.txt
     def build_features(self, padded_raw, col_map) -> dict[str, torch.Tensor]:
         # Let's keep (Batch, Time) for basic ops
         print(f"[DEBUG] padded_raw.shape: {padded_raw.shape}")
