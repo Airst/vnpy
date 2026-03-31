@@ -13,7 +13,8 @@
 - vnpy/core/aplha：用于因子计算和模型训练
 
 ## 当前进展
-- 当前因子计算已经从v3迭代至v8（v8_factor_calculator）
+- 因子计算已经从v3迭代至v8（v8_factor_calculator）
+- 现在开始迭代V9版本
 
 ## 量化思路
 - 量化的内核是寻找市场波动的规律，从波动中获利

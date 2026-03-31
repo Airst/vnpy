@@ -5,6 +5,7 @@ from datetime import datetime
 from pathlib import Path
 import re
 import argparse
+import importlib
 
 from vnpy.alpha import logger
 from core.logger_writer import LoggerWriter
@@ -12,8 +13,7 @@ from core.alpha.engine import AlphaEngine
 from core.alpha.mlp_signals import MLPSignals
 from core.selector.selector import FundamentalSelector
 
-# Import Calculators
-from core.alpha.v8_factor_calculator import V8FactorCalculator
+# Import Calculators dynamically later
 
 
 from data_manager.ts_downloader.download_daily import download_data
@@ -128,9 +128,23 @@ def save_log_dump(version: str):
 if __name__ == "__main__":
     
     # Configuration Map
-    VERSION_CONFIG = {
-        "v8": (V8FactorCalculator, "V8 (Stacking V4)"),
-    }
+    VERSION_CONFIG = {}
+    alpha_dir = Path("core/alpha")
+    if alpha_dir.exists():
+        for file_path in alpha_dir.glob("v*_factor_calculator.py"):
+            module_name = file_path.stem
+            version_str = module_name.split('_')[0]
+            class_name = f"{version_str.capitalize()}FactorCalculator"
+            try:
+                module = importlib.import_module(f"core.alpha.{module_name}")
+                calc_class = getattr(module, class_name)
+                VERSION_CONFIG[version_str] = (calc_class, f"{version_str.upper()} Factor Calculator")
+            except Exception as e:
+                print(f"Warning: Failed to load {class_name} from {module_name}: {e}")
+    
+    if not VERSION_CONFIG:
+        print("Error: No valid factor calculators found in core/alpha/")
+        sys.exit(1)
     
     parser = argparse.ArgumentParser(description="Unified Alpha Run Script")
     
