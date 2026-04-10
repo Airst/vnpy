@@ -1,6 +1,6 @@
 DataFrame 列信息
 ============================================================
-总列数：70
+总列数：88
 ============================================================
 
 序号         列名                                      
@@ -75,3 +75,21 @@ DataFrame 列信息
 67         concept_acc_5_mean                      
 68         concept_rank_score_mean                 
 69         concept_rank_score_max                  
+70         buy_sm_vol                              
+71         buy_sm_amount                           
+72         sell_sm_vol                             
+73         sell_sm_amount                          
+74         buy_md_vol                              
+75         buy_md_amount                           
+76         sell_md_vol                             
+77         sell_md_amount                          
+78         buy_lg_vol                              
+79         buy_lg_amount                           
+80         sell_lg_vol                             
+81         sell_lg_amount                          
+82         buy_elg_vol                             
+83         buy_elg_amount                          
+84         sell_elg_vol                            
+85         sell_elg_amount                         
+86         net_mf_vol                              
+87         net_mf_amount                           

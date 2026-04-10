@@ -21,6 +21,7 @@ from data_manager.ts_downloader.daily_basic_manager import DailyBasicManager
 from data_manager.ts_downloader.stock_info_manager import StockInfoManager
 from data_manager.ts_downloader.concept_manager import ConceptManager
 from data_manager.ts_downloader.fina_indicator_manager import FinaIndicatorManager
+from data_manager.ts_downloader.moneyflow_manager import MoneyFlowManager
 
 
 from core.core_service import CoreService
@@ -47,7 +48,7 @@ def setup_logger(version: str):
 
 def save_log_dump(version: str):
     log_filename = f"log/run_{version}.log"
-    output_filename = f"traning{version.upper()}.txt"
+    output_filename = f"training{version.upper()}.txt"
     
     if not os.path.exists(log_filename):
         print(f"Log file {log_filename} not found.")
@@ -164,6 +165,8 @@ if __name__ == "__main__":
 
     parser.add_argument("-t", "--total", action="store_true", help="Force retrain all models (Total/Full Rolling)")
 
+    parser.add_argument("-m", "--max", help="Max Holdings", default=5)
+
     parser.add_argument("-vt", help="vt_symbol mode")
     
     args = parser.parse_args()
@@ -238,6 +241,10 @@ if __name__ == "__main__":
         fina_manager = FinaIndicatorManager()
         fina_manager.download_all()
         
+        print("\n开始更新资金流向数据...")
+        mf_manager = MoneyFlowManager()
+        mf_manager.download_all()
+        
         print("数据同步到alpha lab...")
         engine.sync_data()
     else: 
@@ -262,7 +269,7 @@ if __name__ == "__main__":
             start=datetime.strptime("2022-01-01", "%Y-%m-%d"),
             end=last_trading_date,
             setting={
-                "max_holdings": 5,
+                "max_holdings": args.max,
                 "signal_name": signal_name,
             }
         )

@@ -349,7 +349,6 @@ class V9FactorCalculator(FactorCalculator):
         pe_mean_20 = ts_mean(PE, 20)
         features["pe_rank_change_20d"] = PE / (pe_mean_20 + 1e-8) - 1
 
-        
         # qtld_{w} = ts_quantile(close, w, 0.2) / close
         features[f"qtld_60"] = ts_quantile(C, 60, 0.2) / C
         
@@ -574,154 +573,34 @@ class V9FactorCalculator(FactorCalculator):
         bear_prob = 1.0 - bull_prob
         features["inter_camel_bear"] = features["camel_hump_score"] * bear_prob
 
-        # === Helper: ZT Count (Needed for Dragon Score) ===
+        # === Helper: ZT Count ===
         is_zt = (ret_1 > 0.095).float()
         features["zt_count_20d"] = ts_sum(is_zt, 20)
 
-        # === V9: Adaptive Dragon Score (Hybrid Logic) ===
-        # Rationale: Dynamically shift focus based on Market Regime.
-        # Bull Market: Chase Leaders & Trend (Attack)
-        # Bear Market: Buy Structure & Reversion (Defense)
-        
+        # === V9 Phase 3: Simplified Dragon Score (no regime hardcoding) ===
+        # Keep V6 base logic only. Let MLP learn regime interactions from atomic factors
+        # (beta_20d, volatility_20d, meta_bull_prob, etc.)
         rank_turnover = cs_rank(features["turnover_mean_20d"])
-        rank_pv_corr = cs_rank(features["price_vol_corr_20"])
-        rank_mom_20d = cs_rank(features["mom_20d"])
-        rank_rel_con = cs_rank(features["rel_con_mom_20d"])
-        
-        rank_camel = cs_rank(features["camel_hump_score"])
-        rank_resonance = cs_rank(features["resonance_signal"])
-        rank_rr = cs_rank(features["rr_ratio_20"])
-        
-        # New Ranks
-        rank_zt = cs_rank(features["zt_count_20d"])
-        # rank_low_price = cs_rank(features["low_price_factor"])
-        rank_elasticity = cs_rank(features["vol_range_20d"])
-        
-        # === V9.3: Triple-Regime Adaptive Logic (Bull, Bear, Chaos) ===
-        # Backtest Analysis: In 2023-2024 "Choppy Bear", both Momentum and Reversion failed.
-        # Only Turnover (Liquidity) worked. We need to detect "Chaos" and hide in Liquidity.
-        
-        # 1. Define Regimes
-        # Bull: Momentum is Up.
-        # Bear: Momentum is Down.
-        # Chaos: Volatility is High (Panic/Choppy).
-        
-        # Volatility Rank (Market Level)
-        # If Market Volatility is in the top 80%, we are in Chaos Mode.
-        # Normalized Volatility: 0.0 = Low, 1.0 = High
-        vol_regime = torch.sigmoid((mkt_vol_20d - 0.015) * 100.0)
-        
-        # Regime Probability Matrix
-        # P(Bull) = bull_prob
-        # P(Bear) = (1 - bull_prob) * (1 - vol_regime)  -> Grinding Down (Safe for Reversion)
-        # P(Chaos) = (1 - bull_prob) * vol_regime       -> Crashing/Choppy (Unsafe for Reversion)
-        
-        prob_bull = bull_prob
-        prob_bear = (1.0 - bull_prob) * (1.0 - vol_regime)
-        prob_chaos = (1.0 - bull_prob) * vol_regime
-        
-        # 2. Strategy Compositions
-        
-        # A. Bull Strategy: Momentum + Resonance (Attack)
-        score_bull = (
-            rank_mom_20d * 0.2 + 
-            rank_rel_con * 0.2 + 
-            rank_resonance * 0.2 +
-            features["head_lift_signal"] * 0.2 + 
-            rank_zt * 0.1 +              
-            rank_elasticity * 0.1
-        )
-        
-        # B. Bear Strategy: Reversion + Structure (Defense)
-        # Works well in low-volatility downtrends (Grinding bear)
-        score_bear = (
-            rank_camel * 0.4 +       
-            rank_rel_con * 0.2 +     
-            rank_rr * 0.1 +          
-            rank_resonance * 0.3     
-        )
-        
-        # C. Chaos Strategy: Liquidity + Low Volatility (Survival)
-        # In High Vol crashes, Alpha fails. Stick to high liquidity.
-        score_chaos = rank_turnover # Pure Liquidity
-        
-        # 3. Dynamic Blending
-        # Base Score is always anchored by Turnover (The only all-weather factor)
-        # We blend the "Alpha Component" based on regime.
-        
-        alpha_component = (
-            score_bull * prob_bull + 
-            score_bear * prob_bear + 
-            score_chaos * prob_chaos
-        )
-        
-        # Final Dragon Score
-        # In Chaos, we boost the weight of the Base Turnover significantly.
-        # Normal: 50% Turnover + 50% Alpha
-        # Chaos:  80% Turnover + 20% Alpha (Survival Mode)
-        
-        turnover_weight = 0.5 + prob_chaos * 0.3 # 0.5 -> 0.8
-        alpha_weight = 1.0 - turnover_weight
-        
-        features["dragon_score"] = rank_turnover * turnover_weight + alpha_component * alpha_weight
-        
-        # Add Inflection Bonus (Aggressive booster for early entry)
-        # Only apply in Bull or Bear regimes, NOT in Chaos (Too risky)
-        inflection_bonus = (ret_1 > 0.0).float() * (features["mom_5d"] < -0.03).float() * (features["dist_support_20"] < 0.08).float()
-        features["dragon_score"] = features["dragon_score"] + inflection_bonus * 0.3 * (1.0 - prob_chaos)
-        
-        # Penalty 1: Short term overheat (Velocity too fast)
-        # Relax penalty if ZT count is high (Dragons are allowed to be overheated)
-        overheat_threshold = 0.2 + bull_prob * 0.2
-        is_dragon_mode = (features["zt_count_20d"] > 0).float()
-        
-        # Only penalize if NOT in Dragon Mode (Normal overheat is bad, Dragon overheat is good)
-        features["dragon_score"] = features["dragon_score"] - (features["mom_5d"] > overheat_threshold).float() * (1.0 - is_dragon_mode) * 1.0
+        features["dragon_score"] = combined_mom + rank_turnover * torch.tanh(features["mom_20d"] * 5.0)
 
-        # Penalty 2: "At Ceiling" Penalty
-        # In Bear Markets, hitting resistance is a sell signal.
-        at_ceiling = (features["dist_pressure_20"] < 0.01).float()
-        features["dragon_score"] = features["dragon_score"] - at_ceiling * bear_prob * 0.5
-        
-        # Penalty 3: Bear Trap / False Stabilization (Downtrend Trap)
-        # Identifies "Falling Knife Pause": Downtrend + Consolidation + Not at Bottom.
+        # bear_trap_score as atomic factor (no regime-dependent penalty applied)
         features["bear_trap_score"] = (features["mom_20d"] * -1).clamp(min=0) * (1.0 - features["vol_ratio_5_20"]).clamp(min=0) * features["dist_support_20"] * 2.0
-        
-        # FIX: If Head Lift is present, this is NOT a bear trap, it's a reversal.
         features["bear_trap_score"] = features["bear_trap_score"] * (1.0 - features["head_lift_signal"]).clamp(min=0)
 
-        # Penalty 4: Pullback Trap (Uptrend Trap)
-        # Identifies "Incomplete Pullback": Uptrend (Mom20>0) + Pullback (Mom5<0) + Not at Support.
-        # User request: "If it's a pullback to halfway I don't want to select it."
-        # We penalize if dist_support > 0.10 (still 10% room to fall to support).
-        pullback_trap = (features["mom_20d"] > 0).float() * (features["mom_5d"] < -0.02).float() * (features["dist_support_20"] > 0.10).float()
-        
-        # === V8.6: ST and Dead Stock Filter (User Request) ===
-        # Filter 1: ST Stock Proxy
-        # ST stocks usually have 5% limit. If max daily range over 20 days is < 5.5%, it's likely ST or very low elasticity.
-        max_range_20 = ts_max(features["daily_range"], 20)
-        is_likely_st = (max_range_20 < 0.055).float()
-        
-        # Filter 2: Dead/Flat Phase ("One-character" distribution)
-        # If daily range is < 1.2%, it's too flat for a volatility-based strategy.
-        # This prevents buying during "suspiciously stable" periods in a downtrend.
-        # FIX: If we are AT SUPPORT, low volatility is good (Base Building).
-        is_dead_flat = (features["daily_range"] < 0.012).float() * (features["dist_support_20"] > 0.05).float()
-        
-        # Penalize Dragon Score
-        # Reduced bear_trap penalty weight from 0.5 to 0.3
-        features["dragon_score"] = features["dragon_score"] - cs_rank(features["bear_trap_score"]) * 0.3 - pullback_trap * 0.5
-        
-        # Apply ST/Flat Penalties (Severe)
-        features["dragon_score"] = features["dragon_score"] - is_likely_st * 2.0 - is_dead_flat * 2.0
-
-        # Label: Next 5 days return (Market Neutral Rank)
+        # Label: Next 5 days EXCESS return (Beta-Neutral Rank)
+        # V9 Phase 1: Remove beta component so the model learns alpha, not beta
         raw_ret_5 = ts_delay(C, -5) / C - 1
-        
+
+        # Market average 5-day return (cross-sectional mean, broadcasts to all stocks)
+        mkt_ret_5 = torch.nanmean(raw_ret_5, dim=0, keepdim=True)
+
+        # Beta-neutral excess return: subtract each stock's beta * market return
+        excess_ret_5 = raw_ret_5 - features["beta_20d"] * mkt_ret_5
+
         # Penalize low liquidity stocks (Turnover < 1%)
         low_liq_penalty = (features["turnover_mean_20d"] < 1.0).float() * 0.05
-        raw_ret_5 = raw_ret_5 - low_liq_penalty
+        excess_ret_5 = excess_ret_5 - low_liq_penalty
 
-        features["label"] = cs_rank(raw_ret_5)
+        features["label"] = cs_rank(excess_ret_5)
 
         return features

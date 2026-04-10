@@ -10,6 +10,8 @@ import pandas as pd
 import numpy as np
 from pathlib import Path
 
+from core.risk_controller import RiskController
+
 ALPHA_DB_PATH = "core/alpha_db"
 
 class MultiFactorStrategy(StrategyTemplate):
@@ -43,16 +45,16 @@ class MultiFactorStrategy(StrategyTemplate):
         super().__init__(portfolio_engine, strategy_name, vt_symbols, setting)
 
         self.signal_name = setting.get("signal_name", "ashare_multi_factor")
-        self.max_holdings = setting.get("max_holdings", 5)
-        self.capital = setting.get("capital", 1_000_000)
-        self.sell_threshold = setting.get("sell_threshold", 1.54)
-        self.buy_threshold = setting.get("buy_threshold", 1)
-        self.stop_loss_pct = setting.get("stop_loss_pct", 0.05)
-        self.trailing_stop_pct = setting.get("trailing_stop_pct", 0.15)
-        self.cooldown_days = setting.get("cooldown_days", 3)
-        self.persistence_days = setting.get("persistence_days", 3)
+        self.max_holdings = int(setting.get("max_holdings", 5))
+        self.capital = float(setting.get("capital", 1_000_000))
+        self.sell_threshold = float(setting.get("sell_threshold", 1.54))
+        self.buy_threshold = float(setting.get("buy_threshold", 1))
+        self.stop_loss_pct = float(setting.get("stop_loss_pct", 0.05))
+        self.trailing_stop_pct = float(setting.get("trailing_stop_pct", 0.15))
+        self.cooldown_days = int(setting.get("cooldown_days", 3))
+        self.persistence_days = int(setting.get("persistence_days", 3))
         
-        self.rate = setting.get("rate", 0.0003)
+        self.rate = float(setting.get("rate", 0.0003))
         self.cash = self.capital
         
         print(f"MultiFactorStrategy initialized with lab: {self.lab_path} signal: {self.signal_name}, max_holdings: {self.max_holdings}, capital: {self.capital}, buy_threshold: {self.buy_threshold}, sell_threshold: {self.sell_threshold}, stop_loss: {self.stop_loss_pct}")
@@ -66,6 +68,13 @@ class MultiFactorStrategy(StrategyTemplate):
         self.pos_high_price = {}
         self.cooldown_map = {} # {vt_symbol: cooldown_counter}
         self.pending_sell = {} # {vt_symbol: days_remaining}
+
+        # Portfolio-level risk controller
+        self.risk_control_enabled = bool(setting.get("risk_control_enabled", True))
+        self.risk_controller = RiskController(
+            base_max_holdings=self.max_holdings,
+            enabled=self.risk_control_enabled,
+        )
 
     def on_init(self):
         print("MultiFactorStrategy Initialized")
@@ -198,15 +207,13 @@ class MultiFactorStrategy(StrategyTemplate):
         date_str = current_dt.strftime("%Y-%m-%d")
         available_cash = self.cash
 
-        # Update last prices
+        # Update last prices & trailing high
         for vt_symbol, bar in bars.items():
             self.last_prices[vt_symbol] = bar.close_price
             
-            # Update High Price for Trailing Stop
             if vt_symbol in self.pos_high_price:
-                if bar.close_price > self.pos_high_price[vt_symbol]:
-                    self.pos_high_price[vt_symbol] = bar.close_price
-            
+                if bar.high_price > self.pos_high_price[vt_symbol]:
+                    self.pos_high_price[vt_symbol] = bar.high_price
         
         # 2. Get Scores
         scores = self.signal_data.get(date_str, {})
@@ -233,106 +240,103 @@ class MultiFactorStrategy(StrategyTemplate):
         for s in expired_pending:
             del self.pending_sell[s]
 
-
-        # 3. Stop Loss Logic (Priority 1)
+        # 3. Compute portfolio equity and call risk controller
         held_symbols = []
+        for vt_symbol in self.vt_symbols:
+            if self.get_pos(vt_symbol) > 0:
+                held_symbols.append(vt_symbol)
+
+        portfolio_equity = self.cash
+        for vt_symbol in held_symbols:
+            pos = self.get_pos(vt_symbol)
+            price = self.last_prices.get(vt_symbol, self.pos_entry_price.get(vt_symbol, 0))
+            portfolio_equity += pos * price
+
+        dynamic_max, force_sell_symbols = self.risk_controller.on_bar(
+            portfolio_equity=portfolio_equity,
+            current_positions=held_symbols,
+            signal_scores=scores,
+        )
+
+        # 4. Execute force sells (highest priority)
+        for vt_symbol in force_sell_symbols:
+            if vt_symbol not in bars:
+                continue
+            bar = bars[vt_symbol]
+            price = bar.close_price
+            if price <= 0:
+                continue
+            pos = self.get_pos(vt_symbol)
+            if pos <= 0:
+                continue
+
+            daily_range = bar.high_price - bar.low_price
+            if daily_range == 0:
+                daily_range = price * 0.02
+            limit_price = max(price - daily_range, price * 0.95)
+
+            self.sell(vt_symbol, limit_price, pos)
+            self.cooldown_map[vt_symbol] = self.cooldown_days
+            print(f"{date_str}, {vt_symbol} Sell (RISK_CTRL max={dynamic_max}), limit_price:{limit_price:.2f} (Close:{price}) score: {scores.get(vt_symbol, 0)}")
+
+        # Remove force-sold symbols from held list for subsequent logic
+        force_sell_set = set(force_sell_symbols)
+        held_symbols = [s for s in held_symbols if s not in force_sell_set]
+
+        # 5. Stop Loss Logic (Priority 2)
         stop_loss_triggered = []
         
-        for vt_symbol in self.vt_symbols:
-            pos = self.get_pos(vt_symbol)
-            if pos > 0:
-                held_symbols.append(vt_symbol)
+        for vt_symbol in held_symbols:
+            if vt_symbol not in bars:
+                continue
                 
-                if vt_symbol not in bars:
-                    continue
+            price = bars[vt_symbol].close_price
+            entry = self.pos_entry_price.get(vt_symbol, price)
+            high = self.pos_high_price.get(vt_symbol, price)
+            
+            hard_stop_price = entry * (1 - self.stop_loss_pct)
+            trailing_stop_price = high * (1 - self.trailing_stop_pct)
+            
+            if price < hard_stop_price:
+                print(f"{date_str} {vt_symbol} HARD STOP triggered. Price: {price}, Entry: {entry} (-{(1-price/entry)*100:.1f}%)")
+                self.cooldown_map[vt_symbol] = self.cooldown_days
+                stop_loss_triggered.append(vt_symbol)
                 
-                price = bars[vt_symbol].close_price
-                entry = self.pos_entry_price.get(vt_symbol, price)
-                high = self.pos_high_price.get(vt_symbol, price)
-                
-                # Check Hard Stop
-                hard_stop_price = entry * (1 - self.stop_loss_pct)
-                # Check Trailing Stop
-                trailing_stop_price = high * (1 - self.trailing_stop_pct)
-                
-                if price < hard_stop_price:
-                    print(f"{date_str} {vt_symbol} HARD STOP triggered. Price: {price}, Entry: {entry} (-{(1-price/entry)*100:.1f}%)")
-                    self.cooldown_map[vt_symbol] = self.cooldown_days
-                    stop_loss_triggered.append(vt_symbol)
-                    
-                elif price < trailing_stop_price:
-                    print(f"{date_str} {vt_symbol} TRAILING STOP triggered. Price: {price}, High: {high} (-{(1-price/high)*100:.1f}%)")
-                    self.cooldown_map[vt_symbol] = self.cooldown_days
-                    stop_loss_triggered.append(vt_symbol)
+            elif price < trailing_stop_price:
+                print(f"{date_str} {vt_symbol} TRAILING STOP triggered. Price: {price}, High: {high} (-{(1-price/high)*100:.1f}%)")
+                self.cooldown_map[vt_symbol] = self.cooldown_days
+                stop_loss_triggered.append(vt_symbol)
 
-        # 4. Rank candidates
+        # 6. Rank candidates (use dynamic_max instead of self.max_holdings)
         available_symbols = list(bars.keys())
         sorted_symbols = sorted(available_symbols, key=lambda s: scores.get(s, -999), reverse=True)
         
-        # 5. Generate Target Portfolio
         target_symbols = []
         for s in sorted_symbols:
-            # Filter:
-            # 1. Score > threshold
-            # 2. Not in cooldown
             if scores.get(s, 0) > self.buy_threshold and s not in self.cooldown_map: 
                 target_symbols.append(s)
-            if len(target_symbols) >= self.max_holdings:
+            if len(target_symbols) >= dynamic_max:
                 break
         
-        # 6. Execute Trading (Buy/Sell Rotation)
+        # 7. Sell logic
         held_count = len(held_symbols)
-        
-        # 6a. Buy (stocks in target but not held)
-        # Identify valid buy candidates (in target, not held)
-        buy_candidates = [s for s in target_symbols if s not in held_symbols]
-        
-        # Determine how many we can buy (limited by available slots)
-        # Update held_count based on sells to allow rotation into new stocks
-        # (Actually we haven't processed 'score-based sells' yet. Let's process Sells FIRST to free up slots/cash?)
-        # Standard logic: Buy what fits, Sell what should go.
-        # Ideally: Sell candidates -> Free up cash -> Buy new.
-        
-        # 6b. Sell based on explicit sell signal (final_signal < threshold)
         sell_candidates = list(set([s for s in held_symbols if s not in target_symbols] + stop_loss_triggered))
         
-        # We process sells first to free up 'virtual' slots if we assume T+0 cash availability? 
-        # A-share is T+1 selling, so cash isn't available same day usually. 
-        # But 'held_count' logic matters.
-        
         for vt_symbol in held_symbols:
-            # Check sell signal using relative score
             score = scores.get(vt_symbol, 0.0)
             
-            # --- Signal Persistence Logic ---
-            # 1. If score drops below threshold, mark as pending sell (persist)
             if score < self.sell_threshold:
                 self.pending_sell[vt_symbol] = self.persistence_days
             
-            # 2. If score becomes very strong (Trend Reversal), clear pending
-            # Arbitrary buffer: Buy Threshold + 0.5 (Significant strength)
             if score > (self.buy_threshold + 0.5):
                 if vt_symbol in self.pending_sell:
                     del self.pending_sell[vt_symbol]
-
-            if vt_symbol not in sell_candidates:
-                # Even if not a 'sell_candidate' by rotation (meaning it might still be in top N but < BuyThreshold),
-                # we might want to force sell if it triggered persistence or stop loss.
-                # 'sell_candidates' above includes stop_loss_triggered and those NOT in target (Top N).
-                # If a stock is in Top N, but score < sell_threshold (contradiction? Possible if N is large and scores are low),
-                # we should respect the sell threshold.
-                pass
             
-            # Explicit Sell Condition
-            # e.g., if score < -0.5 (underperforming average)
             is_stop_loss = vt_symbol in stop_loss_triggered
             is_persistent_sell = vt_symbol in self.pending_sell
-            
-            # Union of reasons to sell
             should_sell = (score < self.sell_threshold) or is_persistent_sell or is_stop_loss
             
             if should_sell:
-                # Need current price. If not in bars (suspended), we can't sell.
                 if vt_symbol not in bars:
                     continue
                     
@@ -343,42 +347,26 @@ class MultiFactorStrategy(StrategyTemplate):
 
                 pos = self.get_pos(vt_symbol)
                 
-                # --- Dynamic Limit Price (Smart Execution) ---
-                # Use daily range (High - Low) as volatility proxy.
                 daily_range = bar.high_price - bar.low_price
                 if daily_range == 0:
-                    # Fallback if doji or no data: 2%
                     daily_range = price * 0.02
-                
-                # Limit Price = Close - Range. 
-                # Gives enough room for a standard deviation drop, ensuring execution unless extreme gap.
-                limit_price = price - daily_range
-                
-                # Safety Guard: Don't sell below 90% (Circuit Breaker limit usually)
-                limit_price = max(limit_price, price * 0.95)
+                limit_price = max(price - daily_range, price * 0.95)
                 
                 self.sell(vt_symbol, limit_price, pos)
                 
                 reason = "STOP_LOSS" if is_stop_loss else ("PERSIST" if is_persistent_sell else "SIGNAL")
                 print(f"{date_str}, {vt_symbol} Sell ({reason}), limit_price:{limit_price:.2f} (Close:{price}) score: {score}")
-                
-            else:
-                # print(f"{date_str}, {vt_symbol} Held, score: {score}")
-                pass
 
-        # Now Buy
-        num_to_buy = min(len(buy_candidates), self.max_holdings - held_count)
+        # 8. Buy logic (use dynamic_max)
+        buy_candidates = [s for s in target_symbols if s not in held_symbols]
+        num_to_buy = min(len(buy_candidates), dynamic_max - held_count)
         
         if num_to_buy > 0 and available_cash > 0:
-            # Determine target value per stock based on available cash and open slots
-            # This ensures we don't overspend even if we only find 1 candidate
-            # Apply a safety buffer (95%)
             target_value = (available_cash / num_to_buy) * 0.95
             
             for i in range(num_to_buy):
                 vt_symbol = buy_candidates[i]
                 
-                # If symbol not in bars, we can't buy
                 if vt_symbol not in bars:
                     continue
                     
@@ -386,15 +374,11 @@ class MultiFactorStrategy(StrategyTemplate):
                 if price <= 0:
                     continue
                     
-                # Calculate volume: round down to nearest 100
                 if target_value > 0:
                     volume = int((target_value / price) / 100) * 100
                     
                     if volume > 0:
-                        # Buy at simulated limit price above close (ensure execution)
-                        # Use 1.05 to handle gap ups (standard aggressive buy)
                         self.buy(vt_symbol, price * 1.02, volume)
-                        
                         print(f"{date_str}, {vt_symbol} Buy, price: {price * 1.02}, volume: {volume}, score: {scores.get(vt_symbol, 0)}")
 
         self.put_event()

@@ -5,6 +5,7 @@ from vnpy.alpha.lab import AlphaLab
 from data_manager.ts_downloader.daily_basic_manager import DailyBasicManager
 from data_manager.ts_downloader.stock_info_manager import StockInfoManager
 from data_manager.ts_downloader.fina_indicator_manager import FinaIndicatorManager
+from data_manager.ts_downloader.moneyflow_manager import MoneyFlowManager
 from core.alpha.concept_embedding import ConceptEmbedding
 
 class DataLoader:
@@ -171,6 +172,46 @@ class DataLoader:
                 print("概念因子数据加载完成")
         except Exception as e:
             print(f"加载概念因子数据失败: {e}")
+        
+        # 6. 加载资金流向数据 (MoneyFlow - Alpha因子)
+        print("加载资金流向数据 (MoneyFlow Alpha)...")
+        try:
+            mf_manager = MoneyFlowManager()
+            mf_df_pd = mf_manager.load_data(symbols, s_date_str, e_date_str)
+            
+            if not mf_df_pd.empty:
+                mf_df = pl.from_pandas(mf_df_pd)
+                if "datetime" in mf_df.columns:
+                    mf_df = mf_df.with_columns(pl.col("datetime").cast(pl.Datetime("us")))
+                
+                # 移除不需要的列
+                cols_to_drop = ["ts_code", "trade_date"]
+                mf_df = mf_df.drop([c for c in cols_to_drop if c in mf_df.columns])
+                
+                price_df = price_df.join(mf_df, on=["vt_symbol", "datetime"], how="left")
+                
+                # 资金流向列
+                mf_cols = [
+                    "buy_sm_vol", "buy_sm_amount", "sell_sm_vol", "sell_sm_amount",
+                    "buy_md_vol", "buy_md_amount", "sell_md_vol", "sell_md_amount",
+                    "buy_lg_vol", "buy_lg_amount", "sell_lg_vol", "sell_lg_amount",
+                    "buy_elg_vol", "buy_elg_amount", "sell_elg_vol", "sell_elg_amount",
+                    "net_mf_vol", "net_mf_amount"
+                ]
+                
+                # 确保所有资金流向列存在
+                for c in mf_cols:
+                    if c not in price_df.columns:
+                        price_df = price_df.with_columns(pl.lit(0.0).alias(c))
+                
+                # Fill nulls
+                price_df = price_df.with_columns([
+                    pl.col(c).fill_null(0.0).fill_nan(0.0) for c in mf_cols if c in price_df.columns
+                ])
+                
+                print(f"资金流向数据加载完成，维度: {price_df.shape}")
+        except Exception as e:
+            print(f"加载资金流向数据失败: {e}")
         
         return price_df
 
