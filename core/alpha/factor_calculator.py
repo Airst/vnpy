@@ -841,3 +841,31 @@ def cs_zscore(x):
     
     # Clip to avoid extreme outliers causing gradient explosion
     return torch.clamp(z, -3.0, 3.0)
+
+def cs_neutralize(y, x):
+    """
+    Cross-sectional neutralization: regress y on x, return residual.
+    y, x: (Batch, Time) tensors. Operates across Batch (dim=0) per time step.
+    Equivalent to: y_resid = y - mean(y) - gamma * (x - mean(x))
+    where gamma = cov(y,x) / var(x)
+    """
+    mask = (~torch.isnan(y)) & (~torch.isnan(x))
+    count = mask.sum(dim=0, keepdim=True).clamp(min=1).float()
+
+    y_zero = torch.where(mask, y, torch.zeros_like(y))
+    x_zero = torch.where(mask, x, torch.zeros_like(x))
+
+    mean_y = y_zero.sum(dim=0, keepdim=True) / count
+    mean_x = x_zero.sum(dim=0, keepdim=True) / count
+
+    dy = (y_zero - mean_y) * mask.float()
+    dx = (x_zero - mean_x) * mask.float()
+
+    cov_yx = (dy * dx).sum(dim=0, keepdim=True) / count
+    var_x = (dx * dx).sum(dim=0, keepdim=True) / count
+
+    gamma = cov_yx / (var_x + 1e-10)
+
+    resid = y - mean_y - gamma * (x - mean_x)
+    resid[~mask] = float('nan')
+    return resid
