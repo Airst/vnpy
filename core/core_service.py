@@ -312,6 +312,21 @@ class CoreService:
         except Exception as e:
             print(f"Failed to save backtest result: {e}")
 
+        # Clean up old backtest files, keep only the latest 4 per signal_name
+        try:
+            all_files = sorted(
+                [
+                    f for f in os.listdir(BACKTEST_DB_PATH)
+                    if f.endswith(".json") and f.startswith(signal_name + "_")
+                ],
+                reverse=True,  # newest first (timestamp in filename)
+            )
+            for old_file in all_files[4:]:
+                os.remove(os.path.join(BACKTEST_DB_PATH, old_file))
+                print(f"Deleted old backtest: {old_file}")
+        except Exception as e:
+            print(f"Failed to clean up old backtest files: {e}")
+
         return result
 
     def get_backtest_history(self) -> List[Dict]:
