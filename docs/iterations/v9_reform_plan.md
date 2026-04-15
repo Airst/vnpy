@@ -560,6 +560,10 @@ features["systematic_risk_ratio"] = mkt_vol_20d / (avg_stock_vol + 1e-8)
 | Phase 5 Step 2 (cord_20) | 2026-04-10 | 量价同步性: ret-vol 相关 20d | 总收益 -109%, Sharpe -0.28, IC 0.061 | **失败，已回退** |
 | Phase 5 Step 3 (sump_20) | 2026-04-10 | 上涨占比: 正向波动比 20d | 总收益 -186%, Sharpe -0.55, IC 0.011 | **失败，已回退** |
 | Phase 5 Step 5 (rel_concept_turnover) | 2026-04-10 | 板块相对活跃度 | 总收益 -161%, Sharpe -0.43, IC 0.294 | **失败，已回退** |
+| Phase 6 Exp 1 (纯 IC-Loss) | 2026-04-14 | MSE→IC-Loss + 日期结构化采样 | Sharpe 0.70, 非牛市年化 19.8%, 牛市腰斩 | **失败，已回退** |
+| Phase 6 Exp 2 (混合 IC+MSE) | 2026-04-14 | loss = -IC + MSE | Sharpe 0.75, 非牛市年化 5.7%, 两头不讨好 | **失败，已回退** |
+| Phase 6 Exp 3 (IC+清理因子) | 2026-04-15 | IC-Loss + 移除 P5P6 因子 | Sharpe 0.71, 非牛市年化 4.0% | **失败，已回退** |
+| Phase 6 Exp 4 (时间衰减采样) | 2026-04-15 | 指数衰减采样 decay=0.995 | Sharpe 0.24, MaxDD -57.7%, 全面崩塌 | **失败，已回退** |
 
 ### 当前基线（Phase 1 + Phase 3 + turnover_x_bull）
 
@@ -851,3 +855,159 @@ ma_bias_120, price_zscore_20d, ret_overnight, ret_intraday, bias_60, trend_rsqua
 - 因子剪枝不能用 IC 一刀切，应使用 permutation importance（在验证集上逐个置换因子测量模型性能变化）
 - 即使要剪枝，也应逐步进行（每次最多移除 3-5 个），而非批量操作
 - **已回退代码，当前模型恢复到 Phase 4 基线状态**
+
+---
+
+## Phase 5: Turnover-Neutral Label（换手率中性化标签）
+
+> 日期：2026-04-13
+> 基线：Phase 4 (Beta-Neutral + turnover_x_bull)
+> 目标：去除 label 中的换手率风险溢价，释放被压制因子的 alpha 空间
+
+### 5.1 问题诊断
+
+通过三层因子分析工具（factor_evaluator / model_attribution / factor_ablation）对 V9 模型的全面分析发现：
+
+**核心问题：模型 77% 的预测能力来自换手率组（9 个因子），其他 89 个因子几乎是摆设**
+
+进一步分析 label 发现：
+- Label 与 turnover_mean_20d 的截面 R² = **12.3%** — label 中超过 1/8 的信息就是换手率
+- 对 label 做 turnover 正交化后发现：
+  - **价值因子被压制**：ep_ratio IC 从 -0.118 提升到 -0.079（提升 33%）
+  - **动量因子虚假信号**：mom_60d IC 从 +0.017 翻转为 -0.021（原来是假的）
+  - **反转因子被掩盖**：bear_reversal IC 从 +0.012 提升到 +0.032（提升 167%）
+  - **换手率因子 1/3 IC 是"自相关"**：turnover IC 从 +0.308 降至 +0.202
+
+**根因**：label 中 baked-in 的换手率信息通过三条路径污染模型：
+1. A 股 5 日收益本身与换手率正相关（散户投机驱动）
+2. `low_liq_penalty` 显式惩罚低换手率股票
+3. MLP 发现 turnover 是预测 label 的"捷径"，不再学习其他因子
+
+### 5.2 理论依据
+
+1. **Miller (1977) 异质信念假说**：高换手率 = 投资者分歧大 = 卖空约束下价格高估 = 低未来收益。A 股卖空约束极强，该机制特别显著
+2. **Datar (1998) 流动性溢价**：低换手率股票要求流动性补偿，提供更高期望收益。这是**风险因子**，不是 alpha
+3. **Barra CNE6 风险模型**：将流动性（STOM/STOQ/STOA）列为风格风险因子，与 beta、size 并列
+4. **Gu, Kelly, Xiu (2020)**：确认 stock-level liquidity 是 ML 模型中最重要的三类预测因子之一，但优秀模型能在多维度均衡获取 alpha
+
+**核心逻辑**：V9 Phase 1 已从 label 中去除 beta（市场风险因子），理论一致的做法是**同样去除 turnover（流动性风险因子）**
+
+### 5.3 方案设计
+
+模拟测试了 4 种方案（见 `core/tools/label_reform_simulation.py`）：
+
+| 方案 | Turnover R² | Turnover IC | bear_reversal IC | illiquidity IC |
+|:---|:---:|:---:|:---:|:---:|
+| V9 基线 | 12.3% | +0.308 | +0.012 | +0.061 |
+| 全量 turnover 中性 | **4.9%** | +0.202 | **+0.032** | +0.074 |
+| turnover+size 中性 | 3.8% | +0.174 | +0.024 | **-0.061**(翻转) |
+| 半中性(50%) | 8.2% | +0.255 | +0.023 | +0.068 |
+
+**选择方案 1（全量 turnover 中性）**：
+- Turnover R² 降 60%，但 IC 仍保留 +0.202（真实预测力完整保留）
+- 被压制因子释放最充分（bear_reversal +167%, tech_reversal +238%）
+- 不会过度矫正（方案 2 导致 illiquidity 翻转）
+
+### 5.4 代码改动
+
+**文件 1: `core/alpha/factor_calculator.py`**
+- 新增 `cs_neutralize(y, x)` 函数：截面回归中性化，返回残差
+
+**文件 2: `core/alpha/v9_factor_calculator.py`**
+- Label 构造改为：
+  ```python
+  excess_ret_5 = raw_ret_5 - beta * mkt_ret_5       # Step 1: Beta neutral (Phase 1)
+  turnover_rank = cs_rank(turnover_mean_20d)
+  alpha_ret_5 = cs_neutralize(excess_ret_5, turnover_rank)  # Step 2: Turnover neutral (Phase 5)
+  label = cs_rank(alpha_ret_5)
+  ```
+- 移除 `low_liq_penalty`（不再硬编码换手率偏见）
+
+### 5.5 验证标准
+
+| 指标 | 通过标准 |
+|:---|:---|
+| Sharpe | >= V9 基线 (1.29) |
+| 非牛市年化 | > V9 基线 (~5%) — **核心改善目标** |
+| 因子组贡献分散度 | Turnover 组贡献占比 < 60%（V9 为 77%）|
+| 牛市收益 | 允许适度下降，但不低于 V9 的 70% |
+
+### 5.6 回测结果
+
+Phase 5 Turnover-Neutral Label 未单独训练验证（直接与 Phase 6 一起测试，见 Phase 6）。
+
+---
+
+## Phase 6: 模型训练层改造实验
+
+> 日期：2026-04-14 ~ 2026-04-15
+> 基线：Phase 4 (Beta-Neutral + turnover_x_bull)，MSE 损失 + 均匀采样
+> 目标：通过改变模型学习方式（而非因子/标签）改善非牛市表现
+
+### 6.1 背景
+
+Phase 5 的因子实验（4 个新因子全部失败）和噪声因子剪枝（批量移除 30 个导致崩溃）表明：因子维度已充分探索，瓶颈在模型学习方式。核心问题：MLP 77% 预测能力来自换手率组，非牛市年化仅 ~14%。
+
+### 6.2 实验记录
+
+#### Exp 1: 纯 IC-Loss（截面排序损失）
+
+**改动**：MSE 替换为 per-day Pearson IC loss + 日期结构化批次采样（每批采样 10 个完整交易日）
+
+| 指标 | MSE 基线 | 纯 IC-Loss | 变化 |
+|:---|:---|:---|:---|
+| 总收益 | 259.0% | 117.6% | -141.4% |
+| Sharpe | 1.10 | 0.70 | -0.40 |
+| Pre-2024-11 年化 | 14.2% | **19.8%** | **+5.6%** |
+| MaxDD | -36.9% | -30.4% | +6.5% |
+| Q2 2024 | -17.6% | -11.2% | +6.4% |
+| 牛市核心(Nov24-Mar25) | +66.6% | +17.0% | -49.6% |
+
+**结论**：IC-Loss 是唯一成功改善非牛市的方法（19.8% vs 14.2%），但牛市收益腰斩导致整体 Sharpe 大降。IC-Loss 让模型不再过度依赖换手率/波动率信号，在非牛市中有效，但牛市中这些信号恰恰是 alpha 来源。
+
+#### Exp 2: 混合损失（IC + MSE）
+
+**改动**：loss = -mean_IC + MSE，早停从 40 降至 20
+
+| 指标 | MSE 基线 | 混合 IC+MSE |
+|:---|:---|:---|
+| Sharpe | 1.10 | 0.75 |
+| Pre-2024-11 年化 | 14.2% | 5.7% |
+| Q1 2024 | -8.9% | -25.2% |
+
+**结论**：两个损失目标梯度方向冲突（IC 优化截面排序 vs MSE 优化绝对值），模型两头都没学好。比纯 IC 和纯 MSE 都差。
+
+#### Exp 3: IC-Loss + 清理噪声因子
+
+**改动**：纯 IC-Loss + 回退因子集到 Phase 1+3+4（移除 Phase 5+6 的资金流/质量因子）
+
+| 指标 | IC+P5P6 | IC+Clean(P1+3+4) |
+|:---|:---|:---|
+| Sharpe | 0.70 | 0.71 |
+| Pre-2024-11 年化 | **19.8%** | 4.0% |
+
+**结论**：Phase 5+6 的低 IC 因子在 IC-Loss 框架下有正贡献。不同损失函数下同一因子集的有效性完全不同。
+
+#### Exp 4: 时间衰减采样（Temporal Decay Sampling）
+
+**改动**：训练采样从均匀分布改为指数衰减（decay=0.995），近期样本被采样概率约为 500 天前的 12 倍
+
+| 指标 | MSE 基线 | 衰减采样 |
+|:---|:---|:---|
+| Sharpe | ~0.68 | **0.24** |
+| MaxDD | ~-29% | **-57.7%** |
+| Q2 2024 | ~-16% | **-33.8%** |
+
+**结论**：catastrophic failure。decay=0.995 过于激进，模型严重过拟合近期 regime。A 股 regime 切换剧烈，时间偏向采样反而有害。均匀采样的 500 天窗口本身是有效的隐式正则化。
+
+### 6.3 核心教训
+
+1. **损失函数改造是双刃剑**：IC-Loss 唯一改善非牛市，但必然损害牛市。两个目标不可调和
+2. **混合损失不可行**：梯度冲突导致两败俱伤，不是比例调参问题
+3. **采样策略改造高风险**：时间衰减破坏了均匀采样的隐式正则化效果
+4. **因子有效性与损失函数耦合**：IC-Loss 下低 IC 因子有价值，MSE 下是噪声
+5. **均匀采样 500 天窗口不可轻易改变**：它提供了 regime 多样性，是模型泛化的基础
+
+### 6.4 代码状态
+
+**全部实验已回退。当前代码 = Phase 1+3+4 基线（MSE + 均匀采样）。**
