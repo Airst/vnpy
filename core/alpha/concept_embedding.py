@@ -1,13 +1,62 @@
 import polars as pl
 from datetime import datetime, timedelta
 from typing import List
+import gc
 import pandas as pd
 from data_manager.ts_downloader.concept_manager import ConceptManager
 
 class ConceptEmbedding:
     def __init__(self):
         self.manager = ConceptManager()
-        
+
+    @staticmethod
+    def _agg_exprs() -> list:
+        """Shared aggregation expressions for concept features."""
+        return [
+            pl.col("con_mom_5").mean().alias("concept_mom_5d"),
+            pl.col("con_mom_10").mean().alias("concept_mom_10d"),
+            pl.col("con_mom_20").mean().alias("concept_mom_20d"),
+            pl.col("con_mom_20").max().alias("concept_mom_20d_max"),
+            pl.col("con_mom_20").min().alias("concept_mom_20d_min"),
+            pl.col("con_mom_20").std().alias("concept_mom_20d_std"),
+            pl.col("con_turnover_20").mean().alias("concept_turnover_20d"),
+            pl.col("con_turnover_20").max().alias("concept_turnover_20d_max"),
+            pl.col("con_vol_20").mean().alias("concept_vol_20d"),
+            pl.len().alias("concept_count"),
+            (pl.col("pct_change") / 100.0).mean().alias("concept_daily_ret"),
+            (pl.col("pct_change") > 3.0).mean().alias("concept_hot_ratio"),
+            pl.col("pct_change").top_k(3).mean().alias("concept_top3_mean"),
+            pl.col("pct_change").std().alias("concept_cohesion"),
+            pl.col("con_mom_5_acc").mean().alias("concept_acc_5_mean"),
+            pl.col("con_rank_score").mean().alias("concept_rank_score_mean"),
+            pl.col("con_rank_score").max().alias("concept_rank_score_max"),
+        ]
+
+    def _chunked_aggregate(self, df: pl.DataFrame, chunk_label: str) -> list:
+        """Split df by quarter, aggregate each chunk, return list of result DataFrames."""
+        if df.is_empty():
+            return []
+
+        # Assign quarter key for chunking
+        df = df.with_columns(
+            (pl.col("datetime").dt.year().cast(pl.Utf8)
+             + "Q"
+             + pl.col("datetime").dt.quarter().cast(pl.Utf8)).alias("_qtr")
+        )
+        quarters = df["_qtr"].unique().sort().to_list()
+        results = []
+        agg = self._agg_exprs()
+        for qtr in quarters:
+            chunk = df.filter(pl.col("_qtr") == qtr).drop("_qtr")
+            feat = chunk.lazy().group_by(["datetime", "vt_symbol"]).agg(agg).collect()
+            results.append(feat)
+            del chunk, feat
+            gc.collect()
+        del df
+        gc.collect()
+        print(f"[ConceptEmbedding] {chunk_label}: aggregated {len(quarters)} quarters")
+        return results
+
     def get_concept_features(self, start_date: str, end_date: str) -> pl.DataFrame:
         """
         Calculate Concept-based features for stocks.
@@ -163,33 +212,13 @@ class ConceptEmbedding:
             print(f"[ConceptEmbedding] Backfilled {merged_hist.shape[0]} rows for history.")
             
             if not merged_hist.is_empty():
-                print("[ConceptEmbedding] Aggregating history chunk...")
-                # Lazy aggregation
-                feat_hist = merged_hist.lazy().group_by(["datetime", "vt_symbol"]).agg([
-                    pl.col("con_mom_5").mean().alias("concept_mom_5d"),
-                    pl.col("con_mom_10").mean().alias("concept_mom_10d"),
-                    pl.col("con_mom_20").mean().alias("concept_mom_20d"),
-                    pl.col("con_mom_20").max().alias("concept_mom_20d_max"),
-                    pl.col("con_mom_20").min().alias("concept_mom_20d_min"),
-                    pl.col("con_mom_20").std().alias("concept_mom_20d_std"),
-                    pl.col("con_turnover_20").mean().alias("concept_turnover_20d"),
-                    pl.col("con_turnover_20").max().alias("concept_turnover_20d_max"),
-                    pl.col("con_vol_20").mean().alias("concept_vol_20d"),
-                    pl.len().alias("concept_count"),
-                    # New Features
-                    (pl.col("pct_change") / 100.0).mean().alias("concept_daily_ret"),
-                    (pl.col("pct_change") > 3.0).mean().alias("concept_hot_ratio"),
-                    pl.col("pct_change").top_k(3).mean().alias("concept_top3_mean"),
-                    pl.col("pct_change").std().alias("concept_cohesion"),
-                    # New Aggregations for Rotation
-                    pl.col("con_mom_5_acc").mean().alias("concept_acc_5_mean"),
-                    pl.col("con_rank_score").mean().alias("concept_rank_score_mean"),
-                    pl.col("con_rank_score").max().alias("concept_rank_score_max")
-                ]).collect()
-                features_list.append(feat_hist)
-                del merged_hist # Free memory
+                print("[ConceptEmbedding] Aggregating history chunk (quarterly)...")
+                features_list.extend(self._chunked_aggregate(merged_hist, "History"))
+                del merged_hist
+                gc.collect()
         
-        del concept_hist # Free memory
+        del concept_hist
+        gc.collect()
 
         # Part B: Recent (On or After Member Data Start)
         concept_recent = concept_df.filter(pl.col("datetime") >= min_mem_date)
@@ -202,32 +231,13 @@ class ConceptEmbedding:
             print(f"[ConceptEmbedding] Joined {merged_recent.shape[0]} rows for recent data.")
             
             if not merged_recent.is_empty():
-                print("[ConceptEmbedding] Aggregating recent chunk...")
-                feat_recent = merged_recent.lazy().group_by(["datetime", "vt_symbol"]).agg([
-                    pl.col("con_mom_5").mean().alias("concept_mom_5d"),
-                    pl.col("con_mom_10").mean().alias("concept_mom_10d"),
-                    pl.col("con_mom_20").mean().alias("concept_mom_20d"),
-                    pl.col("con_mom_20").max().alias("concept_mom_20d_max"),
-                    pl.col("con_mom_20").min().alias("concept_mom_20d_min"),
-                    pl.col("con_mom_20").std().alias("concept_mom_20d_std"),
-                    pl.col("con_turnover_20").mean().alias("concept_turnover_20d"),
-                    pl.col("con_turnover_20").max().alias("concept_turnover_20d_max"),
-                    pl.col("con_vol_20").mean().alias("concept_vol_20d"),
-                    pl.len().alias("concept_count"),
-                    # New Features
-                    (pl.col("pct_change") / 100.0).mean().alias("concept_daily_ret"),
-                    (pl.col("pct_change") > 3.0).mean().alias("concept_hot_ratio"),
-                    pl.col("pct_change").top_k(3).mean().alias("concept_top3_mean"),
-                    pl.col("pct_change").std().alias("concept_cohesion"),
-                    # New Aggregations for Rotation
-                    pl.col("con_mom_5_acc").mean().alias("concept_acc_5_mean"),
-                    pl.col("con_rank_score").mean().alias("concept_rank_score_mean"),
-                    pl.col("con_rank_score").max().alias("concept_rank_score_max")
-                ]).collect()
-                features_list.append(feat_recent)
+                print("[ConceptEmbedding] Aggregating recent chunk (quarterly)...")
+                features_list.extend(self._chunked_aggregate(merged_recent, "Recent"))
                 del merged_recent
+                gc.collect()
 
         del concept_recent
+        gc.collect()
         
         if not features_list:
              print("[ConceptEmbedding] Merged data is empty.")
