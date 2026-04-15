@@ -58,13 +58,13 @@ class MLPSignals:
         #    "device": "auto"  # Will detect GPU
         #}
         self.model_settings = {
-            # Smaller network with stronger regularization for stability
-            "hidden_sizes": (64, 32, 16),
+            # Larger network to capture factor interactions, with stronger regularization
+            "hidden_sizes": (256, 128, 64),
             "n_epochs": 1000,
             "batch_size": 2048,
             "lr": 0.001,
             "early_stop_rounds": 40,
-            "weight_decay": 0.001,
+            "weight_decay": 0.002,
             "optimizer": "adam"
         }
         self.n_jobs = 1  # 改为单线程以保证结果可复现 (多线程下全局Seed会被频繁重置导致随机性)

@@ -594,20 +594,20 @@ class MlpNetwork(nn.Module):
         layer_sizes = [input_size] + list(hidden_sizes)
 
         # Input layer Dropout
-        layers.append(nn.Dropout(0.05))
+        layers.append(nn.Dropout(0.10))
 
         # Build hidden layers
         for in_size, out_size in zip(layer_sizes[:-1], layer_sizes[1:], strict=False):
-            # Add a neural network block: linear layer + batch normalization + activation function
+            # Add a neural network block: linear layer + batch normalization + activation function + dropout
             layers.extend([
                 nn.Linear(in_size, out_size),
                 nn.BatchNorm1d(out_size),
-                self._get_activation(activation)
+                self._get_activation(activation),
+                nn.Dropout(0.10)
             ])
 
         # Output layer
         layers.extend([
-            nn.Dropout(0.05),
             nn.Linear(hidden_sizes[-1], output_size)
         ])
 
