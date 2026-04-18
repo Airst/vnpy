@@ -1,4 +1,5 @@
 import copy
+import math
 from collections import defaultdict
 from typing import Literal, cast
 
@@ -44,7 +45,16 @@ class MlpModel(AlphaModel):
         optimizer: Literal["sgd", "adam"] = "adam",
         weight_decay: float = 0.0,
         device: str = "cpu",
-        seed: int | None = None
+        seed: int | None = None,
+        model_type: str = "mlp",
+        d_token: int = 32,
+        n_heads: int = 4,
+        n_attn_layers: int = 1,
+        d_ffn: int = 64,
+        head_hidden: int = 64,
+        attn_dropout: float = 0.15,
+        ffn_dropout: float = 0.15,
+        head_dropout: float = 0.10,
     ) -> None:
         """
         Initialize MLP model
@@ -96,10 +106,24 @@ class MlpModel(AlphaModel):
         self._scorer = mean_squared_error
 
         # Initialize model
-        self.model: nn.Module = MlpNetwork(
-            input_size=input_size,
-            hidden_sizes=hidden_sizes,
-        )
+        self.model_type = model_type
+        if model_type == "factor_attention":
+            self.model: nn.Module = FactorAttentionNetwork(
+                input_size=input_size,
+                d_token=d_token,
+                n_heads=n_heads,
+                n_layers=n_attn_layers,
+                d_ffn=d_ffn,
+                head_hidden=head_hidden,
+                attn_dropout=attn_dropout,
+                ffn_dropout=ffn_dropout,
+                head_dropout=head_dropout,
+            )
+        else:
+            self.model: nn.Module = MlpNetwork(
+                input_size=input_size,
+                hidden_sizes=hidden_sizes,
+            )
 
         # Move model to specified device
         self.model = self.model.to(device)
@@ -548,6 +572,116 @@ class AverageMeter:
         self.sum += val * n
         self.count += n
         self.avg = self.sum / self.count
+
+
+class FactorAttentionNetwork(nn.Module):
+    """
+    Factor Self-Attention Network (FT-Transformer style)
+
+    Each factor is independently projected to a d_token-dimensional embedding,
+    then Self-Attention models inter-factor interactions. A learnable [CLS] token
+    aggregates global interaction information for the final prediction.
+    """
+
+    def __init__(
+        self,
+        input_size: int,
+        d_token: int = 32,
+        n_heads: int = 4,
+        n_layers: int = 1,
+        d_ffn: int = 64,
+        head_hidden: int = 64,
+        attn_dropout: float = 0.15,
+        ffn_dropout: float = 0.15,
+        head_dropout: float = 0.10,
+    ) -> None:
+        super().__init__()
+        self.input_size = input_size
+        self.d_token = d_token
+
+        # === Factor Tokenizer ===
+        # Each factor: scalar -> d_token vector via element-wise multiply + bias
+        self.token_weight = nn.Parameter(torch.empty(input_size, d_token))
+        self.token_bias = nn.Parameter(torch.empty(input_size, d_token))
+
+        # === CLS Token ===
+        self.cls_token = nn.Parameter(torch.empty(1, 1, d_token))
+
+        # === Transformer Blocks ===
+        self.blocks = nn.ModuleList()
+        for _ in range(n_layers):
+            self.blocks.append(nn.ModuleDict({
+                'norm1': nn.LayerNorm(d_token),
+                'attn': nn.MultiheadAttention(
+                    embed_dim=d_token,
+                    num_heads=n_heads,
+                    dropout=attn_dropout,
+                    batch_first=True,
+                ),
+                'norm2': nn.LayerNorm(d_token),
+                'ffn': nn.Sequential(
+                    nn.Linear(d_token, d_ffn),
+                    nn.GELU(),
+                    nn.Dropout(ffn_dropout),
+                    nn.Linear(d_ffn, d_token),
+                    nn.Dropout(ffn_dropout),
+                ),
+            }))
+
+        # === Prediction Head ===
+        self.head = nn.Sequential(
+            nn.LayerNorm(d_token),
+            nn.Linear(d_token, head_hidden),
+            nn.BatchNorm1d(head_hidden),
+            nn.LeakyReLU(0.1),
+            nn.Dropout(head_dropout),
+            nn.Linear(head_hidden, 1),
+        )
+
+        self._initialize_weights()
+
+    def _initialize_weights(self) -> None:
+        d = self.d_token
+        nn.init.uniform_(self.token_weight, -1.0 / math.sqrt(d), 1.0 / math.sqrt(d))
+        nn.init.uniform_(self.token_bias, -1.0 / math.sqrt(d), 1.0 / math.sqrt(d))
+        nn.init.uniform_(self.cls_token, -1.0 / math.sqrt(d), 1.0 / math.sqrt(d))
+
+        for module in self.modules():
+            if isinstance(module, nn.Linear):
+                nn.init.kaiming_normal_(module.weight, a=0.1, mode="fan_in", nonlinearity="leaky_relu")
+                if module.bias is not None:
+                    nn.init.zeros_(module.bias)
+
+    def forward(self, x: torch.Tensor) -> torch.Tensor:
+        """
+        x: (batch_size, input_size) — scalar factor values
+        output: (batch_size, 1)
+        """
+        batch_size = x.shape[0]
+
+        # === Factor Tokenizer ===
+        # x: (B, N) -> (B, N, 1) * (N, d) -> (B, N, d)
+        tokens = x.unsqueeze(-1) * self.token_weight.unsqueeze(0) + self.token_bias.unsqueeze(0)
+
+        # === Prepend CLS ===
+        cls = self.cls_token.expand(batch_size, -1, -1)  # (B, 1, d)
+        tokens = torch.cat([cls, tokens], dim=1)          # (B, N+1, d)
+
+        # === Transformer Blocks (Pre-Norm) ===
+        for block in self.blocks:
+            normed = block['norm1'](tokens)
+            attn_out, _ = block['attn'](normed, normed, normed)
+            tokens = tokens + attn_out
+
+            normed = block['norm2'](tokens)
+            ffn_out = block['ffn'](normed)
+            tokens = tokens + ffn_out
+
+        # === Extract CLS ===
+        cls_output = tokens[:, 0, :]  # (B, d)
+
+        # === Prediction Head ===
+        return self.head(cls_output)   # (B, 1)
 
 
 class MlpNetwork(nn.Module):

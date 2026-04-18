@@ -58,14 +58,23 @@ class MLPSignals:
         #    "device": "auto"  # Will detect GPU
         #}
         self.model_settings = {
-            # Larger network to capture factor interactions, with stronger regularization
-            "hidden_sizes": (256, 128, 64),
+            # V10 Step 3a Round 2: Factor Self-Attention (larger capacity)
+            "model_type": "factor_attention",
+            "d_token": 64,
+            "n_heads": 4,
+            "n_attn_layers": 1,
+            "d_ffn": 128,
+            "head_hidden": 128,
+            "attn_dropout": 0.15,
+            "ffn_dropout": 0.15,
+            "head_dropout": 0.10,
+            # Training hyperparameters (unchanged from Step 1)
             "n_epochs": 1000,
             "batch_size": 2048,
             "lr": 0.001,
             "early_stop_rounds": 40,
             "weight_decay": 0.002,
-            "optimizer": "adam"
+            "optimizer": "adam",
         }
         self.n_jobs = 1  # 改为单线程以保证结果可复现 (多线程下全局Seed会被频繁重置导致随机性)
 
@@ -355,7 +364,7 @@ class MLPSignals:
         
         model = MlpModel(
             input_size=input_size,
-            hidden_sizes=self.model_settings["hidden_sizes"],
+            hidden_sizes=self.model_settings.get("hidden_sizes", (256, 128, 64)),
             n_epochs=self.model_settings["n_epochs"],
             batch_size=self.model_settings["batch_size"],
             lr=self.model_settings["lr"],
@@ -364,7 +373,16 @@ class MLPSignals:
             weight_decay=self.model_settings.get("weight_decay", 0.0),
             optimizer=self.model_settings.get("optimizer", "adam"),
             device=device,
-            seed=42
+            seed=42,
+            model_type=self.model_settings.get("model_type", "mlp"),
+            d_token=self.model_settings.get("d_token", 32),
+            n_heads=self.model_settings.get("n_heads", 4),
+            n_attn_layers=self.model_settings.get("n_attn_layers", 1),
+            d_ffn=self.model_settings.get("d_ffn", 64),
+            head_hidden=self.model_settings.get("head_hidden", 64),
+            attn_dropout=self.model_settings.get("attn_dropout", 0.15),
+            ffn_dropout=self.model_settings.get("ffn_dropout", 0.15),
+            head_dropout=self.model_settings.get("head_dropout", 0.10),
         )
         
         try:
