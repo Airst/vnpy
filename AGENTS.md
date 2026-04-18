@@ -20,19 +20,20 @@
 
 ### 1.3 当前版本状态
 
-**V9（Phase 1 + Phase 3 + Phase 4 turnover_x_bull）**
+**V10（Phase 1 + Phase 3 + Phase 4 turnover_x_bull + Step 3a Factor Self-Attention）**
 
 | 指标 | 值 |
 |:---|:---|
-| 总收益 | 297.59% |
-| 年化 | 69.21% |
-| Sharpe | 1.29 |
-| MaxDD | -34.28% |
-| 收益回撤比 | 5.86 |
+| 总收益 | 374.96% |
+| 年化 | ~87% |
+| Sharpe | 1.50 |
+| MaxDD | -24.55% |
+| 收益回撤比 | 8.22 |
 | 因子数 | ~100 个 |
-| 待解决问题 | 非牛市年化仅 ~5%，alpha 集中在牛市 |
+| 模型 | FactorAttentionNetwork (d_token=64, 1层Attention, 4heads) |
+| 改善 | 非牛市多个亏损时段转正，牛市收益保持 |
 
-改造路径：V8（beta 策略）→ Phase 1（beta-neutral label）→ Phase 3（去掉 dragon_score 硬编码 regime）→ Phase 4（仅保留 turnover_x_bull 交互因子）
+改造路径：V8（beta 策略）→ Phase 1（beta-neutral label）→ Phase 3（去掉 dragon_score 硬编码 regime）→ Phase 4（仅保留 turnover_x_bull 交互因子）→ V10 Step 3a（Factor Self-Attention 替代 MLP）
 
 ### 1.4 文档结构
 
@@ -40,9 +41,12 @@
 AGENTS.md                           # 本文件：项目知识、迭代流程、量化准则、工作方法
 docs/iterations/
 ├── v9_base_line.md
-└── v9_reform_plan.md               # V9 完整改造记录：Phase 1~5 全部实验过程和数据
+├── v9_reform_plan.md               # V9 完整改造记录：Phase 1~5 全部实验过程和数据
+├── v10_architecture_multitask.md    # V10 Step 1~2 记录：网络扩容（通过）、多任务学习（失败）
+└── v10_step3_factor_attention.md    # V10 Step 3 记录：Factor Self-Attention（通过）
 docs/knowledge/                     # 量化交易知识库：每轮对话沉淀的研究结论和经验
 ├── factor_data_granularity.md      # 因子有效性与数据粒度/模型框架的匹配性
+├── ic_loss_experiment.md           # IC-Loss 与损失函数改造实验
 └── turnover_label_design.md        # 换手率因子与标签设计
 ```
 
@@ -211,6 +215,7 @@ vnpy 框架 Alpha 模块（vnpy/alpha/）：
 9. **训练采样策略不可轻易改变**：500 天均匀采样窗口提供 regime 多样性，是隐式正则化。时间衰减采样（decay=0.995）导致 Sharpe 从 0.68 崩至 0.24
 10. **因子有效性与损失函数深度耦合**：同一因子集在不同损失函数下表现截然不同。IC-Loss 下低 IC 因子有正贡献，MSE 下是噪声
 11. **多任务学习（多周期预测头）在 MLP 截面选股框架下失败**：辅助损失（1d/10d/20d）的梯度冲突大于正则化收益，Sharpe 从 1.20 降至 0.86。损失函数层面的改造（IC-Loss、混合损失、多任务损失）已连续 3 次失败，该方向应暂停探索。详见 `docs/iterations/v10_architecture_multitask.md`
+12. **Factor Self-Attention（FT-Transformer 架构）在截面选股中有效**：在不改因子、不改标签、不改损失函数的前提下，仅将 MLP 替换为 1 层 Self-Attention（d_token=64, 4 heads），Sharpe 从 1.24 提升至 1.50，MaxDD 从 -36% 改善至 -25%，非牛市多个亏损时段转正。d_token 是核心超参数（32 不足，64 最优），Attention 层数 1 层最优（2 层过拟合）。模型结构改变 > 损失函数改造。详见 `docs/iterations/v10_step3_factor_attention.md`
 
 ---
 

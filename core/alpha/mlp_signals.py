@@ -58,7 +58,7 @@ class MLPSignals:
         #    "device": "auto"  # Will detect GPU
         #}
         self.model_settings = {
-            # V10 Step 3a Round 2: Factor Self-Attention (larger capacity)
+            # V10 Step 3a: Factor Self-Attention (best config)
             "model_type": "factor_attention",
             "d_token": 64,
             "n_heads": 4,
