@@ -24,12 +24,12 @@ V9 当前基线（Phase 1+3+4），AGENTS.md 记录值：
 
 ## 二、改造路径（三步递进）
 
-### Step 1：扩大网络 + 强化正则（本轮）
+### Step 1：扩大网络 + 强化正则
 
 **改什么**：
 - hidden_sizes: (64, 32, 16) → (256, 128, 64)
-- weight_decay: 0.001 → 0.005
-- 每层 hidden layer 后加 Dropout(0.10)
+- weight_decay: 0.001 → 0.002（初次试 0.005 过强，降至 0.002）
+- 每层 hidden layer 后加 Dropout(0.10)，输出层不加 Dropout
 
 **为什么**：
 - 99 个因子压缩到 64 维丢失二阶交互信息
@@ -39,11 +39,11 @@ V9 当前基线（Phase 1+3+4），AGENTS.md 记录值：
 
 **验证标准**：Sharpe 不降，关注非牛市表现变化
 
-### Step 2：多任务多周期学习（下一轮）
+### Step 2：多任务多周期学习（已实验，失败）
 
 共享特征提取层 + 多周期独立预测头（1d/5d/10d/20d）
 
-### Step 3：Gate Network 条件化因子权重（再下一轮）
+### Step 3：Gate Network 条件化因子权重（未执行）
 
 动态调整因子权重的门控网络
 
@@ -55,17 +55,89 @@ V9 当前基线（Phase 1+3+4），AGENTS.md 记录值：
 
 **文件 1: `core/alpha/mlp_signals.py`**
 - `hidden_sizes`: (64, 32, 16) → (256, 128, 64)
-- `weight_decay`: 0.001 → 0.005
+- `weight_decay`: 0.001 → 0.002
 
 **文件 2: `vnpy/alpha/model/models/mlp_model.py`**
 - `MlpNetwork.__init__`: 每个 hidden layer 的 activation 后加 `Dropout(0.10)`
 - 输入层 Dropout: 0.05 → 0.10
-- 输出层 Dropout: 0.05 → 0.10
+- 输出层 Dropout: 移除（直接 Linear → output）
 
 ### 3.2 回测结果
 
-（训练后填写）
+#### Round 1 (weight_decay=0.005)
+
+| 指标 | V9 基线 | Step 1 Round 1 |
+|:---|:---|:---|
+| 总收益 | 297.59% | 150.4% |
+| Sharpe | 1.29 | 0.82 |
+| 非牛市年化 | ~5% | 2.65% |
+
+结论：weight_decay=0.005 正则化过强，性能严重退化。
+
+#### Round 2 (weight_decay=0.002)
+
+| 指标 | V9 基线 | Step 1 Round 2 |
+|:---|:---|:---|
+| 总收益 | 297.59% | 300.93% |
+| 年化 | 69.21% | ~69% |
+| Sharpe | 1.29 | 1.20 |
+| MaxDD | -34.28% | -36.4% |
+| 最长回撤天数 | - | 24 |
+| 非牛市年化 | ~5% | 5.00% |
+
+结论：weight_decay=0.002 使总收益持平，Sharpe 略降（1.29→1.20），非牛市表现未改善。网络扩大本身不产生增量 alpha，但为后续实验提供了更大的特征交互容量。**保留此配置作为新基线。**
 
 ### 3.3 结论
 
-（训练后填写）
+Step 1 通过。当前 V10 基线 = V9 + (256,128,64) + Dropout(0.10) + weight_decay(0.002)。
+
+---
+
+## 四、Step 2 实验记录：多任务多周期学习
+
+### 4.1 方案设计
+
+**Hard Parameter Sharing 架构**：
+- 共享编码器：Dropout(0.10) → [Linear+BN+LeakyReLU+Dropout] x 3 层（256→128→64）
+- 主预测头：Linear(64, 1) —— 预测 5 日 beta-neutral 收益
+- 辅助预测头 x 3：Linear(64, 1) —— 分别预测 1d/10d/20d beta-neutral 收益
+- 损失函数：`loss = 1.0 * MSE_5d + 0.3 * MSE_1d + 0.2 * MSE_10d + 0.1 * MSE_20d`
+- 验证集和推理仅使用主预测头
+
+**改动文件**：
+1. `v9_factor_calculator.py` — 新增 label_1d, label_10d, label_20d 辅助标签
+2. `factor_calculator.py` — 辅助标签列排在特征与主标签之间，不参与特征集
+3. `mlp_model.py` — 新增 MultiTaskMlpNetwork 类，MlpModel 支持 num_aux_labels / aux_loss_weights
+4. `mlp_signals.py` — 传递 num_aux_labels=3, aux_loss_weights=(0.3, 0.2, 0.1)
+5. `engine.py` — 因子绩效分析排除辅助标签列
+
+### 4.2 回测结果
+
+| 指标 | V10 Step 1 (基线) | V10 Step 2 (多任务) |
+|:---|:---|:---|
+| 总收益 | 300.93% | **175.29%** |
+| 年化 | ~69% | **40.65%** |
+| Sharpe | 1.20 | **0.86** |
+| MaxDD | -36.4% | **-41.81%** |
+| 最长回撤天数 | 24 | **258** |
+| 收益回撤比 | ~4.9 | **2.34** |
+
+### 4.3 结论
+
+**Step 2 失败。** 多任务学习在当前框架下严重损害主任务性能。
+
+**失败原因分析**：
+1. **梯度冲突**：1d/10d/20d 预测目标与 5d 主任务的梯度方向不一致，辅助任务梯度干扰共享编码器的特征提取
+2. **与 IC-Loss 实验的一致性**：此前 `docs/knowledge/ic_loss_experiment.md` 已证明损失函数改造会导致不同目标间的梯度冲突。多任务损失本质上也是混合损失，同样的机制在此复现
+3. **辅助标签质量问题**：1d 收益噪声极大，20d 收益在 500 天滚动窗口中可用样本大幅减少（前/后 20 天 NaN），辅助信号质量不足以提供正则化收益
+
+**代码已全部回退至 Step 1 状态。**
+
+---
+
+## 五、经验沉淀
+
+1. 网络扩大（64/32/16 → 256/128/64）不直接带来增量 alpha，但不损害性能（Sharpe 1.20 vs 1.29 可接受范围）
+2. weight_decay 敏感：0.005 过强（Sharpe 0.82），0.002 合适（Sharpe 1.20）
+3. **多任务学习（多周期预测头）在 MLP 截面选股框架下失败**：辅助损失的梯度冲突大于正则化收益，与 IC-Loss 实验结论一致
+4. 损失函数层面的改造（IC-Loss、混合损失、多任务损失）已连续 3 次失败，该方向应暂停探索
