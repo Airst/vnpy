@@ -356,6 +356,14 @@ class V9FactorCalculator(FactorCalculator):
         # === V9 Phase 4: Turnover x Bull interaction factor ===
         features["turnover_x_bull"] = features["rel_turnover_20d"] * bull_prob
 
+        # === V10 Step 4: Factors re-tested under Factor Attention ===
+        # cord_20: 量价同步性 (ret change vs volume change correlation, 20d)
+        # IC=0.061, previously failed under MLP (Sharpe -0.28), re-test under Attention
+        ret_1 = C / ts_delay(C, 1) - 1
+        vol_change = torch.log(V / (ts_delay(V, 1) + 1e-8) + 1e-8)
+        features["cord_20"] = ts_corr(ret_1, vol_change, 20)
+
+
         # === V9 Phase 1: Beta-Neutral Label ===
         raw_ret_5 = ts_delay(C, -5) / C - 1
         mkt_ret_5 = torch.nanmean(raw_ret_5, dim=0, keepdim=True)

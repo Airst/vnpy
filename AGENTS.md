@@ -20,20 +20,20 @@
 
 ### 1.3 当前版本状态
 
-**V10（Phase 1 + Phase 3 + Phase 4 turnover_x_bull + Step 3a Factor Self-Attention）**
+**V10（Phase 1 + Phase 3 + Phase 4 turnover_x_bull + Step 3a Factor Self-Attention + Step 4a cord_20）**
 
 | 指标 | 值 |
 |:---|:---|
-| 总收益 | 374.96% |
-| 年化 | ~87% |
-| Sharpe | 1.50 |
-| MaxDD | -24.55% |
-| 收益回撤比 | 8.22 |
-| 因子数 | ~100 个 |
+| 总收益 | 533~606%（训练随机性范围） |
+| 年化 | ~124~140% |
+| Sharpe | 1.76~1.84 |
+| MaxDD | -20.64% |
+| 收益回撤比 | 6.04~8.72 |
+| 因子数 | ~100 个（含 cord_20） |
 | 模型 | FactorAttentionNetwork (d_token=64, 1层Attention, 4heads) |
-| 改善 | 非牛市多个亏损时段转正，牛市收益保持 |
+| 改善 | 非牛市多个亏损时段转正，牛市收益大幅提升 |
 
-改造路径：V8（beta 策略）→ Phase 1（beta-neutral label）→ Phase 3（去掉 dragon_score 硬编码 regime）→ Phase 4（仅保留 turnover_x_bull 交互因子）→ V10 Step 3a（Factor Self-Attention 替代 MLP）
+改造路径：V8（beta 策略）→ Phase 1（beta-neutral label）→ Phase 3（去掉 dragon_score 硬编码 regime）→ Phase 4（仅保留 turnover_x_bull 交互因子）→ V10 Step 3a（Factor Self-Attention 替代 MLP）→ V10 Step 4a（cord_20 量价同步性因子）
 
 ### 1.4 文档结构
 
@@ -43,7 +43,7 @@ docs/iterations/
 ├── v9_base_line.md
 ├── v9_reform_plan.md               # V9 完整改造记录：Phase 1~5 全部实验过程和数据
 ├── v10_architecture_multitask.md    # V10 Step 1~2 记录：网络扩容（通过）、多任务学习（失败）
-└── v10_step3_factor_attention.md    # V10 Step 3 记录：Factor Self-Attention（通过）
+└── v10_step3_factor_attention.md    # V10 Step 3~4 记录：Factor Self-Attention（通过）、弱因子重测
 docs/knowledge/                     # 量化交易知识库：每轮对话沉淀的研究结论和经验
 ├── factor_data_granularity.md      # 因子有效性与数据粒度/模型框架的匹配性
 ├── ic_loss_experiment.md           # IC-Loss 与损失函数改造实验
@@ -216,6 +216,7 @@ vnpy 框架 Alpha 模块（vnpy/alpha/）：
 10. **因子有效性与损失函数深度耦合**：同一因子集在不同损失函数下表现截然不同。IC-Loss 下低 IC 因子有正贡献，MSE 下是噪声
 11. **多任务学习（多周期预测头）在 MLP 截面选股框架下失败**：辅助损失（1d/10d/20d）的梯度冲突大于正则化收益，Sharpe 从 1.20 降至 0.86。损失函数层面的改造（IC-Loss、混合损失、多任务损失）已连续 3 次失败，该方向应暂停探索。详见 `docs/iterations/v10_architecture_multitask.md`
 12. **Factor Self-Attention（FT-Transformer 架构）在截面选股中有效**：在不改因子、不改标签、不改损失函数的前提下，仅将 MLP 替换为 1 层 Self-Attention（d_token=64, 4 heads），Sharpe 从 1.24 提升至 1.50，MaxDD 从 -36% 改善至 -25%，非牛市多个亏损时段转正。d_token 是核心超参数（32 不足，64 最优），Attention 层数 1 层最优（2 层过拟合）。模型结构改变 > 损失函数改造。详见 `docs/iterations/v10_step3_factor_attention.md`
+13. **Attention 框架下弱因子重测有条件成功**：cord_20（量价同步性 IC=0.061）在 MLP 下失败但在 Attention 下成功（Sharpe 1.50→1.76~1.84），因为它提供了独立的价量关系信息维度。klow_2_20d（下影线占比 IC=-0.061）即使在 Attention 下仍然失败（Sharpe→1.24），因为其信息与波动率因子高度冗余。结论：Attention 能利用有独立信息的弱因子，但不能挽救信息冗余的因子
 
 ---
 
