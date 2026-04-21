@@ -3,11 +3,11 @@ from core.alpha.factor_calculator import (
     ts_mean, ts_std, ts_max, ts_min, ts_delay, ts_delta, 
     ts_rank, ts_argmax, ts_argmin, ts_corr, 
     ts_greater, ts_less, ts_slope, ts_rsquare, ts_resi, 
-    ts_quantile, ts_log, ts_abs, ts_sum,
+    ts_quantile, ts_log, ts_abs, ts_sum, cs_rank, ts_cov,
     torch
 )
 
-class Factor158Calculator(FactorCalculator): 
+class V158FactorCalculator(FactorCalculator): 
     """
     Alpha158 Factor Calculator
     Migrated from vnpy/alpha/dataset/datasets/alpha_158.py
@@ -211,6 +211,32 @@ class Factor158Calculator(FactorCalculator):
         # else: res[:, d:] = nan
         # So it supports negative d.
         
-        features["label"] = ts_delay(C, -3) / ts_delay(C, -1) - 1
+        # features["label"] = ts_delay(C, -3) / ts_delay(C, -1) - 1
+        
+        ret_1 = C / ts_delay(C, 1) - 1
+        TR = padded_raw[:, :, col_map['turnover_rate']] # Turnover Rate
+        turnover_mean_20d = ts_mean(TR, 20)
+        
+        # Market Return (Cross-Sectional Mean of Returns)
+        ret_1_clean = torch.nan_to_num(ret_1, nan=0.0)
+        ret_1_mask = ~torch.isnan(ret_1)
+        valid_cnt = ret_1_mask.sum(dim=0)
+        mkt_ret_1d = ret_1_clean.sum(dim=0) / (valid_cnt + 1e-8)
+        mkt_ret_broad = mkt_ret_1d.unsqueeze(0).expand_as(ret_1)
+        
+        # Beta (Sensitivity to Market)
+        cov_im = ts_cov(ret_1, mkt_ret_broad, 20)
+        var_m = ts_std(mkt_ret_broad, 20) ** 2
+        beta_20d = cov_im / (var_m + 1e-8)
+
+
+        raw_ret_5 = ts_delay(C, -5) / C - 1
+        mkt_ret_5 = torch.nanmean(raw_ret_5, dim=0, keepdim=True)
+        excess_ret_5 = raw_ret_5 - beta_20d * mkt_ret_5
+
+        low_liq_penalty = (turnover_mean_20d < 1.0).float() * 0.05
+        excess_ret_5 = excess_ret_5 - low_liq_penalty
+
+        features["label"] = cs_rank(excess_ret_5)
         
         return features

@@ -7,7 +7,7 @@ from core.alpha.factor_calculator import (
     torch
 )
 
-class Factor101Calculator(FactorCalculator): 
+class V101FactorCalculator(FactorCalculator): 
     def __init__(self):
         super().__init__()
 
@@ -584,6 +584,32 @@ class Factor101Calculator(FactorCalculator):
         # which means Close(t+3)/Close(t+1) - 1. (Return from T+1 to T+3).
         # v3 uses simple 5 day forward return: Close(t+5)/Close(t) - 1.
         # I will stick to a standard forward return for now or use the one from v3 as default label.
-        features["label"] = ts_delay(C, -5) / C - 1
+        # features["label"] = ts_delay(C, -5) / C - 1
+        
+        ret_1 = C / ts_delay(C, 1) - 1
+        TR = padded_raw[:, :, col_map['turnover_rate']] # Turnover Rate
+        turnover_mean_20d = ts_mean(TR, 20)
+        
+        # Market Return (Cross-Sectional Mean of Returns)
+        ret_1_clean = torch.nan_to_num(ret_1, nan=0.0)
+        ret_1_mask = ~torch.isnan(ret_1)
+        valid_cnt = ret_1_mask.sum(dim=0)
+        mkt_ret_1d = ret_1_clean.sum(dim=0) / (valid_cnt + 1e-8)
+        mkt_ret_broad = mkt_ret_1d.unsqueeze(0).expand_as(ret_1)
+        
+        # Beta (Sensitivity to Market)
+        cov_im = ts_cov(ret_1, mkt_ret_broad, 20)
+        var_m = ts_std(mkt_ret_broad, 20) ** 2
+        beta_20d = cov_im / (var_m + 1e-8)
+
+
+        raw_ret_5 = ts_delay(C, -5) / C - 1
+        mkt_ret_5 = torch.nanmean(raw_ret_5, dim=0, keepdim=True)
+        excess_ret_5 = raw_ret_5 - beta_20d * mkt_ret_5
+
+        low_liq_penalty = (turnover_mean_20d < 1.0).float() * 0.05
+        excess_ret_5 = excess_ret_5 - low_liq_penalty
+
+        features["label"] = cs_rank(excess_ret_5)
 
         return features
