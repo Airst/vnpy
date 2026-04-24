@@ -20,7 +20,7 @@
 
 ### 1.3 当前版本状态
 
-**V10（Phase 1 + Phase 3 + Phase 4 turnover_x_bull + Step 3a Factor Self-Attention + Step 4a cord_20）**
+**V9（Phase 1 + Phase 3 + Phase 4 turnover_x_bull + Step 3a Factor Self-Attention + Step 4a cord_20）**
 
 | 指标 | 值 |
 |:---|:---|
@@ -33,7 +33,7 @@
 | 模型 | FactorAttentionNetwork (d_token=64, 1层Attention, 4heads) |
 | 改善 | 非牛市多个亏损时段转正，牛市收益大幅提升 |
 
-改造路径：V8（beta 策略）→ Phase 1（beta-neutral label）→ Phase 3（去掉 dragon_score 硬编码 regime）→ Phase 4（仅保留 turnover_x_bull 交互因子）→ V10 Step 3a（Factor Self-Attention 替代 MLP）→ V10 Step 4a（cord_20 量价同步性因子）
+改造路径：V8（beta 策略）→ Phase 1（beta-neutral label）→ Phase 3（去掉 dragon_score 硬编码 regime）→ Phase 4（仅保留 turnover_x_bull 交互因子）→ V9 Step 3a（Factor Self-Attention 替代 MLP）→ V9 Step 4a（cord_20 量价同步性因子）
 
 ### 1.4 文档结构
 
