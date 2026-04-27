@@ -3,12 +3,13 @@ import {
     Layout, Menu, Button, Card, DatePicker, message, Select,
     Typography, Space, Spin, InputNumber
 } from 'antd';
-import { BarChartOutlined, LineChartOutlined, TransactionOutlined } from '@ant-design/icons';
+import { BarChartOutlined, LineChartOutlined, TransactionOutlined, FileSearchOutlined } from '@ant-design/icons';
 import { Routes, Route, useNavigate, useLocation, Navigate } from 'react-router-dom';
 import dayjs from 'dayjs';
 import BacktestResults from './components/BacktestResults';
 import SignalAnalysis from './components/SignalAnalysis';
 import TradeDashboard from './components/TradeDashboard';
+import LlmEvaluation from './components/LlmEvaluation';
 
 const { Header, Sider, Content } = Layout;
 const { Text } = Typography;
@@ -158,6 +159,11 @@ const App = () => {
             label: 'Signal Analysis',
             icon: <LineChartOutlined />
         },
+        {
+            key: '/llm',
+            label: 'LLM 评估',
+            icon: <FileSearchOutlined />
+        },
     ];
 
     // Backtest Content
@@ -293,6 +299,7 @@ const App = () => {
                                 defaultEnd={btEnd}
                             />
                         } />
+                        <Route path="/llm" element={<LlmEvaluation />} />
                     </Routes>
                 </Content>
             </Layout>
