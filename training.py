@@ -22,6 +22,7 @@ from data_manager.ts_downloader.stock_info_manager import StockInfoManager
 from data_manager.ts_downloader.concept_manager import ConceptManager
 from data_manager.ts_downloader.fina_indicator_manager import FinaIndicatorManager
 from data_manager.ts_downloader.moneyflow_manager import MoneyFlowManager
+from data_manager.ts_downloader.download_index import download_all as download_index_all
 
 
 from core.core_service import CoreService
@@ -244,6 +245,9 @@ if __name__ == "__main__":
         print("\n开始更新资金流向数据...")
         mf_manager = MoneyFlowManager()
         mf_manager.download_all()
+        
+        print("\n开始下载指数数据...")
+        download_index_all()
         
         print("数据同步到alpha lab...")
         engine.sync_data()

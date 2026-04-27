@@ -1,4 +1,4 @@
-import React, { useState } from 'react';
+import React, { useState, useMemo } from 'react';
 import { Tabs, Card, Table, Row, Col, Statistic, Empty, Alert } from 'antd';
 import { LineChart, Line, BarChart, Bar, XAxis, YAxis, CartesianGrid, Tooltip, Legend, ResponsiveContainer } from 'recharts';
 
@@ -6,6 +6,36 @@ const BacktestResults = ({ result }) => {
     const stats = result.statistics || {};
     const dailyData = result.daily_data || [];
     const trades = result.trades || [];
+
+    // Benchmark color palette
+    const BENCHMARK_COLORS = {
+        "上证指数": "#ff4d4f",
+        "深证成指": "#52c41a",
+        "沪深300": "#faad14",
+    };
+
+    // Merge benchmark values into dailyData for chart rendering
+    const chartData = useMemo(() => {
+        if (!dailyData || dailyData.length === 0) return [];
+        const benchmarks = result.benchmarks || {};
+        const names = Object.keys(benchmarks);
+        if (names.length === 0) return dailyData;
+
+        const lookup = {};
+        names.forEach(name => {
+            (benchmarks[name] || []).forEach(pt => {
+                if (!lookup[pt.date]) lookup[pt.date] = {};
+                lookup[pt.date][name] = pt.value;
+            });
+        });
+
+        return dailyData.map(entry => {
+            const extra = lookup[entry.date] || {};
+            return { ...entry, ...extra };
+        });
+    }, [dailyData, result.benchmarks]);
+
+    const hasBenchmarks = result.benchmarks && Object.keys(result.benchmarks).length > 0;
     
     // Format statistics data for display
     const statsData = Object.entries(stats).map(([key, value]) => ({
@@ -158,9 +188,9 @@ const BacktestResults = ({ result }) => {
             key: 'equity',
             label: 'Equity Curve',
             children: dailyData && dailyData.length > 0 ? (
-                <Card title="Portfolio Equity Curve" bordered={false}>
+                <Card title={hasBenchmarks ? "Equity Curve vs Benchmarks" : "Portfolio Equity Curve"} bordered={false}>
                     <ResponsiveContainer width="100%" height={400}>
-                        <LineChart data={dailyData} margin={{ top: 5, right: 30, left: 0, bottom: 5 }}>
+                        <LineChart data={chartData} margin={{ top: 5, right: 30, left: 0, bottom: 5 }}>
                             <CartesianGrid strokeDasharray="3 3" />
                             <XAxis 
                                 dataKey="date" 
@@ -183,6 +213,17 @@ const BacktestResults = ({ result }) => {
                                 dot={false}
                                 isAnimationActive={false}
                             />
+                            {hasBenchmarks && Object.keys(result.benchmarks).map(name => (
+                                <Line 
+                                    key={name}
+                                    type="monotone"
+                                    dataKey={name}
+                                    stroke={BENCHMARK_COLORS[name] || "#999"}
+                                    name={name}
+                                    dot={false}
+                                    isAnimationActive={false}
+                                />
+                            ))}
                         </LineChart>
                     </ResponsiveContainer>
                 </Card>

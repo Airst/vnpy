@@ -21,6 +21,12 @@ STRATEGY_PATH = PROJECT_ROOT.joinpath("core/strategies")
 BACKTEST_DB_PATH = PROJECT_ROOT.joinpath("core/alpha_db/backtest")
 ALPHA_DB_PATH = PROJECT_ROOT.joinpath("core/alpha_db")
 SIGNAL_PATH = PROJECT_ROOT.joinpath("core/alpha_db/signal")
+INDEX_PATH = PROJECT_ROOT.joinpath("core/alpha_db/index")
+INDEX_NAME_MAP = {
+    "000001.SH": "上证指数",
+    "399001.SZ": "深证成指",
+    "000300.SH": "沪深300",
+}
 
 class CoreService:
     def __init__(self):
@@ -292,9 +298,13 @@ class CoreService:
                 
                 trade["pnl"] = round(realized_pnl, 2)
 
+        # Compute benchmark index returns
+        benchmark_data = self._compute_benchmarks(daily_data, capital)
+
         result = {
             "statistics": sanitized_stats,
             "daily_data": daily_data,
+            "benchmarks": benchmark_data,
             "trades": trades
         }
 
@@ -328,6 +338,76 @@ class CoreService:
             print(f"Failed to clean up old backtest files: {e}")
 
         return result
+
+    def _compute_benchmarks(self, daily_data: list, capital: int) -> dict:
+        """
+        Compute normalized cumulative benchmark returns aligned to daily_data dates.
+
+        Reads index parquet files from INDEX_PATH, filters to the backtest date range,
+        and normalizes each index to start at the same base value as the portfolio (capital).
+
+        Returns:
+            dict mapping Chinese index name to list of {"date": str, "value": float}
+            Empty dict if no index data is available.
+        """
+        if not INDEX_PATH.exists():
+            return {}
+
+        if not daily_data:
+            return {}
+
+        start_date_str = daily_data[0]["date"]
+        end_date_str = daily_data[-1]["date"]
+        start_date = datetime.strptime(start_date_str, "%Y-%m-%d")
+        end_date = datetime.strptime(end_date_str, "%Y-%m-%d")
+
+        benchmarks = {}
+        for ts_code, name in INDEX_NAME_MAP.items():
+            filepath = INDEX_PATH / f"{ts_code}.parquet"
+            if not filepath.exists():
+                continue
+
+            try:
+                df = pl.read_parquet(filepath)
+
+                # Filter to backtest date range
+                df = df.filter(
+                    (pl.col("trade_date") >= start_date) &
+                    (pl.col("trade_date") <= end_date)
+                ).sort("trade_date")
+
+                if df.is_empty():
+                    continue
+
+                base_close = df["close"][0]
+
+                # Build date->close lookup
+                close_map = {}
+                for row in df.iter_rows(named=True):
+                    d = row["trade_date"]
+                    d_str = d.strftime("%Y-%m-%d") if hasattr(d, "strftime") else str(d)
+                    close_map[d_str] = row["close"]
+
+                # Forward-fill: align to daily_data dates
+                series = []
+                last_close = base_close
+                for entry in daily_data:
+                    d = entry["date"]
+                    if d in close_map:
+                        last_close = close_map[d]
+                    normalized = capital * (last_close / base_close)
+                    series.append({
+                        "date": d,
+                        "value": round(normalized, 2)
+                    })
+
+                benchmarks[name] = series
+
+            except Exception as e:
+                print(f"Failed to compute benchmark for {ts_code}: {e}")
+                continue
+
+        return benchmarks
 
     def get_backtest_history(self) -> List[Dict]:
         """Get list of saved backtest results."""
