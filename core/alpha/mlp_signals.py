@@ -95,27 +95,27 @@ class MLPSignals:
         print("[MLPSignals] Starting Rolling Window Training & Prediction...")
         
         dates = dataset_df["datetime"].unique().sort().to_list()
-        # Increased requirement for 500-day window
-        if len(dates) < 550: 
-             print(f"[MLPSignals] Not enough dates for rolling window: {len(dates)} (Need ~550)")
+        # Increased requirement for 700-day window
+        if len(dates) < 750:
+             print(f"[MLPSignals] Not enough dates for rolling window: {len(dates)} (Need ~750)")
              raise ValueError("Insufficient date range for rolling window.")
-             
+
         # Determine start index for prediction
-        # We need to align with user requested start_date, but ensure we have 500 days history
+        # We need to align with user requested start_date, but ensure we have 700 days history
         target_start_dt = datetime.strptime(start_date, "%Y-%m-%d")
-        
+
         # Find index of first date >= target_start_dt
         start_idx = 0
         for i, d in enumerate(dates):
             if d >= target_start_dt:
                 start_idx = i
                 break
-        
-        # Ensure we have 500 days before start_idx
-        if start_idx < 500:
-            print(f"[MLPSignals] Warning: Not enough history before {start_date} for 500-day training.")
-            print(f"[MLPSignals] Adjusting start index to 500 (Date: {dates[500]})")
-            start_idx = 500
+
+        # Ensure we have 700 days before start_idx
+        if start_idx < 700:
+            print(f"[MLPSignals] Warning: Not enough history before {start_date} for 700-day training.")
+            print(f"[MLPSignals] Adjusting start index to 700 (Date: {dates[700]})")
+            start_idx = 700
             
         all_predictions = []
         tasks = []
@@ -148,10 +148,10 @@ class MLPSignals:
             ps_str = pred_start_date.strftime("%Y-%m-%d") if hasattr(pred_start_date, "strftime") else str(pred_start_date)
             pe_str = pred_end_date.strftime("%Y-%m-%d") if hasattr(pred_end_date, "strftime") else str(pred_end_date)
             
-            # Define Training Window (Previous 500 indices)
+            # Define Training Window (Previous 700 indices)
             train_end_idx = curr_idx - 1
-            # 500 days total (0 to 499)
-            train_start_idx = max(0, train_end_idx - 499) 
+            # 700 days total (0 to 699)
+            train_start_idx = max(0, train_end_idx - 699) 
             
             valid_len = 50
             train_period_end_idx = train_end_idx - valid_len
@@ -304,7 +304,7 @@ class MLPSignals:
         pe_str = task_info["pe_str"]
         save_model = task_info.get("save_model", False)
         
-        print(f"[MLPSignals] Window: Train [500 days pre {ps_str}] -> Predict [{ps_str} to {pe_str}]")
+        print(f"[MLPSignals] Window: Train [700 days pre {ps_str}] -> Predict [{ps_str} to {pe_str}]")
         
         # Construct Dataset for this window
         dataset = AlphaDataset(
@@ -342,6 +342,15 @@ class MLPSignals:
                     print(f"[MLPSignals] Mismatch in prediction length: {len(preds)} vs {len(meta)}")
             except Exception as e:
                 print(f"[MLPSignals] Prediction failed for window {ps_str}: {e}")
+        
+        # === Memory Cleanup ===
+        # Explicitly delete heavy objects to prevent memory leak across windows
+        del model
+        del dataset
+        
+        # Force garbage collection
+        import gc
+        gc.collect()
                 
         return result_df
     

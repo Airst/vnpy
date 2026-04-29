@@ -588,6 +588,55 @@ async def trigger_batch_reevaluate(check_date: Optional[str] = None):
     }
 
 
+@app.post("/api/llm_ratings/reevaluate_all")
+async def trigger_reevaluate_all(check_date: Optional[str] = None):
+    """Trigger background re-evaluation for ALL existing rated stocks.
+
+    Scans all per-stock files and submits every stock for re-evaluation,
+    regardless of current rating or error status.
+    """
+    if check_date is None:
+        check_date = datetime.now().strftime("%Y-%m-%d")
+
+    with _llm_task_lock:
+        if _batch_task_status.get("running"):
+            raise HTTPException(status_code=409, detail="批量评估任务正在执行中")
+
+    ratings_dir = PROJECT_ROOT / "core" / "alpha_db" / "llm_tasks"
+    all_symbols = []
+
+    for f in ratings_dir.glob("*.json"):
+        if f.name.startswith("ratings_"):
+            continue
+        try:
+            with open(f, "r", encoding="utf-8") as fp:
+                history = json.load(fp)
+            if isinstance(history, list) and history:
+                latest = history[-1]
+                all_symbols.append({
+                    "vt_symbol": latest.get("vt_symbol", f.stem),
+                    "score": latest.get("score", 0.0) or 0.0,
+                })
+        except Exception:
+            pass
+
+    if not all_symbols:
+        return {"message": "没有已评估的股票", "count": 0}
+
+    thread = threading.Thread(
+        target=_run_batch_reevaluate,
+        args=(all_symbols, check_date),
+        daemon=True,
+    )
+    thread.start()
+
+    return {
+        "message": f"全部重新评估任务已提交，共 {len(all_symbols)} 只股票",
+        "count": len(all_symbols),
+        "check_date": check_date,
+    }
+
+
 @app.get("/api/llm_ratings/batch_status")
 def get_batch_task_status():
     """Get status of the batch re-evaluation task."""

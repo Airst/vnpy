@@ -1,15 +1,15 @@
 """
-Stock rating screener.
+Stock entry timing screener.
 
 Takes top-N signal candidates, sends each to OpenClaw for LLM analysis,
-and returns structured stock ratings (Good/Bad/Neutral) with predictions.
+and returns structured entry timing assessments (buy_now/wait/avoid).
 
-Supports both sequential and parallel (batched) rating.
+Supports both sequential and parallel (batched) evaluation.
 """
 
 import json
 import math
-from dataclasses import dataclass, asdict
+from dataclasses import dataclass, field, asdict
 from datetime import datetime
 from pathlib import Path
 from typing import Any, Dict, List, Optional
@@ -19,33 +19,45 @@ from core.llm.openclaw_client import OpenClawClient, _extract_json
 from core.llm.prompts import build_stock_rating_messages
 
 
-VALID_RATINGS = {"good", "bad", "neutral"}
+VALID_ACTIONS = {"buy_now", "wait", "avoid"}
+# Legacy compatibility
+VALID_RATINGS = VALID_ACTIONS
 
 
 @dataclass
 class StockRating:
-    """Structured result from LLM stock rating prediction for one stock."""
+    """Structured result from LLM entry timing evaluation for one stock."""
 
     vt_symbol: str
-    rating: str  # "Good", "Bad", "Neutral"
+    action: str  # "buy_now", "wait", "avoid"
+    risk_level: str  # "low", "medium", "high"
     reason: str
     confidence: float
-    analysis_dimensions: Dict[str, str]  # technical, fundamental, event, sentiment
-    key_factors: List[Dict[str, str]]  # [{type: positive/negative, dimension, content}]
-    target_direction: str  # "up", "down", "flat"
+    analysis_dimensions: Dict[str, str]  # risk_event, earnings_quality, entry_timing, sentiment
+    key_factors: List[Dict[str, Any]]  # [{type, dimension, content, info_date, timeliness}]
+    entry_timing: Dict[str, Any]  # {recommendation, wait_reason, wait_days, upcoming_events}
+    risk_events: List[Dict[str, Any]]  # [{event, date, severity, source, priced_in}]
     stop_loss_price: Optional[float]
     expiry_days: int
     raw_response: Optional[str] = None
     error: Optional[str] = None
 
+    # Backward-compatible property: old code using .rating still works
+    @property
+    def rating(self) -> str:
+        """Map action to legacy rating: buy_now->good, avoid->bad, wait->neutral."""
+        return {"buy_now": "good", "avoid": "bad", "wait": "neutral"}.get(
+            self.action, "neutral"
+        )
+
     def is_good(self) -> bool:
-        return self.rating == "good"
+        return self.action == "buy_now"
 
     def is_bad(self) -> bool:
-        return self.rating == "bad"
+        return self.action == "avoid"
 
     def is_neutral(self) -> bool:
-        return self.rating == "neutral"
+        return self.action == "wait"
 
 
 class StockRatingScreener:
@@ -140,7 +152,7 @@ class StockRatingScreener:
                     try:
                         result = future.result()
                         all_results[idx] = result
-                        print(f"[StockRatingScreener]   [{idx + 1}/{total}] → {result.rating} (confidence={result.confidence:.2f}): {result.reason[:60]}")
+                        print(f"[StockRatingScreener]   [{idx + 1}/{total}] → {result.action} (confidence={result.confidence:.2f}): {result.reason[:60]}")
                     except Exception as exc:
                         c = batch[min(idx % batch_size, len(batch) - 1)]
                         vt_symbol = c["vt_symbol"]
@@ -155,7 +167,7 @@ class StockRatingScreener:
         bad = sum(1 for r in final_results if r.is_bad())
         neutral = sum(1 for r in final_results if r.is_neutral())
         errors = sum(1 for r in final_results if r.error)
-        print(f"[StockRatingScreener] Done: Good={good}, Bad={bad}, Neutral={neutral}, Errors={errors}")
+        print(f"[StockRatingScreener] Done: BuyNow={good}, Avoid={bad}, Wait={neutral}, Errors={errors}")
 
         return final_results
 
@@ -179,24 +191,20 @@ class StockRatingScreener:
         raw: Optional[str] = None,
     ) -> StockRating:
         """Validate and build a StockRating from a dict."""
-        rating = str(data.get("rating", "neutral")).lower()
-        if rating not in VALID_RATINGS:
-            rating = "neutral"
+        action = str(data.get("action", "wait")).lower()
+        if action not in VALID_ACTIONS:
+            action = "wait"
+
+        risk_level = str(data.get("risk_level", "medium")).lower()
+        if risk_level not in ("low", "medium", "high"):
+            risk_level = "medium"
 
         confidence = float(data.get("confidence", 0.5))
         confidence = max(0.0, min(1.0, confidence))
 
-        # Downgrade low-confidence ratings
-        original_rating = rating
-        if confidence < 0.6:
-            if rating == "good":
-                rating = "neutral"
-            elif rating == "bad":
-                rating = "neutral"
-
-        target_direction = str(data.get("target_direction", "flat")).lower()
-        if target_direction not in ("up", "down", "flat"):
-            target_direction = "flat"
+        # Downgrade low-confidence actions to wait
+        if confidence < 0.6 and action != "wait":
+            action = "wait"
 
         stop_loss_price = data.get("stop_loss_price")
         if stop_loss_price is not None:
@@ -205,20 +213,24 @@ class StockRatingScreener:
             except (ValueError, TypeError):
                 stop_loss_price = None
 
-        expiry_days = int(data.get("expiry_days", 60))
+        expiry_days = int(data.get("expiry_days", 30))
         expiry_days = max(1, min(180, expiry_days))
 
         analysis_dimensions = data.get("analysis_dimensions", {}) or {}
         key_factors = data.get("key_factors", []) or []
+        entry_timing = data.get("entry_timing", {}) or {}
+        risk_events = data.get("risk_events", []) or []
 
         return StockRating(
             vt_symbol=vt_symbol,
-            rating=rating,
+            action=action,
+            risk_level=risk_level,
             reason=str(data.get("reason", ""))[:500],
             confidence=confidence,
             analysis_dimensions=analysis_dimensions,
             key_factors=key_factors,
-            target_direction=target_direction,
+            entry_timing=entry_timing,
+            risk_events=risk_events,
             stop_loss_price=stop_loss_price,
             expiry_days=expiry_days,
             raw_response=raw,
@@ -227,17 +239,19 @@ class StockRatingScreener:
     def _error_result(
         self, vt_symbol: str, error_msg: str, raw: Optional[str] = None
     ) -> StockRating:
-        """Fail-safe: on any error, return neutral / no-op result."""
+        """Fail-safe: on any error, return wait / no-op result."""
         return StockRating(
             vt_symbol=vt_symbol,
-            rating="neutral",
+            action="wait",
+            risk_level="medium",
             reason=f"[ERROR] {error_msg}",
             confidence=0.0,
             analysis_dimensions={},
             key_factors=[],
-            target_direction="flat",
+            entry_timing={"recommendation": "wait", "wait_reason": "评估失败，建议人工复核", "wait_days": 0, "upcoming_events": []},
+            risk_events=[],
             stop_loss_price=None,
-            expiry_days=60,
+            expiry_days=30,
             raw_response=raw,
             error=error_msg,
         )
@@ -277,12 +291,15 @@ def save_ratings(results: List[StockRating], output_dir: str) -> None:
         history.append({
             "date": today,
             "vt_symbol": rating.vt_symbol,
-            "rating": rating.rating,
+            "action": rating.action,
+            "rating": rating.rating,  # backward-compat mapped field
+            "risk_level": rating.risk_level,
             "reason": rating.reason,
             "confidence": rating.confidence,
             "analysis_dimensions": rating.analysis_dimensions,
             "key_factors": rating.key_factors,
-            "target_direction": rating.target_direction,
+            "entry_timing": rating.entry_timing,
+            "risk_events": rating.risk_events,
             "stop_loss_price": rating.stop_loss_price,
             "expiry_days": rating.expiry_days,
             "error": rating.error,
@@ -297,7 +314,7 @@ def save_ratings(results: List[StockRating], output_dir: str) -> None:
     bad = sum(1 for r in results if r.is_bad())
     neutral = sum(1 for r in results if r.is_neutral())
     errors = sum(1 for r in results if r.error)
-    print(f"[save_ratings] Saved {len(results)} stocks: Good={good}, Bad={bad}, Neutral={neutral}, Errors={errors}")
+    print(f"[save_ratings] Saved {len(results)} stocks: BuyNow={good}, Avoid={bad}, Wait={neutral}, Errors={errors}")
 
 
 # Legacy aliases for backward compatibility

@@ -287,6 +287,12 @@ class AlphaEngine:
         else:
             print("No results generated.")
 
+        # Cleanup intermediate large objects
+        del df_analysis
+        del df_calc
+        del table_data
+        del display_data
+        
         return factors_df
 
     def calculate_signals(self, factor_df: pl.DataFrame) -> pl.DataFrame:

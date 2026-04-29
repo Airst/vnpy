@@ -53,7 +53,12 @@ class LoggerWriter:
 
     def close(self):
         if self.file:
-            self.file.close()
+            try:
+                self.file.flush()
+                self.file.close()
+            except Exception:
+                pass
+            self.file = None
 
     def isatty(self):
         if hasattr(self.writer, "isatty"):

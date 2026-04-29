@@ -2,7 +2,28 @@
   "permissions": {
     "allow": [
       "Bash(find:*)",
-      "Bash(ls:*)"
+      "Bash(ls:*)",
+      "Bash(nvidia-smi:*)",
+      "Bash(ps aux:*)",
+      "Bash(which qoder:*)",
+      "Read(*)",
+      "Glob(*)",
+      "Grep(*)",
+      "Bash(cd:*)",
+      "Bash(git checkout:*)",
+      "WebFetch(*)",
+      "WebFetch(www.robeco.com)",
+      "WebFetch(quantpedia.com)",
+      "WebFetch(arxiv.org)",
+      "WebFetch(github.com)",
+      "WebFetch(juejin.cn)",
+      "WebFetch(www.tradingview.com)",
+      "WebFetch(www.sciencedirect.com)",
+      "WebFetch(pubsonline.informs.org)",
+      "WebFetch(www.researchgate.net)",
+      "Bash(tail:*)",
+      "Bash(which qodercli:*)",
+      "Bash(grep:*)"
     ]
   }
 }

@@ -19,7 +19,14 @@ const BacktestResults = ({ result }) => {
         if (!dailyData || dailyData.length === 0) return [];
         const benchmarks = result.benchmarks || {};
         const names = Object.keys(benchmarks);
-        if (names.length === 0) return dailyData;
+        const initialCapital = stats.capital || dailyData[0]?.balance || 1000000;
+        if (names.length === 0) {
+            const baseNav = dailyData[0]?.balance || initialCapital;
+            return dailyData.map(entry => ({
+                ...entry,
+                portfolioNav: entry.balance / baseNav,
+            }));
+        }
 
         const lookup = {};
         names.forEach(name => {
@@ -29,11 +36,13 @@ const BacktestResults = ({ result }) => {
             });
         });
 
+
+        const baseNav = dailyData[0]?.balance || initialCapital;
         return dailyData.map(entry => {
             const extra = lookup[entry.date] || {};
-            return { ...entry, ...extra };
+            return { ...entry, portfolioNav: entry.balance / baseNav, ...extra };
         });
-    }, [dailyData, result.benchmarks]);
+    }, [dailyData, result.benchmarks, stats.capital]);
 
     const hasBenchmarks = result.benchmarks && Object.keys(result.benchmarks).length > 0;
     
@@ -188,7 +197,7 @@ const BacktestResults = ({ result }) => {
             key: 'equity',
             label: 'Equity Curve',
             children: dailyData && dailyData.length > 0 ? (
-                <Card title={hasBenchmarks ? "Equity Curve vs Benchmarks" : "Portfolio Equity Curve"} bordered={false}>
+                <Card title={hasBenchmarks ? "NAV曲线对比 (1.00 = 1元)" : "策略 NAV 曲线"} bordered={false}>
                     <ResponsiveContainer width="100%" height={400}>
                         <LineChart data={chartData} margin={{ top: 5, right: 30, left: 0, bottom: 5 }}>
                             <CartesianGrid strokeDasharray="3 3" />
@@ -199,17 +208,22 @@ const BacktestResults = ({ result }) => {
                                 textAnchor="end"
                                 height={80}
                             />
-                            <YAxis />
+                            <YAxis 
+                                tickFormatter={(value) => `${value.toFixed(2)}`}
+                            />
                             <Tooltip 
-                                formatter={(value) => value.toFixed(0)}
+                                formatter={(value, name) => {
+                                    const formatted = typeof value === 'number' ? `${value.toFixed(3)}` : value;
+                                    return [formatted, name];
+                                }}
                                 labelFormatter={(label) => `Date: ${label}`}
                             />
                             <Legend />
-                            <Line 
-                                type="monotone" 
-                                dataKey="balance" 
-                                stroke="#1890ff" 
-                                name="Portfolio Value"
+                            <Line
+                                type="monotone"
+                                dataKey="portfolioNav"
+                                stroke="#1890ff"
+                                name="策略 NAV"
                                 dot={false}
                                 isAnimationActive={false}
                             />

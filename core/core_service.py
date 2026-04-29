@@ -341,10 +341,11 @@ class CoreService:
 
     def _compute_benchmarks(self, daily_data: list, capital: int) -> dict:
         """
-        Compute normalized cumulative benchmark returns aligned to daily_data dates.
+        Compute normalized NAV benchmark returns aligned to daily_data dates.
 
         Reads index parquet files from INDEX_PATH, filters to the backtest date range,
-        and normalizes each index to start at the same base value as the portfolio (capital).
+        and normalizes each index to start at 1.00 (representing 1元 initial investment).
+        Returns cumulative growth curve (1.00 → X.XX) so it aligns with portfolio NAV.
 
         Returns:
             dict mapping Chinese index name to list of {"date": str, "value": float}
@@ -370,7 +371,6 @@ class CoreService:
             try:
                 df = pl.read_parquet(filepath)
 
-                # Filter to backtest date range
                 df = df.filter(
                     (pl.col("trade_date") >= start_date) &
                     (pl.col("trade_date") <= end_date)
@@ -381,24 +381,22 @@ class CoreService:
 
                 base_close = df["close"][0]
 
-                # Build date->close lookup
                 close_map = {}
                 for row in df.iter_rows(named=True):
                     d = row["trade_date"]
                     d_str = d.strftime("%Y-%m-%d") if hasattr(d, "strftime") else str(d)
                     close_map[d_str] = row["close"]
 
-                # Forward-fill: align to daily_data dates
                 series = []
                 last_close = base_close
                 for entry in daily_data:
                     d = entry["date"]
                     if d in close_map:
                         last_close = close_map[d]
-                    normalized = capital * (last_close / base_close)
+                    nav = last_close / base_close
                     series.append({
                         "date": d,
-                        "value": round(normalized, 2)
+                        "value": round(nav, 4)
                     })
 
                 benchmarks[name] = series

@@ -30,8 +30,8 @@ INDEX_DIR = PROJECT_ROOT / "core" / "alpha_db" / "index"
 # Benchmark indices to download
 BENCHMARK_INDICES = {
     "000001.SH": "上证指数",
-    "399001.SZ": "深证成指",
     "000300.SH": "沪深300",
+    "399001.SZ": "深证成指",
 }
 
 

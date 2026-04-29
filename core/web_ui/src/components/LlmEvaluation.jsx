@@ -339,24 +339,72 @@ const LlmEvaluation = () => {
         }
     };
 
-    const getRatingTag = (rating) => {
+    const handleReevaluateAll = async () => {
+        setBatchStatus({ running: true, total: 0, completed: 0, failed: 0, results: [] });
+        
+        try {
+            const res = await fetch('/api/llm_ratings/reevaluate_all', { method: 'POST' });
+            const data = await res.json();
+            
+            if (data.count === 0) {
+                message.info('没有已评估的股票');
+                setBatchStatus(null);
+                return;
+            }
+            
+            message.success(`全部重新评估任务已提交，共 ${data.count} 只股票`);
+            setBatchStatus({ running: true, total: data.count, completed: 0, failed: 0, results: [] });
+            startBatchPolling();
+        } catch (error) {
+            setBatchStatus(null);
+            message.error(`提交失败: ${error.message}`);
+        }
+    };
+
+    // Normalize: get display action from record (supports both new action and legacy rating fields)
+    const getAction = (record) => {
+        if (typeof record === 'string') {
+            // Called with a raw value (from table column render)
+            const val = record.toLowerCase();
+            // Map legacy rating to action
+            const legacyMap = { good: 'buy_now', bad: 'avoid', neutral: 'wait' };
+            return legacyMap[val] || val;
+        }
+        // Called with a record object
+        const action = record?.action?.toLowerCase();
+        if (action && ['buy_now', 'wait', 'avoid'].includes(action)) return action;
+        // Fallback to legacy rating field
+        const rating = record?.rating?.toLowerCase();
+        const legacyMap = { good: 'buy_now', bad: 'avoid', neutral: 'wait' };
+        return legacyMap[rating] || 'wait';
+    };
+
+    const getActionTag = (actionOrRecord) => {
+        const action = typeof actionOrRecord === 'string' ? getAction(actionOrRecord) : getAction(actionOrRecord);
         const config = {
-            good: { color: 'green', icon: <CheckCircleOutlined />, text: 'Good' },
-            bad: { color: 'red', icon: <CloseCircleOutlined />, text: 'Bad' },
-            neutral: { color: 'default', icon: <MinusCircleOutlined />, text: 'Neutral' },
+            buy_now: { color: 'green', icon: <CheckCircleOutlined />, text: '建议进场' },
+            avoid: { color: 'red', icon: <CloseCircleOutlined />, text: '建议回避' },
+            wait: { color: 'orange', icon: <MinusCircleOutlined />, text: '等待时机' },
         };
-        const c = config[rating?.toLowerCase()] || config.neutral;
+        const c = config[action] || config.wait;
         return <Tag color={c.color} icon={c.icon}>{c.text}</Tag>;
     };
 
-    const getDirectionTag = (direction) => {
-        const config = {
-            up: { color: 'green', text: '看涨' },
-            down: { color: 'red', text: '看跌' },
-            flat: { color: 'default', text: '震荡' },
-        };
-        const c = config[direction?.toLowerCase()] || config.flat;
-        return <Tag color={c.color}>{c.text}</Tag>;
+    // Legacy alias
+    const getRatingTag = getActionTag;
+
+    const getRiskLevelTag = (record) => {
+        const riskLevel = record?.risk_level?.toLowerCase();
+        if (riskLevel) {
+            const config = {
+                low: { color: 'green', text: '低风险' },
+                medium: { color: 'orange', text: '中风险' },
+                high: { color: 'red', text: '高风险' },
+            };
+            const c = config[riskLevel] || config.medium;
+            return <Tag color={c.color}>{c.text}</Tag>;
+        }
+        return '-';
     };
 
     const renderSummary = () => {
@@ -376,7 +424,7 @@ const LlmEvaluation = () => {
                     </Col>
                     <Col span={4}>
                         <div style={{ textAlign: 'center', cursor: 'pointer' }} onClick={() => handleFilterClick('good')}>
-                            <Text type="secondary">Good (看好)</Text>
+                            <Text type="secondary">建议进场</Text>
                             <div style={{ marginTop: 8 }}>
                                 <Tag color={filterActive('good') ? 'blue' : 'green'} style={{ transition: 'all 0.3s' }}>{good}</Tag>
                             </div>
@@ -384,7 +432,7 @@ const LlmEvaluation = () => {
                     </Col>
                     <Col span={4}>
                         <div style={{ textAlign: 'center', cursor: 'pointer' }} onClick={() => handleFilterClick('bad')}>
-                            <Text type="secondary">Bad (看空)</Text>
+                            <Text type="secondary">建议回避</Text>
                             <div style={{ marginTop: 8 }}>
                                 <Tag color={filterActive('bad') ? 'blue' : 'red'} style={{ transition: 'all 0.3s' }}>{bad}</Tag>
                             </div>
@@ -392,9 +440,9 @@ const LlmEvaluation = () => {
                     </Col>
                     <Col span={4}>
                         <div style={{ textAlign: 'center', cursor: 'pointer' }} onClick={() => handleFilterClick('neutral')}>
-                            <Text type="secondary">Neutral (中性)</Text>
+                            <Text type="secondary">等待时机</Text>
                             <div style={{ marginTop: 8 }}>
-                                <Tag color={filterActive('neutral') ? 'blue' : 'default'} style={{ transition: 'all 0.3s' }}>{neutral}</Tag>
+                                <Tag color={filterActive('neutral') ? 'blue' : 'orange'} style={{ transition: 'all 0.3s' }}>{neutral}</Tag>
                             </div>
                         </div>
                     </Col>
@@ -549,12 +597,12 @@ const LlmEvaluation = () => {
                 <div style={{ marginBottom: 16 }}>
                     <Row gutter={[16, 16]}>
                         <Col span={8}>
-                            <Text type="secondary">评级：</Text>
-                            {getRatingTag(rating.rating)}
+                            <Text type="secondary">进场建议：</Text>
+                            {getActionTag(rating)}
                         </Col>
                         <Col span={8}>
-                            <Text type="secondary">预测方向：</Text>
-                            {getDirectionTag(rating.target_direction)}
+                            <Text type="secondary">风险等级：</Text>
+                            {getRiskLevelTag(rating)}
                         </Col>
                         <Col span={8}>
                             <Text type="secondary">置信度：</Text>
@@ -578,14 +626,93 @@ const LlmEvaluation = () => {
                 )}
 
                 <div style={{ marginBottom: 16 }}>
-                    <Text type="secondary">评级理由：</Text>
+                    <Text type="secondary">评估理由：</Text>
                     <Paragraph style={{ marginTop: 4 }}>{rating.reason}</Paragraph>
                 </div>
+
+                {/* Entry Timing Section (new format) */}
+                {rating.entry_timing && Object.keys(rating.entry_timing).length > 0 && (
+                    <>
+                        <Divider orientation="left">进场时机</Divider>
+                        <div style={{ marginBottom: 8 }}>
+                            {rating.entry_timing.recommendation && (
+                                <div style={{ marginBottom: 4 }}>
+                                    <Text type="secondary">建议：</Text>
+                                    <Text strong>{rating.entry_timing.recommendation}</Text>
+                                </div>
+                            )}
+                            {rating.entry_timing.wait_reason && (
+                                <div style={{ marginBottom: 4 }}>
+                                    <Text type="secondary">等待原因：</Text>
+                                    <Text>{rating.entry_timing.wait_reason}</Text>
+                                </div>
+                            )}
+                            {rating.entry_timing.wait_days > 0 && (
+                                <div style={{ marginBottom: 4 }}>
+                                    <Text type="secondary">建议等待：</Text>
+                                    <Text>{rating.entry_timing.wait_days} 天</Text>
+                                </div>
+                            )}
+                            {rating.entry_timing.upcoming_events?.length > 0 && (
+                                <div>
+                                    <Text type="secondary">即将到来的事件：</Text>
+                                    <ul style={{ paddingLeft: 20, marginTop: 4 }}>
+                                        {rating.entry_timing.upcoming_events.map((e, i) => (
+                                            <li key={i}><Text>{e}</Text></li>
+                                        ))}
+                                    </ul>
+                                </div>
+                            )}
+                        </div>
+                    </>
+                )}
+
+                {/* Risk Events Section (new format) */}
+                {rating.risk_events?.length > 0 && (
+                    <>
+                        <Divider orientation="left">风险事件</Divider>
+                        {rating.risk_events.map((evt, i) => (
+                            <div key={i} style={{ marginBottom: 8, padding: '8px 12px', background: '#fafafa', borderRadius: 4, border: '1px solid #f0f0f0' }}>
+                                <div>
+                                    <Tag color={evt.severity === 'high' ? 'red' : evt.severity === 'medium' ? 'orange' : 'default'}>
+                                        {evt.severity === 'high' ? '高' : evt.severity === 'medium' ? '中' : '低'}
+                                    </Tag>
+                                    {evt.priced_in && <Tag color="default">已定价</Tag>}
+                                    <Text strong>{evt.event}</Text>
+                                </div>
+                                <div style={{ marginTop: 4 }}>
+                                    {evt.date && <Text type="secondary" style={{ marginRight: 12 }}>{evt.date}</Text>}
+                                    {evt.source && <Text type="secondary">来源：{evt.source}</Text>}
+                                </div>
+                            </div>
+                        ))}
+                    </>
+                )}
 
                 {Object.keys(dimensions).length > 0 && (
                     <>
                         <Divider orientation="left">分析维度</Divider>
                         <Row gutter={[8, 12]}>
+                            {/* New format dimensions */}
+                            {dimensions.risk_event && (
+                                <Col span={12}>
+                                    <Text type="secondary">事件风险：</Text>
+                                    <div>{dimensions.risk_event}</div>
+                                </Col>
+                            )}
+                            {dimensions.earnings_quality && (
+                                <Col span={12}>
+                                    <Text type="secondary">盈利质量：</Text>
+                                    <div>{dimensions.earnings_quality}</div>
+                                </Col>
+                            )}
+                            {dimensions.entry_timing && (
+                                <Col span={12}>
+                                    <Text type="secondary">进场时机：</Text>
+                                    <div>{dimensions.entry_timing}</div>
+                                </Col>
+                            )}
+                            {/* Legacy format dimensions */}
                             {dimensions.technical && (
                                 <Col span={12}>
                                     <Text type="secondary">技术面：</Text>
@@ -606,7 +733,7 @@ const LlmEvaluation = () => {
                             )}
                             {dimensions.sentiment && (
                                 <Col span={12}>
-                                    <Text type="secondary">市场情绪：</Text>
+                                    <Text type="secondary">情绪催化：</Text>
                                     <div>{dimensions.sentiment}</div>
                                 </Col>
                             )}
@@ -620,20 +747,38 @@ const LlmEvaluation = () => {
                         <Row gutter={16}>
                             {positiveFactors.length > 0 && (
                                 <Col span={12}>
-                                    <Text type="success">看多因素：</Text>
+                                    <Text type="success">正面因素：</Text>
                                     <ul style={{ paddingLeft: 20, marginTop: 4 }}>
                                         {positiveFactors.map((f, i) => (
-                                            <li key={i}><Text>{f.content}</Text></li>
+                                            <li key={i}>
+                                                <Text>{f.content}</Text>
+                                                {f.info_date && <Text type="secondary" style={{ fontSize: 12, marginLeft: 4 }}>({f.info_date})</Text>}
+                                                {f.timeliness && f.timeliness !== 'priced_in' && (
+                                                    <Tag style={{ marginLeft: 4, fontSize: 11 }} color={f.timeliness === 'high' ? 'red' : f.timeliness === 'medium' ? 'orange' : 'default'}>
+                                                        {f.timeliness === 'high' ? '高冲击' : f.timeliness === 'medium' ? '中等' : '低冲击'}
+                                                    </Tag>
+                                                )}
+                                                {f.timeliness === 'priced_in' && <Tag style={{ marginLeft: 4, fontSize: 11 }}>已定价</Tag>}
+                                            </li>
                                         ))}
                                     </ul>
                                 </Col>
                             )}
                             {negativeFactors.length > 0 && (
                                 <Col span={12}>
-                                    <Text type="danger">看空因素：</Text>
+                                    <Text type="danger">负面因素：</Text>
                                     <ul style={{ paddingLeft: 20, marginTop: 4 }}>
                                         {negativeFactors.map((f, i) => (
-                                            <li key={i}><Text>{f.content}</Text></li>
+                                            <li key={i}>
+                                                <Text>{f.content}</Text>
+                                                {f.info_date && <Text type="secondary" style={{ fontSize: 12, marginLeft: 4 }}>({f.info_date})</Text>}
+                                                {f.timeliness && f.timeliness !== 'priced_in' && (
+                                                    <Tag style={{ marginLeft: 4, fontSize: 11 }} color={f.timeliness === 'high' ? 'red' : f.timeliness === 'medium' ? 'orange' : 'default'}>
+                                                        {f.timeliness === 'high' ? '高冲击' : f.timeliness === 'medium' ? '中等' : '低冲击'}
+                                                    </Tag>
+                                                )}
+                                                {f.timeliness === 'priced_in' && <Tag style={{ marginLeft: 4, fontSize: 11 }}>已定价</Tag>}
+                                            </li>
                                         ))}
                                     </ul>
                                 </Col>
@@ -671,18 +816,16 @@ const LlmEvaluation = () => {
             width: 120,
         },
         {
-            title: '评级',
-            dataIndex: 'rating',
-            key: 'rating',
-            width: 100,
-            render: (rating) => rating ? getRatingTag(rating) : '-',
+            title: '进场建议',
+            key: 'action',
+            width: 110,
+            render: (_, record) => record.action || record.rating ? getActionTag(record) : '-',
         },
         {
-            title: '预测方向',
-            dataIndex: 'target_direction',
-            key: 'target_direction',
+            title: '风险等级',
+            key: 'risk_level',
             width: 100,
-            render: (direction) => direction ? getDirectionTag(direction) : '-',
+            render: (_, record) => getRiskLevelTag(record),
         },
         {
             title: '置信度',
@@ -707,7 +850,7 @@ const LlmEvaluation = () => {
         },
         {
             title: '操作',
-            key: 'action',
+            key: 'operations',
             width: 140,
             fixed: 'right',
             render: (_, record) => (
@@ -740,22 +883,41 @@ const LlmEvaluation = () => {
             {/* Search and batch actions */}
             <Card title="LLM 评估" bordered={false}
                 extra={
-                    <Popconfirm
-                        title="重新评估所有失败股票"
-                        description="将对所有评估失败的股票重新执行 LLM 评估，是否继续？"
-                        onConfirm={handleBatchReevaluate}
-                        okText="确认"
-                        cancelText="取消"
-                        disabled={batchStatus?.running}
-                    >
-                        <Button 
-                            icon={batchStatus?.running ? <LoadingOutlined spin /> : <CloudUploadOutlined />}
-                            loading={batchStatus?.running}
+                    <div style={{ display: 'flex', gap: 8 }}>
+                        <Popconfirm
+                            title="全部重新评估"
+                            description="将对所有已评估的股票重新执行 LLM 评估，是否继续？"
+                            onConfirm={handleReevaluateAll}
+                            okText="确认"
+                            cancelText="取消"
                             disabled={batchStatus?.running}
                         >
-                            {batchStatus?.running ? `批量评估中 (${batchStatus.completed}/${batchStatus.total})` : '批量重评失败股票'}
-                        </Button>
-                    </Popconfirm>
+                            <Button 
+                                icon={batchStatus?.running ? <LoadingOutlined spin /> : <ReloadOutlined />}
+                                loading={batchStatus?.running}
+                                disabled={batchStatus?.running}
+                                type="primary"
+                            >
+                                全部重新评估
+                            </Button>
+                        </Popconfirm>
+                        <Popconfirm
+                            title="重新评估所有失败股票"
+                            description="将对所有评估失败的股票重新执行 LLM 评估，是否继续？"
+                            onConfirm={handleBatchReevaluate}
+                            okText="确认"
+                            cancelText="取消"
+                            disabled={batchStatus?.running}
+                        >
+                            <Button 
+                                icon={batchStatus?.running ? <LoadingOutlined spin /> : <CloudUploadOutlined />}
+                                loading={batchStatus?.running}
+                                disabled={batchStatus?.running}
+                            >
+                                批量重评失败股票
+                            </Button>
+                        </Popconfirm>
+                    </div>
                 }
             >
                 <div style={{ display: 'flex', alignItems: 'center', gap: 16 }}>
@@ -829,7 +991,7 @@ const LlmEvaluation = () => {
                                     onClose={() => { setFilterRating(null); setPage(1); loadRatings(1, pageSizeRef.current, null); }}
                                     style={{ fontSize: 14, padding: '4px 12px' }}
                                 >
-                                    当前筛选: {filterRating === 'good' ? 'Good (看好)' : filterRating === 'bad' ? 'Bad (看空)' : 'Neutral (中性)'}
+                                    当前筛选: {filterRating === 'good' ? '建议进场' : filterRating === 'bad' ? '建议回避' : '等待时机'}
                                 </Tag>
                                 <Button 
                                     size="small" 

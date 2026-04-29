@@ -49,7 +49,23 @@ if not hasattr(sys.stdout, 'file') or not isinstance(sys.stdout, LoggerWriter):
 if __name__ == "__main__":
     print(f"Starting Uvicorn server for FastAPI app..., {PROJECT_ROOT}")
     # --------------------------
-    uvicorn.run("core.main_controller:app", host="0.0.0.0", port=8000, reload=True, reload_dirs=[str(PROJECT_ROOT)])
+    uvicorn.run(
+        "core.main_controller:app",
+        host="0.0.0.0",
+        port=8000,
+        reload=False,
+        reload_excludes=[
+            str(PROJECT_ROOT / "core" / "alpha_db/"),
+            str(PROJECT_ROOT / "core" / "web_ui" / "node_modules/"),
+            str(PROJECT_ROOT / "core" / "web_ui" / "dist/"),
+            str(PROJECT_ROOT / "log/"),
+            str(PROJECT_ROOT / ".git"),
+            str(PROJECT_ROOT / "build/"),
+            "**/__pycache__",
+            "**/*.pyc",
+            "**/*.parquet",
+        ],
+    )
     
     print("Forcing process exit...")
     os._exit(0)

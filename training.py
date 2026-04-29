@@ -47,6 +47,16 @@ def setup_logger(version: str):
         except Exception as e:
             print(f"Failed to setup logger redirection: {e}")
 
+def cleanup_logger():
+    """Close log file handles and restore original stdout/stderr"""
+    try:
+        if hasattr(sys.stdout, 'close'):
+            sys.stdout.close()
+        if hasattr(sys.stderr, 'close'):
+            sys.stderr.close()
+    except Exception:
+        pass
+
 def save_log_dump(version: str):
     log_filename = f"log/run_{version}.log"
     output_filename = f"training{version.upper()}.txt"
@@ -279,4 +289,22 @@ if __name__ == "__main__":
         )
     
     save_log_dump(version)
+    
+    # === Memory Cleanup ===
+    # Release major objects and force garbage collection
+    del engine
+    del calculator
+    del selector
+    del data_df
+    del signal_df
+    if 'result' in locals():
+        del result
+    if 'core_service' in locals():
+        del core_service
+    
+    import gc
+    gc.collect()
+    
+    # Close logger file handles
+    cleanup_logger()
 
