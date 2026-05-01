@@ -156,6 +156,30 @@ def get_signal_data(req: SignalDataRequest):
         traceback.print_exc()
         raise HTTPException(status_code=500, detail=str(e))
 
+@app.get("/api/kline")
+def get_kline(vt_symbol: str, start_date: str, end_date: str):
+    """Get OHLCV candlestick data for a symbol within a date range."""
+    try:
+        start = datetime.strptime(start_date, "%Y%m%d")
+        end = datetime.strptime(end_date, "%Y%m%d")
+        bars = core_service.lab.load_bar_data(vt_symbol, "d", start, end)
+        data = [
+            {
+                "time": bar.datetime.strftime("%Y-%m-%d"),
+                "open": bar.open_price,
+                "high": bar.high_price,
+                "low": bar.low_price,
+                "close": bar.close_price,
+                "volume": bar.volume,
+            }
+            for bar in bars
+        ]
+        return {"data": data}
+    except Exception as e:
+        import traceback
+        traceback.print_exc()
+        raise HTTPException(status_code=500, detail=str(e))
+
 @app.get("/api/symbols/search")
 def search_symbols(keyword: str):
     return {"symbols": core_service.search_symbols(keyword)}
@@ -214,49 +238,32 @@ def get_llm_ratings():
 def get_all_ratings(page: int = 1, page_size: int = 20, rating_filter: str = "", signal_name: str = ""):
     """Get all stock ratings with server-side pagination.
     
-    Returns latest rating for each stock.
-    If signal_name is provided, loads signal scores and sorts by score descending.
-    Summary stats are always for the full dataset (no filter applied).
+    Stock list = signal top 30 + historically evaluated stocks (deduplicated).
+    Stocks from signal without evaluations are shown as empty entries.
+    Sorted by latest signal score descending.
     """
     try:
         ratings_dir = PROJECT_ROOT / "core" / "alpha_db" / "llm_tasks"
-        if not ratings_dir.exists():
-            return {
-                "ratings": [], "total": 0, "total_unfiltered": 0, "page": page, "page_size": page_size,
-                "summary": {"good": 0, "bad": 0, "neutral": 0, "error": 0, "avg_confidence": "N/A"},
-                "signal_date": None,
-            }
         
-        # Step 1: Collect ALL latest ratings (no filter)
-        all_ratings = []
-        for f in ratings_dir.glob("*.json"):
-            if f.name.startswith("ratings_"):
-                continue
-            try:
-                with open(f, "r", encoding="utf-8") as fp:
-                    history = json.load(fp)
-                if isinstance(history, list) and history:
-                    all_ratings.append(history[-1])
-            except Exception:
-                pass
+        # Step 1: Collect ALL existing ratings (keyed by vt_symbol)
+        rated_map = {}  # vt_symbol -> latest rating dict
+        if ratings_dir.exists():
+            for f in ratings_dir.glob("*.json"):
+                if f.name.startswith("ratings_"):
+                    continue
+                try:
+                    with open(f, "r", encoding="utf-8") as fp:
+                        history = json.load(fp)
+                    if isinstance(history, list) and history:
+                        entry = history[-1]
+                        rated_map[entry.get("vt_symbol", f.stem)] = entry
+                except Exception:
+                    pass
         
-        # Step 2: Compute summary stats from full dataset (always unfiltered)
-        good = sum(1 for r in all_ratings if r.get("rating") == "good")
-        bad = sum(1 for r in all_ratings if r.get("rating") == "bad")
-        neutral = sum(1 for r in all_ratings if r.get("rating") == "neutral")
-        error = sum(1 for r in all_ratings if r.get("error"))
-        confidences = [r.get("confidence", 0) for r in all_ratings if r.get("confidence") is not None]
-        avg_conf = f"{sum(confidences) / len(confidences):.2f}" if confidences else "N/A"
-        
-        # Step 3: Record total unfiltered count
-        total_unfiltered = len(all_ratings)
-        
-        # Step 4: Apply filter for list display only
-        if rating_filter:
-            all_ratings = [r for r in all_ratings if r.get("rating", "") == rating_filter]
-        
-        # Step 5: Load signal scores if signal_name provided, sort by score descending
+        # Step 2: Load signal scores and get top 30
         signal_date = None
+        score_map = {}
+        top_signal_symbols = []
         if signal_name:
             try:
                 signal_df = core_service.lab.load_signal(signal_name)
@@ -264,24 +271,66 @@ def get_all_ratings(page: int = 1, page_size: int = 20, rating_filter: str = "",
                     latest_dt = signal_df['datetime'].max()
                     signal_date = latest_dt.strftime("%Y-%m-%d") if latest_dt else None
                     latest_df = signal_df.filter(pl.col('datetime') == latest_dt)
-                    score_map = {}
                     for row in latest_df.iter_rows(named=True):
                         score = row.get('final_signal') or row.get('total_score') or 0
                         score_map[row['vt_symbol']] = score
-                    
-                    # Attach scores and sort by score descending
-                    for r in all_ratings:
-                        r['score'] = score_map.get(r['vt_symbol'])
-                    all_ratings.sort(key=lambda x: x.get('score') if x.get('score') is not None else float('-inf'), reverse=True)
-                else:
-                    # Signal not found, fall back to date sorting
-                    all_ratings.sort(key=lambda x: x.get("date", ""), reverse=True)
+                    # Top 30 by score
+                    sorted_symbols = sorted(score_map.items(), key=lambda x: x[1], reverse=True)
+                    top_signal_symbols = [s for s, _ in sorted_symbols[:30]]
             except Exception:
-                # Signal loading failed, fall back to date sorting
-                all_ratings.sort(key=lambda x: x.get("date", ""), reverse=True)
-        else:
-            # No signal specified, sort by date descending
-            all_ratings.sort(key=lambda x: x.get("date", ""), reverse=True)
+                pass
+        
+        # Step 3: Build merged stock list = top 30 signal + all historically rated (deduplicated)
+        seen = set()
+        all_ratings = []
+        
+        # Add top 30 signal stocks first
+        for sym in top_signal_symbols:
+            seen.add(sym)
+            if sym in rated_map:
+                entry = rated_map[sym].copy()
+            else:
+                # Placeholder for unrated signal stock
+                entry = {
+                    "vt_symbol": sym,
+                    "date": None,
+                    "rating": None,
+                    "action": None,
+                    "risk_level": None,
+                    "reason": None,
+                    "confidence": None,
+                    "analysis_dimensions": {},
+                    "key_factors": [],
+                    "error": None,
+                }
+            entry['score'] = score_map.get(sym)
+            all_ratings.append(entry)
+        
+        # Add remaining historically rated stocks
+        for sym, entry in rated_map.items():
+            if sym not in seen:
+                seen.add(sym)
+                entry_copy = entry.copy()
+                entry_copy['score'] = score_map.get(sym)
+                all_ratings.append(entry_copy)
+        
+        # Step 4: Compute summary stats from rated stocks only
+        rated_entries = [r for r in all_ratings if r.get("rating") is not None]
+        good = sum(1 for r in rated_entries if r.get("rating") == "good")
+        bad = sum(1 for r in rated_entries if r.get("rating") == "bad")
+        neutral = sum(1 for r in rated_entries if r.get("rating") == "neutral")
+        error = sum(1 for r in rated_entries if r.get("error"))
+        confidences = [r.get("confidence", 0) for r in rated_entries if r.get("confidence") is not None]
+        avg_conf = f"{sum(confidences) / len(confidences):.2f}" if confidences else "N/A"
+        
+        total_unfiltered = len(all_ratings)
+        
+        # Step 5: Apply rating filter for display
+        if rating_filter:
+            all_ratings = [r for r in all_ratings if r.get("rating", "") == rating_filter]
+        
+        # Step 6: Sort by score descending (None scores go to bottom)
+        all_ratings.sort(key=lambda x: x.get('score') if x.get('score') is not None else float('-inf'), reverse=True)
         
         total = len(all_ratings)
         start = (page - 1) * page_size

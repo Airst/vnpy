@@ -1,6 +1,11 @@
 import React, { useState, useEffect, useRef } from 'react';
-import { Card, Select, Spin, Empty, Tag, Typography, Table, Modal, Row, Col, Divider, Alert, message, Button, Popconfirm, Progress } from 'antd';
-import { FileTextOutlined, CheckCircleOutlined, CloseCircleOutlined, MinusCircleOutlined, EyeOutlined, ReloadOutlined, LoadingOutlined, CloudUploadOutlined, DeleteOutlined } from '@ant-design/icons';
+import { Card, Select, Spin, Empty, Tag, Typography, Table, Modal, Row, Col, Divider, Alert, message, Button, Popconfirm, Progress, DatePicker, Tabs } from 'antd';
+import { FileTextOutlined, CheckCircleOutlined, CloseCircleOutlined, MinusCircleOutlined, EyeOutlined, ReloadOutlined, LoadingOutlined, CloudUploadOutlined, DeleteOutlined, LineChartOutlined } from '@ant-design/icons';
+import { LineChart, Line, XAxis, YAxis, CartesianGrid, Tooltip, Legend, ResponsiveContainer } from 'recharts';
+import { createChart, CandlestickSeries, HistogramSeries } from 'lightweight-charts';
+import dayjs from 'dayjs';
+
+const { RangePicker } = DatePicker;
 
 const { Text, Title, Paragraph } = Typography;
 
@@ -39,6 +44,22 @@ const LlmEvaluation = () => {
     const searchTimeoutRef = useRef(null);
     const [searchedSymbol, setSearchedSymbol] = useState(null);
     const [isSearchMode, setIsSearchMode] = useState(false);
+
+    // Signal chart in detail modal
+    const [detailSignal, setDetailSignal] = useState(null);
+    const [detailDateRange, setDetailDateRange] = useState([dayjs().subtract(14, 'day'), dayjs()]);
+    const [detailChartData, setDetailChartData] = useState([]);
+    const [detailChartLoading, setDetailChartLoading] = useState(false);
+    const [detailChartSeries, setDetailChartSeries] = useState([]);
+
+    const signalColors = ['#8884d8', '#82ca9d', '#ffc658', '#ff7300', '#d0ed57', '#a4de6c', '#8dd1e1', '#83a6ed'];
+
+    // K-line chart in detail modal
+    const [klineDateRange, setKlineDateRange] = useState([dayjs().subtract(90, 'day'), dayjs()]);
+    const [klineLoading, setKlineLoading] = useState(false);
+    const [klineData, setKlineData] = useState([]);
+    const klineContainerRef = useRef(null);
+    const klineChartRef = useRef(null);
 
     // Toggle filter when clicking summary tags
     const handleFilterClick = (ratingType) => {
@@ -237,6 +258,144 @@ const LlmEvaluation = () => {
             setLoading(false);
         }
     };
+
+    // Load signal chart data for detail modal
+    const loadDetailSignalChart = async (vt_symbol, signalName, dateRange) => {
+        if (!signalName || !dateRange || !dateRange[0] || !dateRange[1]) return;
+        setDetailChartLoading(true);
+        try {
+            const payload = {
+                signal_name: signalName,
+                start_date: dateRange[0].format("YYYYMMDD"),
+                end_date: dateRange[1].format("YYYYMMDD"),
+                vt_symbols: [vt_symbol]
+            };
+            const res = await fetch('/api/signal_data', {
+                method: 'POST',
+                headers: { 'Content-Type': 'application/json' },
+                body: JSON.stringify(payload)
+            });
+            const result = await res.json();
+            if (result.error) {
+                message.error(result.error);
+                setDetailChartData([]);
+                setDetailChartSeries([]);
+                return;
+            }
+            if (result.dates && result.series) {
+                const transformed = result.dates.map((date, idx) => {
+                    const point = { date };
+                    result.series.forEach(s => {
+                        point[s.name] = s.data[idx];
+                    });
+                    return point;
+                });
+                setDetailChartData(transformed);
+                setDetailChartSeries(result.series);
+            } else {
+                setDetailChartData([]);
+                setDetailChartSeries([]);
+            }
+        } catch (error) {
+            console.error('Failed to load signal chart', error);
+            setDetailChartData([]);
+            setDetailChartSeries([]);
+        } finally {
+            setDetailChartLoading(false);
+        }
+    };
+
+    // Load K-line data for detail modal
+    const loadKlineData = async (vt_symbol, dateRange) => {
+        if (!vt_symbol || !dateRange || !dateRange[0] || !dateRange[1]) return;
+        setKlineLoading(true);
+        try {
+            const params = new URLSearchParams({
+                vt_symbol,
+                start_date: dateRange[0].format("YYYYMMDD"),
+                end_date: dateRange[1].format("YYYYMMDD"),
+            });
+            const res = await fetch(`/api/kline?${params}`);
+            const result = await res.json();
+            if (result.data) {
+                setKlineData(result.data);
+            } else {
+                setKlineData([]);
+            }
+        } catch (error) {
+            console.error('Failed to load kline data', error);
+            setKlineData([]);
+        } finally {
+            setKlineLoading(false);
+        }
+    };
+
+    // Render K-line chart when data changes
+    useEffect(() => {
+        if (!klineContainerRef.current || klineData.length === 0) {
+            if (klineChartRef.current) {
+                klineChartRef.current.remove();
+                klineChartRef.current = null;
+            }
+            return;
+        }
+
+        // Clean up previous chart
+        if (klineChartRef.current) {
+            klineChartRef.current.remove();
+            klineChartRef.current = null;
+        }
+
+        const chart = createChart(klineContainerRef.current, {
+            width: klineContainerRef.current.clientWidth,
+            height: 400,
+            layout: { background: { color: '#ffffff' }, textColor: '#333' },
+            grid: { vertLines: { color: '#f0f0f0' }, horzLines: { color: '#f0f0f0' } },
+            timeScale: { timeVisible: false, borderColor: '#d1d4dc' },
+            crosshair: { mode: 0 },
+        });
+
+        const candleSeries = chart.addSeries(CandlestickSeries, {
+            upColor: '#ef5350',
+            downColor: '#26a69a',
+            borderUpColor: '#ef5350',
+            borderDownColor: '#26a69a',
+            wickUpColor: '#ef5350',
+            wickDownColor: '#26a69a',
+        });
+        candleSeries.setData(klineData);
+
+        const volumeSeries = chart.addSeries(HistogramSeries, {
+            priceFormat: { type: 'volume' },
+            priceScaleId: 'volume',
+        });
+        chart.priceScale('volume').applyOptions({
+            scaleMargins: { top: 0.8, bottom: 0 },
+        });
+        volumeSeries.setData(klineData.map(d => ({
+            time: d.time,
+            value: d.volume,
+            color: d.close >= d.open ? '#ef535080' : '#26a69a80',
+        })));
+
+        chart.timeScale().fitContent();
+        klineChartRef.current = chart;
+
+        const handleResize = () => {
+            if (klineContainerRef.current && klineChartRef.current) {
+                klineChartRef.current.applyOptions({ width: klineContainerRef.current.clientWidth });
+            }
+        };
+        window.addEventListener('resize', handleResize);
+
+        return () => {
+            window.removeEventListener('resize', handleResize);
+            if (klineChartRef.current) {
+                klineChartRef.current.remove();
+                klineChartRef.current = null;
+            }
+        };
+    }, [klineData]);
 
     // Poll task status when running
     const startPolling = (vt_symbol) => {
@@ -468,6 +627,16 @@ const LlmEvaluation = () => {
     const handleCloseDetail = () => {
         setDetailModal({ visible: false, rating: null });
         setTaskStatus(null);
+        setDetailSignal(null);
+        setDetailChartData([]);
+        setDetailChartSeries([]);
+        setDetailDateRange([dayjs().subtract(14, 'day'), dayjs()]);
+        setKlineData([]);
+        setKlineDateRange([dayjs().subtract(90, 'day'), dayjs()]);
+        if (klineChartRef.current) {
+            klineChartRef.current.remove();
+            klineChartRef.current = null;
+        }
         if (pollTimerRef.current) {
             clearInterval(pollTimerRef.current);
             pollTimerRef.current = null;
@@ -574,7 +743,7 @@ const LlmEvaluation = () => {
                     </Button>,
                     <Button key="close" type="primary" onClick={handleCloseDetail}>关闭</Button>
                 ]}
-                width={800}
+                width={900}
             >
                 {taskStatus && (
                     <Alert
@@ -588,214 +757,326 @@ const LlmEvaluation = () => {
                         style={{ marginBottom: 16 }}
                     />
                 )}
-                {rating.date && (
-                    <div style={{ marginBottom: 12 }}>
-                        <Text type="secondary">评估日期：</Text>
-                        <Text strong>{rating.date}</Text>
-                    </div>
-                )}
-                <div style={{ marginBottom: 16 }}>
-                    <Row gutter={[16, 16]}>
-                        <Col span={8}>
-                            <Text type="secondary">进场建议：</Text>
-                            {getActionTag(rating)}
-                        </Col>
-                        <Col span={8}>
-                            <Text type="secondary">风险等级：</Text>
-                            {getRiskLevelTag(rating)}
-                        </Col>
-                        <Col span={8}>
-                            <Text type="secondary">置信度：</Text>
-                            <Text strong>{(rating.confidence * 100).toFixed(0)}%</Text>
-                        </Col>
-                    </Row>
-                </div>
-
-                {rating.score !== undefined && rating.score !== null && (
-                    <div style={{ marginBottom: 16 }}>
-                        <Text type="secondary">模型分数：</Text>
-                        <Text code>{rating.score?.toFixed(4)}</Text>
-                    </div>
-                )}
-
-                {rating.stop_loss_price && (
-                    <div style={{ marginBottom: 16 }}>
-                        <Text type="secondary">止损价：</Text>
-                        <Text code>{rating.stop_loss_price}</Text>
-                    </div>
-                )}
-
-                <div style={{ marginBottom: 16 }}>
-                    <Text type="secondary">评估理由：</Text>
-                    <Paragraph style={{ marginTop: 4 }}>{rating.reason}</Paragraph>
-                </div>
-
-                {/* Entry Timing Section (new format) */}
-                {rating.entry_timing && Object.keys(rating.entry_timing).length > 0 && (
-                    <>
-                        <Divider orientation="left">进场时机</Divider>
-                        <div style={{ marginBottom: 8 }}>
-                            {rating.entry_timing.recommendation && (
-                                <div style={{ marginBottom: 4 }}>
-                                    <Text type="secondary">建议：</Text>
-                                    <Text strong>{rating.entry_timing.recommendation}</Text>
+                <Tabs defaultActiveKey="evaluation" items={[
+                    {
+                        key: 'evaluation',
+                        label: 'LLM 评估',
+                        children: (
+                            <>
+                                {rating.date && (
+                                    <div style={{ marginBottom: 12 }}>
+                                        <Text type="secondary">评估日期：</Text>
+                                        <Text strong>{rating.date}</Text>
+                                    </div>
+                                )}
+                                <div style={{ marginBottom: 16 }}>
+                                    <Row gutter={[16, 16]}>
+                                        <Col span={8}>
+                                            <Text type="secondary">进场建议：</Text>
+                                            {getActionTag(rating)}
+                                        </Col>
+                                        <Col span={8}>
+                                            <Text type="secondary">风险等级：</Text>
+                                            {getRiskLevelTag(rating)}
+                                        </Col>
+                                        <Col span={8}>
+                                            <Text type="secondary">置信度：</Text>
+                                            <Text strong>{(rating.confidence * 100).toFixed(0)}%</Text>
+                                        </Col>
+                                    </Row>
                                 </div>
-                            )}
-                            {rating.entry_timing.wait_reason && (
-                                <div style={{ marginBottom: 4 }}>
-                                    <Text type="secondary">等待原因：</Text>
-                                    <Text>{rating.entry_timing.wait_reason}</Text>
-                                </div>
-                            )}
-                            {rating.entry_timing.wait_days > 0 && (
-                                <div style={{ marginBottom: 4 }}>
-                                    <Text type="secondary">建议等待：</Text>
-                                    <Text>{rating.entry_timing.wait_days} 天</Text>
-                                </div>
-                            )}
-                            {rating.entry_timing.upcoming_events?.length > 0 && (
-                                <div>
-                                    <Text type="secondary">即将到来的事件：</Text>
-                                    <ul style={{ paddingLeft: 20, marginTop: 4 }}>
-                                        {rating.entry_timing.upcoming_events.map((e, i) => (
-                                            <li key={i}><Text>{e}</Text></li>
-                                        ))}
-                                    </ul>
-                                </div>
-                            )}
-                        </div>
-                    </>
-                )}
 
-                {/* Risk Events Section (new format) */}
-                {rating.risk_events?.length > 0 && (
-                    <>
-                        <Divider orientation="left">风险事件</Divider>
-                        {rating.risk_events.map((evt, i) => (
-                            <div key={i} style={{ marginBottom: 8, padding: '8px 12px', background: '#fafafa', borderRadius: 4, border: '1px solid #f0f0f0' }}>
-                                <div>
-                                    <Tag color={evt.severity === 'high' ? 'red' : evt.severity === 'medium' ? 'orange' : 'default'}>
-                                        {evt.severity === 'high' ? '高' : evt.severity === 'medium' ? '中' : '低'}
-                                    </Tag>
-                                    {evt.priced_in && <Tag color="default">已定价</Tag>}
-                                    <Text strong>{evt.event}</Text>
-                                </div>
-                                <div style={{ marginTop: 4 }}>
-                                    {evt.date && <Text type="secondary" style={{ marginRight: 12 }}>{evt.date}</Text>}
-                                    {evt.source && <Text type="secondary">来源：{evt.source}</Text>}
-                                </div>
-                            </div>
-                        ))}
-                    </>
-                )}
+                                {rating.score !== undefined && rating.score !== null && (
+                                    <div style={{ marginBottom: 16 }}>
+                                        <Text type="secondary">模型分数：</Text>
+                                        <Text code>{rating.score?.toFixed(4)}</Text>
+                                    </div>
+                                )}
 
-                {Object.keys(dimensions).length > 0 && (
-                    <>
-                        <Divider orientation="left">分析维度</Divider>
-                        <Row gutter={[8, 12]}>
-                            {/* New format dimensions */}
-                            {dimensions.risk_event && (
-                                <Col span={12}>
-                                    <Text type="secondary">事件风险：</Text>
-                                    <div>{dimensions.risk_event}</div>
-                                </Col>
-                            )}
-                            {dimensions.earnings_quality && (
-                                <Col span={12}>
-                                    <Text type="secondary">盈利质量：</Text>
-                                    <div>{dimensions.earnings_quality}</div>
-                                </Col>
-                            )}
-                            {dimensions.entry_timing && (
-                                <Col span={12}>
-                                    <Text type="secondary">进场时机：</Text>
-                                    <div>{dimensions.entry_timing}</div>
-                                </Col>
-                            )}
-                            {/* Legacy format dimensions */}
-                            {dimensions.technical && (
-                                <Col span={12}>
-                                    <Text type="secondary">技术面：</Text>
-                                    <div>{dimensions.technical}</div>
-                                </Col>
-                            )}
-                            {dimensions.fundamental && (
-                                <Col span={12}>
-                                    <Text type="secondary">基本面：</Text>
-                                    <div>{dimensions.fundamental}</div>
-                                </Col>
-                            )}
-                            {dimensions.event && (
-                                <Col span={12}>
-                                    <Text type="secondary">事件/催化剂：</Text>
-                                    <div>{dimensions.event}</div>
-                                </Col>
-                            )}
-                            {dimensions.sentiment && (
-                                <Col span={12}>
-                                    <Text type="secondary">情绪催化：</Text>
-                                    <div>{dimensions.sentiment}</div>
-                                </Col>
-                            )}
-                        </Row>
-                    </>
-                )}
+                                {rating.stop_loss_price && (
+                                    <div style={{ marginBottom: 16 }}>
+                                        <Text type="secondary">止损价：</Text>
+                                        <Text code>{rating.stop_loss_price}</Text>
+                                    </div>
+                                )}
 
-                {(positiveFactors.length > 0 || negativeFactors.length > 0) && (
-                    <>
-                        <Divider orientation="left">关键因素</Divider>
-                        <Row gutter={16}>
-                            {positiveFactors.length > 0 && (
-                                <Col span={12}>
-                                    <Text type="success">正面因素：</Text>
-                                    <ul style={{ paddingLeft: 20, marginTop: 4 }}>
-                                        {positiveFactors.map((f, i) => (
-                                            <li key={i}>
-                                                <Text>{f.content}</Text>
-                                                {f.info_date && <Text type="secondary" style={{ fontSize: 12, marginLeft: 4 }}>({f.info_date})</Text>}
-                                                {f.timeliness && f.timeliness !== 'priced_in' && (
-                                                    <Tag style={{ marginLeft: 4, fontSize: 11 }} color={f.timeliness === 'high' ? 'red' : f.timeliness === 'medium' ? 'orange' : 'default'}>
-                                                        {f.timeliness === 'high' ? '高冲击' : f.timeliness === 'medium' ? '中等' : '低冲击'}
+                                <div style={{ marginBottom: 16 }}>
+                                    <Text type="secondary">评估理由：</Text>
+                                    <Paragraph style={{ marginTop: 4 }}>{rating.reason}</Paragraph>
+                                </div>
+
+                                {/* Entry Timing Section (new format) */}
+                                {rating.entry_timing && Object.keys(rating.entry_timing).length > 0 && (
+                                    <>
+                                        <Divider orientation="left">进场时机</Divider>
+                                        <div style={{ marginBottom: 8 }}>
+                                            {rating.entry_timing.recommendation && (
+                                                <div style={{ marginBottom: 4 }}>
+                                                    <Text type="secondary">建议：</Text>
+                                                    <Text strong>{rating.entry_timing.recommendation}</Text>
+                                                </div>
+                                            )}
+                                            {rating.entry_timing.wait_reason && (
+                                                <div style={{ marginBottom: 4 }}>
+                                                    <Text type="secondary">等待原因：</Text>
+                                                    <Text>{rating.entry_timing.wait_reason}</Text>
+                                                </div>
+                                            )}
+                                            {rating.entry_timing.wait_days > 0 && (
+                                                <div style={{ marginBottom: 4 }}>
+                                                    <Text type="secondary">建议等待：</Text>
+                                                    <Text>{rating.entry_timing.wait_days} 天</Text>
+                                                </div>
+                                            )}
+                                            {rating.entry_timing.upcoming_events?.length > 0 && (
+                                                <div>
+                                                    <Text type="secondary">即将到来的事件：</Text>
+                                                    <ul style={{ paddingLeft: 20, marginTop: 4 }}>
+                                                        {rating.entry_timing.upcoming_events.map((e, i) => (
+                                                            <li key={i}><Text>{e}</Text></li>
+                                                        ))}
+                                                    </ul>
+                                                </div>
+                                            )}
+                                        </div>
+                                    </>
+                                )}
+
+                                {/* Risk Events Section (new format) */}
+                                {rating.risk_events?.length > 0 && (
+                                    <>
+                                        <Divider orientation="left">风险事件</Divider>
+                                        {rating.risk_events.map((evt, i) => (
+                                            <div key={i} style={{ marginBottom: 8, padding: '8px 12px', background: '#fafafa', borderRadius: 4, border: '1px solid #f0f0f0' }}>
+                                                <div>
+                                                    <Tag color={evt.severity === 'high' ? 'red' : evt.severity === 'medium' ? 'orange' : 'default'}>
+                                                        {evt.severity === 'high' ? '高' : evt.severity === 'medium' ? '中' : '低'}
                                                     </Tag>
-                                                )}
-                                                {f.timeliness === 'priced_in' && <Tag style={{ marginLeft: 4, fontSize: 11 }}>已定价</Tag>}
-                                            </li>
+                                                    {evt.priced_in && <Tag color="default">已定价</Tag>}
+                                                    <Text strong>{evt.event}</Text>
+                                                </div>
+                                                <div style={{ marginTop: 4 }}>
+                                                    {evt.date && <Text type="secondary" style={{ marginRight: 12 }}>{evt.date}</Text>}
+                                                    {evt.source && <Text type="secondary">来源：{evt.source}</Text>}
+                                                </div>
+                                            </div>
                                         ))}
-                                    </ul>
-                                </Col>
-                            )}
-                            {negativeFactors.length > 0 && (
-                                <Col span={12}>
-                                    <Text type="danger">负面因素：</Text>
-                                    <ul style={{ paddingLeft: 20, marginTop: 4 }}>
-                                        {negativeFactors.map((f, i) => (
-                                            <li key={i}>
-                                                <Text>{f.content}</Text>
-                                                {f.info_date && <Text type="secondary" style={{ fontSize: 12, marginLeft: 4 }}>({f.info_date})</Text>}
-                                                {f.timeliness && f.timeliness !== 'priced_in' && (
-                                                    <Tag style={{ marginLeft: 4, fontSize: 11 }} color={f.timeliness === 'high' ? 'red' : f.timeliness === 'medium' ? 'orange' : 'default'}>
-                                                        {f.timeliness === 'high' ? '高冲击' : f.timeliness === 'medium' ? '中等' : '低冲击'}
-                                                    </Tag>
-                                                )}
-                                                {f.timeliness === 'priced_in' && <Tag style={{ marginLeft: 4, fontSize: 11 }}>已定价</Tag>}
-                                            </li>
-                                        ))}
-                                    </ul>
-                                </Col>
-                            )}
-                        </Row>
-                    </>
-                )}
+                                    </>
+                                )}
 
-                {rating.error && (
-                    <Alert
-                        message="LLM 调用错误"
-                        description={rating.error}
-                        type="error"
-                        showIcon
-                        style={{ marginTop: 12 }}
-                    />
-                )}
+                                {Object.keys(dimensions).length > 0 && (
+                                    <>
+                                        <Divider orientation="left">分析维度</Divider>
+                                        <Row gutter={[8, 12]}>
+                                            {dimensions.risk_event && (
+                                                <Col span={12}>
+                                                    <Text type="secondary">事件风险：</Text>
+                                                    <div>{dimensions.risk_event}</div>
+                                                </Col>
+                                            )}
+                                            {dimensions.earnings_quality && (
+                                                <Col span={12}>
+                                                    <Text type="secondary">盈利质量：</Text>
+                                                    <div>{dimensions.earnings_quality}</div>
+                                                </Col>
+                                            )}
+                                            {dimensions.entry_timing && (
+                                                <Col span={12}>
+                                                    <Text type="secondary">进场时机：</Text>
+                                                    <div>{dimensions.entry_timing}</div>
+                                                </Col>
+                                            )}
+                                            {dimensions.technical && (
+                                                <Col span={12}>
+                                                    <Text type="secondary">技术面：</Text>
+                                                    <div>{dimensions.technical}</div>
+                                                </Col>
+                                            )}
+                                            {dimensions.fundamental && (
+                                                <Col span={12}>
+                                                    <Text type="secondary">基本面：</Text>
+                                                    <div>{dimensions.fundamental}</div>
+                                                </Col>
+                                            )}
+                                            {dimensions.event && (
+                                                <Col span={12}>
+                                                    <Text type="secondary">事件/催化剂：</Text>
+                                                    <div>{dimensions.event}</div>
+                                                </Col>
+                                            )}
+                                            {dimensions.sentiment && (
+                                                <Col span={12}>
+                                                    <Text type="secondary">情绪催化：</Text>
+                                                    <div>{dimensions.sentiment}</div>
+                                                </Col>
+                                            )}
+                                        </Row>
+                                    </>
+                                )}
+
+                                {(positiveFactors.length > 0 || negativeFactors.length > 0) && (
+                                    <>
+                                        <Divider orientation="left">关键因素</Divider>
+                                        <Row gutter={16}>
+                                            {positiveFactors.length > 0 && (
+                                                <Col span={12}>
+                                                    <Text type="success">正面因素：</Text>
+                                                    <ul style={{ paddingLeft: 20, marginTop: 4 }}>
+                                                        {positiveFactors.map((f, i) => (
+                                                            <li key={i}>
+                                                                <Text>{f.content}</Text>
+                                                                {f.info_date && <Text type="secondary" style={{ fontSize: 12, marginLeft: 4 }}>({f.info_date})</Text>}
+                                                                {f.timeliness && f.timeliness !== 'priced_in' && (
+                                                                    <Tag style={{ marginLeft: 4, fontSize: 11 }} color={f.timeliness === 'high' ? 'red' : f.timeliness === 'medium' ? 'orange' : 'default'}>
+                                                                        {f.timeliness === 'high' ? '高冲击' : f.timeliness === 'medium' ? '中等' : '低冲击'}
+                                                                    </Tag>
+                                                                )}
+                                                                {f.timeliness === 'priced_in' && <Tag style={{ marginLeft: 4, fontSize: 11 }}>已定价</Tag>}
+                                                            </li>
+                                                        ))}
+                                                    </ul>
+                                                </Col>
+                                            )}
+                                            {negativeFactors.length > 0 && (
+                                                <Col span={12}>
+                                                    <Text type="danger">负面因素：</Text>
+                                                    <ul style={{ paddingLeft: 20, marginTop: 4 }}>
+                                                        {negativeFactors.map((f, i) => (
+                                                            <li key={i}>
+                                                                <Text>{f.content}</Text>
+                                                                {f.info_date && <Text type="secondary" style={{ fontSize: 12, marginLeft: 4 }}>({f.info_date})</Text>}
+                                                                {f.timeliness && f.timeliness !== 'priced_in' && (
+                                                                    <Tag style={{ marginLeft: 4, fontSize: 11 }} color={f.timeliness === 'high' ? 'red' : f.timeliness === 'medium' ? 'orange' : 'default'}>
+                                                                        {f.timeliness === 'high' ? '高冲击' : f.timeliness === 'medium' ? '中等' : '低冲击'}
+                                                                    </Tag>
+                                                                )}
+                                                                {f.timeliness === 'priced_in' && <Tag style={{ marginLeft: 4, fontSize: 11 }}>已定价</Tag>}
+                                                            </li>
+                                                        ))}
+                                                    </ul>
+                                                </Col>
+                                            )}
+                                        </Row>
+                                    </>
+                                )}
+
+                                {rating.error && (
+                                    <Alert
+                                        message="LLM 调用错误"
+                                        description={rating.error}
+                                        type="error"
+                                        showIcon
+                                        style={{ marginTop: 12 }}
+                                    />
+                                )}
+                            </>
+                        ),
+                    },
+                    {
+                        key: 'signal',
+                        label: '信号趋势',
+                        children: (
+                            <>
+                                <div style={{ marginBottom: 12 }}>
+                                    <Row gutter={[12, 8]} align="middle">
+                                        <Col flex="auto">
+                                            <Select
+                                                style={{ width: '100%' }}
+                                                placeholder="选择信号"
+                                                options={signals.map(s => ({ value: s, label: s }))}
+                                                value={detailSignal}
+                                                onChange={(value) => {
+                                                    setDetailSignal(value);
+                                                    loadDetailSignalChart(rating.vt_symbol, value, detailDateRange);
+                                                }}
+                                            />
+                                        </Col>
+                                        <Col>
+                                            <RangePicker
+                                                value={detailDateRange}
+                                                onChange={(dates) => {
+                                                    setDetailDateRange(dates);
+                                                    if (detailSignal && dates && dates[0] && dates[1]) {
+                                                        loadDetailSignalChart(rating.vt_symbol, detailSignal, dates);
+                                                    }
+                                                }}
+                                                format="YYYY-MM-DD"
+                                            />
+                                        </Col>
+                                    </Row>
+                                </div>
+                                <Spin spinning={detailChartLoading}>
+                                    {detailChartData.length > 0 ? (
+                                        <div style={{ height: 300, width: '100%' }}>
+                                            <ResponsiveContainer width="100%" height="100%">
+                                                <LineChart data={detailChartData} margin={{ top: 5, right: 20, left: 0, bottom: 5 }}>
+                                                    <CartesianGrid strokeDasharray="3 3" />
+                                                    <XAxis dataKey="date" tick={{ fontSize: 11 }} />
+                                                    <YAxis tick={{ fontSize: 11 }} />
+                                                    <Tooltip />
+                                                    <Legend />
+                                                    {detailChartSeries.map((s, idx) => (
+                                                        <Line
+                                                            key={s.name}
+                                                            type="monotone"
+                                                            dataKey={s.name}
+                                                            stroke={signalColors[idx % signalColors.length]}
+                                                            dot={false}
+                                                            connectNulls
+                                                        />
+                                                    ))}
+                                                </LineChart>
+                                            </ResponsiveContainer>
+                                        </div>
+                                    ) : (
+                                        <Empty description={detailSignal ? "暂无数据" : "请选择信号查看趋势"} image={Empty.PRESENTED_IMAGE_SIMPLE} />
+                                    )}
+                                </Spin>
+                            </>
+                        ),
+                    },
+                    {
+                        key: 'kline',
+                        label: 'K线图',
+                        children: (
+                            <>
+                                <div style={{ marginBottom: 12 }}>
+                                    <Row gutter={[12, 8]} align="middle">
+                                        <Col flex="auto">
+                                            <RangePicker
+                                                style={{ width: '100%' }}
+                                                value={klineDateRange}
+                                                onChange={(dates) => {
+                                                    setKlineDateRange(dates);
+                                                    if (dates && dates[0] && dates[1]) {
+                                                        loadKlineData(rating.vt_symbol, dates);
+                                                    }
+                                                }}
+                                                format="YYYY-MM-DD"
+                                            />
+                                        </Col>
+                                        <Col>
+                                            <Button
+                                                type="primary"
+                                                onClick={() => loadKlineData(rating.vt_symbol, klineDateRange)}
+                                                loading={klineLoading}
+                                            >
+                                                查询
+                                            </Button>
+                                        </Col>
+                                    </Row>
+                                </div>
+                                <Spin spinning={klineLoading}>
+                                    {klineData.length > 0 ? (
+                                        <div ref={klineContainerRef} style={{ width: '100%', height: 400 }} />
+                                    ) : (
+                                        <Empty description="选择日期范围后点击查询" image={Empty.PRESENTED_IMAGE_SIMPLE} />
+                                    )}
+                                </Spin>
+                            </>
+                        ),
+                    },
+                ]} />
             </Modal>
         );
     };
@@ -814,6 +1095,7 @@ const LlmEvaluation = () => {
             dataIndex: 'date',
             key: 'date',
             width: 120,
+            render: (date) => date || '-',
         },
         {
             title: '进场建议',
@@ -847,6 +1129,7 @@ const LlmEvaluation = () => {
             dataIndex: 'reason',
             key: 'reason',
             ellipsis: true,
+            render: (reason, record) => reason || (!record.rating ? <Text type="secondary">未评估</Text> : '-'),
         },
         {
             title: '操作',

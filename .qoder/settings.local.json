@@ -1,29 +1,27 @@
 {
   "permissions": {
     "allow": [
-      "Bash(find:*)",
-      "Bash(ls:*)",
-      "Bash(nvidia-smi:*)",
-      "Bash(ps aux:*)",
-      "Bash(which qoder:*)",
       "Read(*)",
       "Glob(*)",
       "Grep(*)",
-      "Bash(cd:*)",
-      "Bash(git checkout:*)",
       "WebFetch(*)",
-      "WebFetch(www.robeco.com)",
-      "WebFetch(quantpedia.com)",
-      "WebFetch(arxiv.org)",
-      "WebFetch(github.com)",
-      "WebFetch(juejin.cn)",
-      "WebFetch(www.tradingview.com)",
-      "WebFetch(www.sciencedirect.com)",
-      "WebFetch(pubsonline.informs.org)",
-      "WebFetch(www.researchgate.net)",
+      "Bash(find:*)",
+      "Bash(ls:*)",
+      "Bash(ps aux*)",
+      "Bash(which:*)",
+      "Bash(cd:*)",
+      "Bash(git:*)",
       "Bash(tail:*)",
-      "Bash(which qodercli:*)",
-      "Bash(grep:*)"
+      "Bash(grep:*)",
+      "Bash(grep *)",
+      "Bash(echo:*)",
+      "Bash(cd:*)",
+      "Bash(ls:*)",
+      "Bash(cat *)",
+      "Bash(python:*)",
+      "Bash(ls *)",
+      "Bash(cat:*)",
+      "Bash(/home/airst/Workspace/.venv/bin/python *)"
     ]
   }
 }
