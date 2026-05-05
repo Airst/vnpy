@@ -255,6 +255,11 @@ if __name__ == "__main__":
         print("\n开始更新资金流向数据...")
         mf_manager = MoneyFlowManager()
         mf_manager.download_all()
+
+        print("\n开始更新筹码分布数据...")
+        from data_manager.ts_downloader.cyq_manager import CyqPerfManager
+        cyq_manager = CyqPerfManager()
+        cyq_manager.download_all()
         
         print("\n开始下载指数数据...")
         download_index_all()

@@ -213,6 +213,36 @@ class DataLoader:
         except Exception as e:
             print(f"加载资金流向数据失败: {e}")
         
+
+        # 7. 加载筹码分布数据 (Cyq Perf - Alpha因子)
+        print("加载筹码分布数据 (Cyq Perf)...")
+        try:
+            from data_manager.ts_downloader.cyq_manager import CyqPerfManager
+            cyq_manager = CyqPerfManager()
+            cyq_df_pd = cyq_manager.load_data(symbols, s_date_str, e_date_str)
+
+            if not cyq_df_pd.empty:
+                cyq_df = pl.from_pandas(cyq_df_pd)
+                if "datetime" in cyq_df.columns:
+                    cyq_df = cyq_df.with_columns(pl.col("datetime").cast(pl.Datetime("us")))
+
+                cols_to_drop = ["ts_code", "trade_date"]
+                cyq_df = cyq_df.drop([c for c in cols_to_drop if c in cyq_df.columns])
+
+                price_df = price_df.join(cyq_df, on=["vt_symbol", "datetime"], how="left")
+
+                cyq_cols = ["his_low", "his_high", "cost_5pct", "cost_15pct",
+                            "cost_50pct", "cost_85pct", "weight_avg"]
+                price_df = price_df.sort(["vt_symbol", "datetime"])
+                price_df = price_df.with_columns([
+                    pl.col(col).forward_fill().over("vt_symbol")
+                    for col in cyq_cols if col in price_df.columns
+                ])
+
+                print(f"筹码分布数据加载完成，维度: {price_df.shape}")
+        except Exception as e:
+            print(f"加载筹码分布数据失败: {e}")
+
         return price_df
 
     def _load_financial_data(self, symbols: List[str], start_date: str, end_date: str) -> pl.DataFrame:

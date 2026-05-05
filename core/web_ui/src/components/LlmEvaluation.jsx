@@ -27,16 +27,12 @@ const LlmEvaluation = () => {
     const filterRatingRef = useRef(filterRating);
     const pageRef = useRef(page);
     const pageSizeRef = useRef(pageSize);
+    const selectedSignalRef = useRef('ashare_mlp_signal_v9');
 
     // Signal selection
     const [signals, setSignals] = useState([]);
     const [selectedSignal, setSelectedSignal] = useState('ashare_mlp_signal_v9');
     const [signalDate, setSignalDate] = useState(null);
-
-    // Keep refs updated
-    useEffect(() => { filterRatingRef.current = filterRating; }, [filterRating]);
-    useEffect(() => { pageRef.current = page; }, [page]);
-    useEffect(() => { pageSizeRef.current = pageSize; }, [pageSize]);
 
     // Stock search related state
     const [searchOptions, setSearchOptions] = useState([]);
@@ -61,6 +57,12 @@ const LlmEvaluation = () => {
     const klineContainerRef = useRef(null);
     const klineChartRef = useRef(null);
 
+    // Keep refs updated
+    useEffect(() => { filterRatingRef.current = filterRating; }, [filterRating]);
+    useEffect(() => { pageRef.current = page; }, [page]);
+    useEffect(() => { pageSizeRef.current = pageSize; }, [pageSize]);
+    useEffect(() => { selectedSignalRef.current = selectedSignal; }, [selectedSignal]);
+
     // Toggle filter when clicking summary tags
     const handleFilterClick = (ratingType) => {
         const newFilter = filterRating === ratingType ? null : ratingType;
@@ -70,7 +72,7 @@ const LlmEvaluation = () => {
     };
 
     // Load all ratings with pagination
-    const loadRatings = async (pageNum, ps, filter) => {
+    const loadRatings = async (pageNum, ps, filter, signalName) => {
         setLoading(true);
         try {
             const params = new URLSearchParams({
@@ -80,10 +82,11 @@ const LlmEvaluation = () => {
             if (filter) {
                 params.append('rating_filter', filter);
             }
-            if (selectedSignal) {
-                params.append('signal_name', selectedSignal);
+            const sig = signalName ?? selectedSignal;
+            if (sig) {
+                params.append('signal_name', sig);
             }
-            const res = await fetch(`/api/llm_ratings/all?${params}`);
+            const res = await fetch(`/api/llm_ratings?${params}`);
             const data = await res.json();
             setRatings(data.ratings || []);
             setTotal(data.total || 0);
@@ -146,7 +149,7 @@ const LlmEvaluation = () => {
         if (isSearchMode && searchedSymbol) {
             handleStockSelect(searchedSymbol);
         } else {
-            loadRatings(pageRef.current, pageSizeRef.current, filterRatingRef.current);
+            loadRatings(pageRef.current, pageSizeRef.current, filterRatingRef.current, selectedSignalRef.current);
         }
     };
 
@@ -221,7 +224,13 @@ const LlmEvaluation = () => {
 
         setLoading(true);
         try {
-            const res = await fetch(`/api/llm_ratings/stock/${value}`);
+            const params = new URLSearchParams({
+                vt_symbol: value,
+            });
+            if (selectedSignal) {
+                params.append('signal_name', selectedSignal);
+            }
+            const res = await fetch(`/api/llm_ratings?${params}`);
             if (res.ok) {
                 const data = await res.json();
                 setRatings(data.history || []);
@@ -480,16 +489,21 @@ const LlmEvaluation = () => {
         setBatchStatus({ running: true, total: 0, completed: 0, failed: 0, results: [] });
         
         try {
-            const res = await fetch('/api/llm_ratings/reevaluate_failed', { method: 'POST' });
+            const params = new URLSearchParams();
+            if (selectedSignal) {
+                params.append('signal_name', selectedSignal);
+            }
+            const url = `/api/llm_ratings/reevaluate_failed?${params}`;
+            const res = await fetch(url, { method: 'POST' });
             const data = await res.json();
             
             if (data.count === 0) {
-                message.info('没有评估失败的股票');
+                message.info('没有需要评估的股票');
                 setBatchStatus(null);
                 return;
             }
             
-            message.success(`批量评估任务已提交，共 ${data.count} 只股票`);
+            message.success(`批量评估任务已提交，共 ${data.count} 只股票（失败 ${data.failed} + 未评估 ${data.unrated}）`);
             setBatchStatus({ running: true, total: data.count, completed: 0, failed: 0, results: [] });
             startBatchPolling();
         } catch (error) {
@@ -646,7 +660,13 @@ const LlmEvaluation = () => {
     const handleRefreshDetail = async (vt_symbol) => {
         setTaskStatus(null);
         try {
-            const res = await fetch(`/api/llm_ratings/stock/${vt_symbol}`);
+            const params = new URLSearchParams({
+                vt_symbol,
+            });
+            if (selectedSignal) {
+                params.append('signal_name', selectedSignal);
+            }
+            const res = await fetch(`/api/llm_ratings?${params}`);
             if (res.ok) {
                 const data = await res.json();
                 const latest = data.history[data.history.length - 1];
@@ -1185,8 +1205,8 @@ const LlmEvaluation = () => {
                             </Button>
                         </Popconfirm>
                         <Popconfirm
-                            title="重新评估所有失败股票"
-                            description="将对所有评估失败的股票重新执行 LLM 评估，是否继续？"
+                            title="重评失败 & 未评估股票"
+                            description="将对所有评估失败 + 信号中未评估的股票重新执行 LLM 评估，是否继续？"
                             onConfirm={handleBatchReevaluate}
                             okText="确认"
                             cancelText="取消"
@@ -1197,7 +1217,7 @@ const LlmEvaluation = () => {
                                 loading={batchStatus?.running}
                                 disabled={batchStatus?.running}
                             >
-                                批量重评失败股票
+                                批量重评失败&未评估股票
                             </Button>
                         </Popconfirm>
                     </div>
@@ -1212,10 +1232,13 @@ const LlmEvaluation = () => {
                         value={selectedSignal}
                         onChange={(value) => {
                             setSelectedSignal(value);
-                            // Reload ratings with new signal scores
                             setFilterRating(null);
                             setPage(1);
-                            loadRatings(1, pageSizeRef.current, null);
+                            if (isSearchMode && searchedSymbol) {
+                                handleStockSelect(searchedSymbol);
+                            } else {
+                                loadRatings(1, pageSizeRef.current, null, value);
+                            }
                         }}
                     />
                     <Select
@@ -1230,6 +1253,14 @@ const LlmEvaluation = () => {
                         allowClear
                         value={searchedSymbol}
                     />
+                    <Button 
+                        type="primary"
+                        icon={<ReloadOutlined />}
+                        loading={loading}
+                        onClick={handleRefreshList}
+                    >
+                        查询
+                    </Button>
                 </div>
 
                 {signalDate && (
@@ -1285,15 +1316,6 @@ const LlmEvaluation = () => {
                                 </Button>
                             </div>
                         )}
-                        <div style={{ marginBottom: 16, display: 'flex', justifyContent: 'flex-end' }}>
-                            <Button 
-                                size="small" 
-                                icon={<ReloadOutlined />} 
-                                onClick={handleRefreshList}
-                            >
-                                刷新列表
-                            </Button>
-                        </div>
                         <Table
                             columns={columns}
                             dataSource={isSearchMode ? ratings : ratings}

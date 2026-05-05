@@ -1,6 +1,6 @@
 DataFrame 列信息
 ============================================================
-总列数：88
+总列数：95
 ============================================================
 
 序号         列名                                      
@@ -93,3 +93,10 @@ DataFrame 列信息
 85         sell_elg_amount                         
 86         net_mf_vol                              
 87         net_mf_amount                           
+88         his_low                                 
+89         his_high                                
+90         cost_5pct                               
+91         cost_15pct                              
+92         cost_50pct                              
+93         cost_85pct                              
+94         weight_avg                              

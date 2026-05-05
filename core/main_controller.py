@@ -186,62 +186,88 @@ def search_symbols(keyword: str):
 
 # --- LLM Rating API ---
 @app.get("/api/llm_ratings")
-def get_llm_ratings():
-    """Get list of available LLM rating dates (aggregated from per-stock files)."""
+def get_llm_ratings(
+    vt_symbol: str = "",
+    page: int = 1,
+    page_size: int = 20,
+    rating_filter: str = "",
+    signal_name: str = ""
+):
+    """Get LLM ratings.
+    
+    If vt_symbol is provided: return single stock's rating history.
+    Otherwise: return paginated list of all ratings with summary.
+    """
+    # Single stock mode
+    if vt_symbol:
+        return _get_single_stock_rating(vt_symbol, signal_name)
+    
+    # List mode with pagination
+    return _get_all_ratings_list(page, page_size, rating_filter, signal_name)
+
+
+def _get_single_stock_rating(vt_symbol: str, signal_name: str = ""):
+    """Get rating history for a single stock."""
     try:
-        from pathlib import Path
-        import json
-        from collections import defaultdict
+        # Security: prevent path traversal
+        if ".." in vt_symbol or "/" in vt_symbol or "\\" in vt_symbol:
+            raise HTTPException(status_code=400, detail="Invalid symbol")
         
         ratings_dir = PROJECT_ROOT / "core" / "alpha_db" / "llm_tasks"
-        if not ratings_dir.exists():
-            return {"files": []}
+        filepath = ratings_dir / f"{vt_symbol}.json"
         
-        # Aggregate dates from per-stock files
-        date_stocks = defaultdict(list)
-        for f in ratings_dir.glob("*.json"):
-            if f.name.startswith("ratings_"):  # Skip legacy files
-                continue
+        if not filepath.exists():
+            raise HTTPException(status_code=404, detail=f"No rating found for: {vt_symbol}")
+        
+        with open(filepath, "r", encoding="utf-8") as f:
+            history = json.load(f)
+        
+        if not isinstance(history, list) or not history:
+            raise HTTPException(status_code=404, detail=f"No rating found for: {vt_symbol}")
+        
+        # Attach signal scores if signal_name is provided
+        if signal_name:
             try:
-                with open(f, "r", encoding="utf-8") as fp:
-                    history = json.load(fp)
-                if isinstance(history, list) and history:
-                    latest = history[-1]
-                    date_str = latest.get("date", "")
-                    if date_str:
-                        date_stocks[date_str].append({
-                            "symbol": latest.get("vt_symbol", ""),
-                            "rating": latest.get("rating", "neutral"),
-                            "confidence": latest.get("confidence", 0.0),
-                        })
+                signal_df = core_service.lab.load_signal(signal_name)
+                if signal_df is not None and not signal_df.is_empty():
+                    # Build score map from all dates
+                    score_map = {}
+                    for row in signal_df.iter_rows(named=True):
+                        date_str = row.get('datetime')
+                        if date_str:
+                            if hasattr(date_str, 'strftime'):
+                                date_str = date_str.strftime("%Y-%m-%d")
+                            else:
+                                date_str = str(date_str)[:10]  # YYYY-MM-DD
+                            score = row.get('final_signal') or row.get('total_score') or 0
+                            key = f"{vt_symbol}_{date_str}"
+                            score_map[key] = score
+                    
+                    # Attach scores to history entries
+                    for entry in history:
+                        entry_date = entry.get("date", "")
+                        key = f"{vt_symbol}_{entry_date}"
+                        entry['score'] = score_map.get(key)
             except Exception:
-                pass
+                pass  # Signal loading is optional
         
-        # Build file list (one entry per date)
-        files = []
-        for date_str in sorted(date_stocks.keys(), reverse=True):
-            stocks = date_stocks[date_str]
-            label = f"{date_str} ({len(stocks)} stocks)"
-            files.append({
-                "filename": date_str,
-                "label": label,
-                "date": date_str,
-                "stock_count": len(stocks),
-            })
+        latest = history[-1]
+        date_str = latest.get("date", "")
         
-        return {"files": files}
+        return {
+            "vt_symbol": vt_symbol,
+            "date": date_str,
+            "latest": latest,
+            "history": history,
+        }
+    except HTTPException:
+        raise
     except Exception as e:
-        logger.error(f"Error listing LLM ratings: {e}")
-        return {"files": []}
+        raise HTTPException(status_code=500, detail=str(e))
 
-@app.get("/api/llm_ratings/all")
-def get_all_ratings(page: int = 1, page_size: int = 20, rating_filter: str = "", signal_name: str = ""):
-    """Get all stock ratings with server-side pagination.
-    
-    Stock list = signal top 30 + historically evaluated stocks (deduplicated).
-    Stocks from signal without evaluations are shown as empty entries.
-    Sorted by latest signal score descending.
-    """
+
+def _get_all_ratings_list(page: int, page_size: int, rating_filter: str, signal_name: str):
+    """Get all stock ratings with server-side pagination."""
     try:
         ratings_dir = PROJECT_ROOT / "core" / "alpha_db" / "llm_tasks"
         
@@ -360,73 +386,74 @@ def get_all_ratings(page: int = 1, page_size: int = 20, rating_filter: str = "",
             "signal_date": None,
         }
 
-@app.get("/api/llm_ratings/{filename}")
-def get_llm_rating_file(filename: str):
-    """Get all ratings for a specific date (aggregated from per-stock files)."""
-    try:
-        import json
-        import polars as pl
-        from datetime import datetime
-        
-        # Security: prevent path traversal
-        if ".." in filename or "/" in filename or "\\" in filename:
-            raise HTTPException(status_code=400, detail="Invalid filename")
-        
-        ratings_dir = PROJECT_ROOT / "core" / "alpha_db" / "llm_tasks"
-        if not ratings_dir.exists():
-            raise HTTPException(status_code=404, detail=f"Rating directory not found")
-        
-        # Collect all stocks for this date
-        rating_list = []
-        for f in ratings_dir.glob("*.json"):
-            if f.name.startswith("ratings_"):  # Skip legacy files
-                continue
-            try:
-                with open(f, "r", encoding="utf-8") as fp:
-                    history = json.load(fp)
-                if isinstance(history, list) and history:
-                    # Find entry matching the date (use latest if date matches, or find closest)
-                    for entry in reversed(history):
-                        if entry.get("date") == filename:
-                            rating_list.append(entry)
-                            break
-            except Exception:
-                pass
-        
-        if not rating_list:
-            raise HTTPException(status_code=404, detail=f"No ratings found for date: {filename}")
-        
-        # Try to attach signal scores
-        try:
-            signal_name = "ashare_mlp_signal_v9"  # Default
-            signal_df = core_service.lab.load_signal(signal_name)
-            if signal_df is not None and not signal_df.is_empty():
-                try:
-                    target_dt = datetime.strptime(filename, "%Y-%m-%d")
-                    day_signals = signal_df.filter(pl.col("datetime") == target_dt)
-                    score_map = {}
-                    for row in day_signals.iter_rows(named=True):
-                        score = row.get("final_signal") or row.get("total_score") or 0
-                        score_map[row["vt_symbol"]] = score
-                    
-                    for r in rating_list:
-                        r["score"] = score_map.get(r["vt_symbol"], None)
-                except Exception:
-                    pass
-        except Exception:
-            pass  # Signal loading is optional
-        
-        return {
-            "date": filename,
-            "file": filename,
-            "ratings": rating_list,
-        }
-    except HTTPException:
-        raise
-    except Exception as e:
-        import traceback
-        traceback.print_exc()
-        raise HTTPException(status_code=500, detail=str(e))
+# Deprecated: This endpoint is no longer used
+# @app.get("/api/llm_ratings/{filename}")
+# def get_llm_rating_file(filename: str):
+#     """Get all ratings for a specific date (aggregated from per-stock files)."""
+#     try:
+#         import json
+#         import polars as pl
+#         from datetime import datetime
+#         
+#         # Security: prevent path traversal
+#         if ".." in filename or "/" in filename or "\\" in filename:
+#             raise HTTPException(status_code=400, detail="Invalid filename")
+#         
+#         ratings_dir = PROJECT_ROOT / "core" / "alpha_db" / "llm_tasks"
+#         if not ratings_dir.exists():
+#             raise HTTPException(status_code=404, detail=f"Rating directory not found")
+#         
+#         # Collect all stocks for this date
+#         rating_list = []
+#         for f in ratings_dir.glob("*.json"):
+#             if f.name.startswith("ratings_"):  # Skip legacy files
+#                 continue
+#             try:
+#                 with open(f, "r", encoding="utf-8") as fp:
+#                     history = json.load(fp)
+#                 if isinstance(history, list) and history:
+#                     # Find entry matching the date (use latest if date matches, or find closest)
+#                     for entry in reversed(history):
+#                         if entry.get("date") == filename:
+#                             rating_list.append(entry)
+#                             break
+#             except Exception:
+#                 pass
+#         
+#         if not rating_list:
+#             raise HTTPException(status_code=404, detail=f"No ratings found for date: {filename}")
+#         
+#         # Try to attach signal scores
+#         try:
+#             signal_name = "ashare_mlp_signal_v9"  # Default
+#             signal_df = core_service.lab.load_signal(signal_name)
+#             if signal_df is not None and not signal_df.is_empty():
+#                 try:
+#                     target_dt = datetime.strptime(filename, "%Y-%m-%d")
+#                     day_signals = signal_df.filter(pl.col("datetime") == target_dt)
+#                     score_map = {}
+#                     for row in day_signals.iter_rows(named=True):
+#                         score = row.get("final_signal") or row.get("total_score") or 0
+#                         score_map[row["vt_symbol"]] = score
+#                     
+#                     for r in rating_list:
+#                         r["score"] = score_map.get(r["vt_symbol"], None)
+#                 except Exception:
+#                     pass
+#         except Exception:
+#             pass  # Signal loading is optional
+#         
+#         return {
+#             "date": filename,
+#             "file": filename,
+#             "ratings": rating_list,
+#         }
+#     except HTTPException:
+#         raise
+#     except Exception as e:
+#         import traceback
+#         traceback.print_exc()
+#         raise HTTPException(status_code=500, detail=str(e))
 
 # --- LLM Re-evaluation Background Task ---
 _batch_task_status: Dict = {"running": False, "total": 0, "completed": 0, "failed": 0, "results": []}
@@ -584,11 +611,15 @@ async def trigger_llm_reevaluate(vt_symbol: str, score: float = 0.0, check_date:
 
 
 @app.post("/api/llm_ratings/reevaluate_failed")
-async def trigger_batch_reevaluate(check_date: Optional[str] = None):
-    """Trigger background batch re-evaluation for all failed stocks.
+async def trigger_batch_reevaluate(signal_name: str = "", check_date: Optional[str] = None):
+    """Trigger background batch re-evaluation for failed + unrated stocks.
     
-    Scans all per-stock files, finds those with error in latest entry,
-    and submits them for batch re-evaluation.
+    Finds:
+    1. Stocks with error in latest rating entry (failed)
+    2. Stocks from signal top list that have no rating file at all (unrated)
+    
+    If signal_name not provided, uses the latest selected signal from request query param.
+    Falls back to no unrated scanning if signal loading fails.
     """
     if check_date is None:
         check_date = datetime.now().strftime("%Y-%m-%d")
@@ -598,41 +629,70 @@ async def trigger_batch_reevaluate(check_date: Optional[str] = None):
         if _batch_task_status.get("running"):
             raise HTTPException(status_code=409, detail="批量评估任务正在执行中")
 
-    # Find failed stocks
     ratings_dir = PROJECT_ROOT / "core" / "alpha_db" / "llm_tasks"
+
+    # Step 1: Find failed stocks
+    rated_symbols = set()
     failed_symbols = []
 
-    for f in ratings_dir.glob("*.json"):
-        if f.name.startswith("ratings_"):
-            continue
+    if ratings_dir.exists():
+        for f in ratings_dir.glob("*.json"):
+            if f.name.startswith("ratings_"):
+                continue
+            try:
+                with open(f, "r", encoding="utf-8") as fp:
+                    history = json.load(fp)
+                if isinstance(history, list) and history:
+                    latest = history[-1]
+                    sym = latest.get("vt_symbol", f.stem)
+                    rated_symbols.add(sym)
+                    if latest.get("error"):
+                        failed_symbols.append({
+                            "vt_symbol": sym,
+                            "score": latest.get("score", 0.0),
+                        })
+            except Exception:
+                pass
+
+    # Step 2: Find unrated stocks from signal top list
+    unrated_symbols = []
+    if signal_name:
         try:
-            with open(f, "r", encoding="utf-8") as fp:
-                history = json.load(fp)
-            if isinstance(history, list) and history:
-                latest = history[-1]
-                if latest.get("error"):
-                    failed_symbols.append({
-                        "vt_symbol": latest.get("vt_symbol"),
-                        "score": latest.get("score", 0.0),
-                    })
+            signal_df = core_service.lab.load_signal(signal_name)
+            if signal_df is not None and not signal_df.is_empty():
+                latest_dt = signal_df['datetime'].max()
+                latest_df = signal_df.filter(pl.col('datetime') == latest_dt)
+                for row in latest_df.iter_rows(named=True):
+                    score = row.get('final_signal') or row.get('total_score') or 0
+                    sym = row['vt_symbol']
+                    if sym not in rated_symbols:
+                        unrated_symbols.append({
+                            "vt_symbol": sym,
+                            "score": score,
+                        })
         except Exception:
             pass
 
-    if not failed_symbols:
-        return {"message": "没有评估失败的股票", "count": 0}
+    # Step 3: Combine failed + unrated
+    all_symbols = failed_symbols + unrated_symbols
+
+    if not all_symbols:
+        return {"message": "没有需要评估的股票", "count": 0, "failed": len(failed_symbols), "unrated": len(unrated_symbols)}
 
     # Launch background batch task
     thread = threading.Thread(
         target=_run_batch_reevaluate,
-        args=(failed_symbols, check_date),
+        args=(all_symbols, check_date),
         daemon=True,
     )
     thread.start()
 
     return {
-        "message": f"批量评估任务已提交，共 {len(failed_symbols)} 只股票",
-        "count": len(failed_symbols),
-        "symbols": [s["vt_symbol"] for s in failed_symbols],
+        "message": f"批量评估任务已提交，共 {len(all_symbols)} 只股票（失败 {len(failed_symbols)} + 未评估 {len(unrated_symbols)}）",
+        "count": len(all_symbols),
+        "failed": len(failed_symbols),
+        "unrated": len(unrated_symbols),
+        "symbols": [s["vt_symbol"] for s in all_symbols],
         "check_date": check_date,
     }
 
@@ -705,39 +765,6 @@ def get_llm_task_status(vt_symbol: str):
     return status
 
 
-@app.get("/api/llm_ratings/stock/{vt_symbol}")
-def get_stock_rating(vt_symbol: str):
-    """Get rating history for a single stock."""
-    try:
-        # Security: prevent path traversal
-        if ".." in vt_symbol or "/" in vt_symbol or "\\" in vt_symbol:
-            raise HTTPException(status_code=400, detail="Invalid symbol")
-        
-        ratings_dir = PROJECT_ROOT / "core" / "alpha_db" / "llm_tasks"
-        filepath = ratings_dir / f"{vt_symbol}.json"
-        
-        if not filepath.exists():
-            raise HTTPException(status_code=404, detail=f"No rating found for: {vt_symbol}")
-        
-        with open(filepath, "r", encoding="utf-8") as f:
-            history = json.load(f)
-        
-        if not isinstance(history, list) or not history:
-            raise HTTPException(status_code=404, detail=f"No rating found for: {vt_symbol}")
-        
-        latest = history[-1]
-        date_str = latest.get("date", "")
-        
-        return {
-            "vt_symbol": vt_symbol,
-            "date": date_str,
-            "latest": latest,
-            "history": history,
-        }
-    except HTTPException:
-        raise
-    except Exception as e:
-        raise HTTPException(status_code=500, detail=str(e))
 
 
 @app.delete("/api/llm_ratings/stock/{vt_symbol}")

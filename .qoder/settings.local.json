@@ -18,10 +18,11 @@
       "Bash(cd:*)",
       "Bash(ls:*)",
       "Bash(cat *)",
-      "Bash(python:*)",
+      "Bash(python *)",
       "Bash(ls *)",
       "Bash(cat:*)",
-      "Bash(/home/airst/Workspace/.venv/bin/python *)"
+      "Bash(/home/airst/Workspace/.venv/bin/python *)",
+      "Bash(/home/airst/Workspace/.venv/bin/python -c \"\nfrom core.alpha.data_loader import DataLoader\nfrom core.alpha.engine import AlphaEngine\nfrom vnpy.alpha.lab import AlphaLab\n\n# Test loading data\nlab = AlphaLab\\('core/alpha_db'\\)\nloader = DataLoader\\(lab\\)\nsymbols = ['000001.SZSE', '600000.SSE']  # Just 2 symbols for testing\ntry:\n    df = loader.load_ashare_data\\(symbols, '20240101', '20241231'\\)\n    print\\(f'Success! Shape: {df.shape}'\\)\n    print\\(f'Columns: {df.columns}'\\)\n    # Check if cyq columns exist\n    cyq_cols = ['his_low', 'his_high', 'cost_5pct', 'cost_50pct', 'cost_85pct', 'weight_avg']\n    for col in cyq_cols:\n        if col in df.columns:\n            print\\(f'{col}: {df[col].is_null\\(\\).sum\\(\\)} nulls'\\)\n        else:\n            print\\(f'{col}: MISSING'\\)\nexcept Exception as e:\n    import traceback\n    traceback.print_exc\\(\\)\n\" 2>&1 | tail -50)"
     ]
   }
 }

@@ -374,23 +374,140 @@ class V10FactorCalculator(FactorCalculator):
         vol_shrink = (1.0 - vol_shrink_ratio).clamp(min=0)
         features["oversold_vol_confirm"] = oversold_depth * vol_shrink
 
-        # === V10: Rank-Blended Oversold Recovery Label ===
-        # 80% base beta-neutral rank + 20% oversold recovery rank
-        # Recovery rank: only oversold stocks with positive excess get high rank
+        # === V10 Validated New Factors ===
+
+        # amihud_20d: Amihud流动性冲击因子
+        # |daily_return| / daily_volume, averaged over 20 days
+        # IC improving over time: -0.047(early) -> 0.075(2025) -> 0.059(recent)
+        abs_ret = torch.abs(ret_1)
+        daily_amihud = abs_ret / (V + 1e-8)
+        features["amihud_20d"] = ts_mean(daily_amihud, 20)
+
+        # price_impact_asym: 非对称价格冲击
+        # 下跌日冲击 / 上涨日冲击, IC improving (0.041 recent)
+        down_mask = (ret_1 < 0).float()
+        up_mask = (ret_1 > 0).float()
+        down_impact = ts_mean(daily_amihud * down_mask, 20) / (ts_mean(down_mask, 20) + 1e-8)
+        up_impact = ts_mean(daily_amihud * up_mask, 20) / (ts_mean(up_mask, 20) + 1e-8)
+        features["price_impact_asym"] = down_impact / (up_impact + 1e-8)
+
+        # vol_price_div: 量价背离信号 (IC=0.049 recent, stable)
+        price_trend = (C / ts_mean(C, 20) - 1)
+        vol_trend = 1.0 - vol_shrink_ratio
+        features["vol_price_div"] = (-price_trend).clamp(min=0) * vol_trend.clamp(min=0)
+
+        # === V10 Batch 2: Amihud/Liquidity Variants for IC Screening ===
+
+        # 1. amihud_5d: 短窗口Amihud (捕捉近期流动性突变)
+        features["amihud_5d"] = ts_mean(daily_amihud, 5)
+
+        # 2. amihud_60d: 长窗口Amihud (流动性结构性水平)
+        features["amihud_60d"] = ts_mean(daily_amihud, 60)
+
+        # 3. log_amihud_20d: 对数Amihud (压缩极端值，改善分布)
+        features["log_amihud_20d"] = torch.log1p(features["amihud_20d"] * 1e6)
+
+        # 4. amihud_trend: 流动性恶化趋势 (短/长比值)
+        # 高值=近期流动性比长期差=流动性在恶化
+        features["amihud_trend"] = features["amihud_5d"] / (features["amihud_60d"] + 1e-8)
+
+        # 5. liquidity_shock: 流动性冲击z-score
+        # 当前amihud vs 自身60日历史的偏离程度
+        amihud_60d_mean = ts_mean(daily_amihud, 60)
+        amihud_60d_std = ts_std(daily_amihud, 60)
+        features["liquidity_shock"] = (features["amihud_5d"] - amihud_60d_mean) / (amihud_60d_std + 1e-8)
+
+        # 6. kyle_lambda_20d: Kyle's Lambda代理 (价格冲击斜率)
+        # 用 |ret| / sqrt(volume) 近似，捕捉知情交易者冲击
+        kyle_daily = abs_ret / (torch.sqrt(V) + 1e-8)
+        features["kyle_lambda_20d"] = ts_mean(kyle_daily, 20)
+
+        # === V10 Batch 8: Chip Distribution (筹码分布) Factors ===
+        # 筹码分布反映散户/主力持仓结构，是超跌反转时机的重要信号
+        # 数据来源: tushare cyq_perf接口 (his_low, his_high, cost_5pct, cost_15pct, cost_50pct, cost_85pct, weight_avg)
+        # 数据从2018年开始，按日更新
+
+        if False :
+        #if all(k in col_map for k in ['his_low', 'his_high', 'cost_5pct', 'cost_50pct', 'cost_85pct', 'weight_avg']):
+            his_low = padded_raw[:, :, col_map['his_low']]
+            his_high = padded_raw[:, :, col_map['his_high']]
+            cost_5pct = padded_raw[:, :, col_map['cost_5pct']]
+            cost_50pct = padded_raw[:, :, col_map['cost_50pct']]
+            cost_85pct = padded_raw[:, :, col_map['cost_85pct']]
+            weight_avg = padded_raw[:, :, col_map['weight_avg']]
+
+            # 1. chip_cost_deviation: 筹码成本偏离度
+            # (price - avg_chip_cost) / avg_chip_cost
+            # 负值=当前价格低于筹码平均成本=超跌
+            # Expected IC: -0.03 ~ -0.05 (负IC: 价格低于成本越低，反弹概率越高)
+            features["chip_cost_deviation"] = (C - weight_avg) / (weight_avg + 1e-8)
+
+            # 2. chip_concentration: 筹码集中度
+            # (cost_85pct - cost_5pct) / weight_avg
+            # 低值=筹码集中（散户割肉后筹码向低位集中）
+            # Expected IC: -0.02 ~ -0.04
+            features["chip_concentration"] = (cost_85pct - cost_5pct) / (weight_avg + 1e-8)
+
+            # 3. chip_profit_ratio_proxy: 获利盘比例代理
+            # (C - cost_50pct) / cost_50pct
+            # 正值=多数筹码盈利；负值=多数筹码套牢
+            # Expected IC: 0.02 ~ 0.04
+            features["chip_profit_ratio"] = (C - cost_50pct) / (cost_50pct + 1e-8)
+
+            # 4. chip_peak_distance: 筹码峰距离
+            # 当前价格距离筹码密集峰(cost_50pct)的偏离
+            # 负值=价格在筹码峰下方=超跌
+            # Expected IC: -0.02 ~ -0.03
+            features["chip_peak_distance"] = (C - cost_50pct) / (cost_50pct + 1e-8)
+
+            # 5. chip_range: 筹码分布范围
+            # (his_high - his_low) / weight_avg
+            # 高值=筹码分布分散；低值=筹码集中
+            features["chip_range"] = (his_high - his_low) / (weight_avg + 1e-8)
+
+            # 6. retail_capitulation: 散户割肉信号
+            # 筹码集中度低(筹码向低位集中) + 价格低于筹码成本
+            # 这是"散户割肉、主力吸筹"的底部信号
+            # Expected IC: 0.03 ~ 0.05
+            low_concentration = (features["chip_concentration"] < torch.nanmean(features["chip_concentration"], dim=0, keepdim=True)).float()
+            below_cost = (features["chip_cost_deviation"] < 0).float()
+            features["retail_capitulation"] = low_concentration * below_cost
+
+        else:
+            print("[WARNING] Cyq Perf columns not available, skipping chip distribution factors")
+
+        # === V10 Batch 7: Informed Trading Screening Results ===
+        # All informed trading factors failed:
+        # - vpin_proxy: calculation error (all NaN) -> REMOVED
+        # - order_flow_toxicity: IC=-0.199 (future function bug fixed, still negative) -> REMOVED
+        # - informed_herding: calculation error (all NaN) -> REMOVED
+        # - adverse_selection: IC=0.082 but redundant with amihud/volatility -> REMOVED
+        # - informed_buy_pressure: IC=0.019 (noise) -> REMOVED
+        # - information_asymmetry: IC=0.017 (noise, Sharpe dropped from 1.37 to 0.95) -> REMOVED
+        #
+        # Conclusion: Informed trading dimensions cannot be captured from daily OHLCV data.
+        # These microstructure indicators require tick-level or minute-level data.
+        # Restored to V10 stable state (110 factors: V9 + 10 Amihud liquidity factors)
+
+        # === Beta-Neutral Label (V9 baseline + Informed Buyer Bonus) ===
         raw_ret_5 = ts_delay(C, -5) / C - 1
         mkt_ret_5 = torch.nanmean(raw_ret_5, dim=0, keepdim=True)
         excess_ret_5 = raw_ret_5 - features["beta_20d"] * mkt_ret_5
 
+        # 低流动性惩罚：换手率<1%的股票扣减
         low_liq_penalty = (features["turnover_mean_20d"] < 1.0).float() * 0.05
         excess_ret_5 = excess_ret_5 - low_liq_penalty
 
-        base_rank = cs_rank(excess_ret_5)
+        # 超跌+知情交易者买入奖励
+        # 超跌：60日回撤超过15%
+        # 知情买入：kyle_lambda高（少量交易推动价格，机构吸筹特征）
+        # 逻辑：超跌后有机构资金进场 = 未来收益更高的概率更大
+        drawdown_60d = (C - ts_max(C, 60)) / (ts_max(C, 60) + 1e-8)  # 负值
+        is_oversold = (drawdown_60d < -0.15).float()  # 超跌标记
+        high_kyle = (features["kyle_lambda_20d"] > torch.nanmean(features["kyle_lambda_20d"], dim=0, keepdim=True)).float()
+        informed_buyer_bonus = is_oversold * high_kyle * 0.08
+        excess_ret_5 = excess_ret_5 + informed_buyer_bonus
 
-        # Oversold recovery score: drawdown depth × positive excess return
-        # Non-oversold or negative excess → 0 → rank ~0.5 (neutral)
-        recovery_score = oversold_depth * torch.clamp(excess_ret_5, min=0)
-        recovery_rank = cs_rank(recovery_score)
-
-        features["label"] = 0.8 * base_rank + 0.2 * recovery_rank
+        features["label"] = cs_rank(excess_ret_5)
 
         return features

@@ -203,22 +203,16 @@ class MLPSignals:
                 
         else:
             # Full Rolling Mode
-            print(f"[MLPSignals] Force Retrain Mode: Executing {len(tasks)} windows with {self.n_jobs} threads...")
-            with concurrent.futures.ThreadPoolExecutor(max_workers=self.n_jobs) as executor:
-                # Submit all tasks
-                future_to_task = {
-                    executor.submit(self._train_and_predict_window, dataset_df, t, lab): t 
-                    for t in tasks
-                }
-                
-                for future in tqdm(concurrent.futures.as_completed(future_to_task), total=len(tasks)):
-                    task = future_to_task[future]
-                    try:
-                        result = future.result()
-                        if result is not None:
-                            all_predictions.append(result)
-                    except Exception as exc:
-                        print(f"[MLPSignals] Task {task['ps_str']} generated an exception: {exc}")
+            print(f"[MLPSignals] Force Retrain Mode: Executing {len(tasks)} windows sequentially...")
+            for task in tqdm(tasks, total=len(tasks)):
+                try:
+                    result = self._train_and_predict_window(dataset_df, task, lab)
+                    if result is not None:
+                        all_predictions.append(result)
+                except Exception as exc:
+                    print(f"[MLPSignals] Task {task['ps_str']} generated an exception: {exc}")
+                    import traceback
+                    traceback.print_exc()
 
         # 7. Concatenate and Post-process
         if not all_predictions:
@@ -322,16 +316,17 @@ class MLPSignals:
         dataset.add_processor("learn", self._clean_label)
         dataset.process_data()
         
-        # Train Model
-        model = self._train_model(dataset)
-        
-        if model and save_model:
-            self._save_model(lab, model, ps_str, pe_str)
-        
+        model = None
         result_df = None
-        if model:
-            # Predict
-            try:
+        try:
+            # Train Model
+            model = self._train_model(dataset)
+            
+            if model and save_model:
+                self._save_model(lab, model, ps_str, pe_str)
+            
+            if model:
+                # Predict
                 preds = model.predict(dataset, Segment.TEST)
                 meta = dataset.fetch_infer(Segment.TEST).select(["datetime", "vt_symbol"])
                 
@@ -340,17 +335,24 @@ class MLPSignals:
                     result_df = meta
                 else:
                     print(f"[MLPSignals] Mismatch in prediction length: {len(preds)} vs {len(meta)}")
-            except Exception as e:
-                print(f"[MLPSignals] Prediction failed for window {ps_str}: {e}")
-        
-        # === Memory Cleanup ===
-        # Explicitly delete heavy objects to prevent memory leak across windows
-        del model
-        del dataset
-        
-        # Force garbage collection
-        import gc
-        gc.collect()
+        except Exception as e:
+            print(f"[MLPSignals] Prediction/Training failed for window {ps_str}: {e}")
+            import traceback
+            traceback.print_exc()
+        finally:
+            # === Memory Cleanup ===
+            # Explicitly delete heavy objects to prevent memory leak across windows
+            if model is not None:
+                del model
+            if 'dataset' in locals() and dataset is not None:
+                del dataset
+            
+            # Force garbage collection and empty CUDA cache
+            import gc
+            gc.collect()
+            import torch
+            if torch.cuda.is_available():
+                torch.cuda.empty_cache()
                 
         return result_df
     
