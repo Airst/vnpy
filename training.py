@@ -22,6 +22,7 @@ from data_manager.ts_downloader.stock_info_manager import StockInfoManager
 from data_manager.ts_downloader.concept_manager import ConceptManager
 from data_manager.ts_downloader.fina_indicator_manager import FinaIndicatorManager
 from data_manager.ts_downloader.moneyflow_manager import MoneyFlowManager
+from data_manager.ts_downloader.namechange_manager import NamechangeManager
 from data_manager.ts_downloader.download_index import download_all as download_index_all
 
 
@@ -171,10 +172,14 @@ if __name__ == "__main__":
     parser.add_argument("-s", "--skip", action="store_true", help="Skip Sync data before running")
 
     parser.add_argument("-b", "--basic", action="store_true", help="Sync Stock Basic data before running")
+    parser.add_argument("-d", "--download", action="store_true", help="force download daily data")
     
     parser.add_argument("-f", "--force", action="store_true", help="Force Sync data to Alpha Lab")
 
     parser.add_argument("-t", "--total", action="store_true", help="Force retrain all models (Total/Full Rolling)")
+
+    parser.add_argument("--gp", action="store_true", help="Run GP factor mining before training")
+    parser.add_argument("--gp-only", action="store_true", help="Only run GP factor mining (no training)")
 
     parser.add_argument("-m", "--max", help="Max Holdings", default=5)
 
@@ -235,7 +240,7 @@ if __name__ == "__main__":
         stock_manager.download_all()
 
     manager = DailyBasicManager()
-    if latest_date < last_trading_date and not args.skip:
+    if args.download or (latest_date < last_trading_date and not args.skip):
         print("开始下载历史数据...")
         download_data(end_date=last_trading_date.strftime("%Y%m%d"))
 
@@ -260,6 +265,10 @@ if __name__ == "__main__":
         from data_manager.ts_downloader.cyq_manager import CyqPerfManager
         cyq_manager = CyqPerfManager()
         cyq_manager.download_all()
+
+        print("\n开始更新股票名称变更数据(ST过滤用)...")
+        nc_manager = NamechangeManager()
+        nc_manager.download_all()
         
         print("\n开始下载指数数据...")
         download_index_all()
@@ -275,6 +284,92 @@ if __name__ == "__main__":
     
     data_df = engine.load_data()
     signal_df = engine.calculate_factors(data_df)
+
+    # === GP Factor Mining ===
+    if args.gp or args.gp_only:
+        from core.alpha.gp_factor_miner import GPFactorMiner
+        print("\n[GP Mining] Starting GP factor discovery...")
+        
+        gp_miner = GPFactorMiner(
+            population_size=200,
+            n_generations=30,
+            max_factors=10,
+            min_ic=0.02,
+            min_icir=0.3,
+        )
+        
+        # Re-run factor calculation to get GPU tensors for GP
+        # We need raw padded tensor and label
+        import torch as _torch
+        from core.alpha.factor_calculator import device as _device
+        
+        # Prepare data same way as FactorCalculator.calculate_features
+        df_sorted = data_df.sort(["vt_symbol", "datetime"])
+        exclude_cols = {"datetime", "vt_symbol", "industry"}
+        cols = [c for c in df_sorted.columns if c not in exclude_cols]
+        col_map = {name: i for i, name in enumerate(cols)}
+        
+        import numpy as _np
+        raw_data = df_sorted.select(cols).to_numpy().astype(_np.float32)
+        symbols = df_sorted["vt_symbol"].to_numpy()
+        unique_symbols, inverse_indices, counts = _np.unique(symbols, return_inverse=True, return_counts=True)
+        num_stocks = len(unique_symbols)
+        max_len = counts.max()
+        
+        padded_raw = _torch.full((num_stocks, max_len, len(cols)), float('nan'), device=_device, dtype=_torch.float32)
+        
+        df_idx = df_sorted.select(["vt_symbol"]).with_columns([
+            __import__('polars').int_range(0, __import__('polars').len()).over("vt_symbol").alias("t_idx")
+        ])
+        t_indices = df_idx["t_idx"].to_numpy()
+        s_indices = inverse_indices
+        
+        s_indices_t = _torch.tensor(s_indices, dtype=_torch.long, device=_device)
+        t_indices_t = _torch.tensor(t_indices, dtype=_torch.long, device=_device)
+        raw_tensor = _torch.tensor(raw_data, device=_device, dtype=_torch.float32)
+        padded_raw[s_indices_t, t_indices_t, :] = raw_tensor
+        
+        # Compute label for fitness evaluation
+        from core.alpha.factor_calculator import ts_delay, ts_mean, cs_rank
+        C = padded_raw[:, :, col_map['close']]
+        raw_ret_5 = ts_delay(C, -5) / C - 1
+        label = cs_rank(raw_ret_5)  # Simple forward return rank as GP target
+        
+        # Collect existing factor tensors for deduplication
+        existing_tensors = []
+        features_computed = calculator.build_features(padded_raw, col_map)
+        for fname, ftensor in features_computed.items():
+            if fname != "label":
+                existing_tensors.append(ftensor)
+        
+        # Run GP mining
+        results = gp_miner.mine(
+            padded_raw=padded_raw,
+            col_map=col_map,
+            label=label,
+            existing_factor_tensors=existing_tensors[:10],  # Use top-10 for speed
+        )
+        
+        # Save discovered factors
+        gp_path = "core/alpha_db/gp_factors.json"
+        gp_miner.save(gp_path)
+        
+        del padded_raw, raw_tensor, s_indices_t, t_indices_t, label
+        import gc
+        gc.collect()
+        _torch.cuda.empty_cache() if _torch.cuda.is_available() else None
+        
+        if args.gp_only:
+            print(f"\n[GP Mining] Done. Found {len(results)} factors. Saved to {gp_path}")
+            save_log_dump(version)
+            cleanup_logger()
+            sys.exit(0)
+        
+        # Reload calculator to pick up new GP factors
+        calculator = CalcClass()
+        engine.factor_calculator = calculator
+        signal_df = engine.calculate_factors(data_df)
+        print("[GP Mining] Factors recomputed with GP additions.")
 
     signal_df = engine.analyze_factor_performance(signal_df)
 

@@ -1,16 +1,46 @@
 from core.alpha.factor_calculator import FactorCalculator, device, torch, np, pl, cs_rank, ts_corr, cs_zscore, ts_delay, ts_mean, ts_min, ts_max, ts_quantile, ts_std, ts_sum, ts_rsquare, ts_slope, ta_atr, ta_rsi, cs_group_mean, ts_kdj, ts_cov
+from core.alpha.gp_factor_miner import GPFactorMiner
 
-class V10FactorCalculator(FactorCalculator):
+class V11FactorCalculator(FactorCalculator):
     """
-    V9 Baseline Factor Calculator
-    Base: V8 complete factor set (~100 factors)
-    Changes from V8:
-      - Phase 1: Beta-neutral label (excess return ranking)
-      - Phase 3: Simplified dragon_score (remove triple-regime hardcoding)
-      - Phase 4: Add turnover_x_bull interaction factor
+    V11 因子计算器 — 当前主力版本
+
+    == 版本演进 ==
+    V8: 基线，~80+ 因子，含 dragon_score 三重 regime 硬编码
+    V8 → V9: beta-neutral label, 简化 dragon_score, 加 turnover_x_bull 交互因子, cord_20
+    V9 → V10: 新增 Amihud 流动性因子组, 标签加入低流动性惩罚 + informed-buyer bonus
+    V10 → V11: 动量崩溃检测 4 次尝试全部失败，回退到 V10 基线
+    V11-5: GP 遗传编程因子挖掘 — 发现 2 个短周期因子 (Sharpe +33%)
+
+    == 当前状态 ==
+    手工因子: ~110, GP因子: 2 (从 gp_factors.json 动态加载)
+    模型: FactorAttentionNetwork (d_token=64, 1层Attention, 4heads, d_ffn=128)
+    回测指标: Sharpe 1.33, 年化 97%, MaxDD -29.37% (2022-01 ~ 2026-05)
+
+    == 设计决策 ==
+    - 因子体系以换手率、动量、流动性三大维度为主导
+    - GP 因子补充短周期信号维度，增加模型输出变异性
+    - beta-neutral label 使模型学习截面相对排序而非绝对收益
+    - GP 因子通过 gp_factors.json 动态加载，与手工因子解耦
+
+    == 失败记录 ==
+    - V11-1 单日差分动量加速度: Sharpe 1.13, 金融时序差分=白噪声
+    - V11-2 动量交互+质量因子: Sharpe 1.23, 12个因子中10个IC为负
+    - V11-3 动量崩溃检测(Daniel&Moskowitz 2016): Sharpe 0.89
+    - V11-4 Gate Network条件化因子加权: Sharpe 0.84, Attention已实现动态加权
+    - V11-5a informed-buyer bonus加质量门槛: 标签改动牵连太广，全面下滑
+    - V11-5b GP因子v1(7因子同质化): Sharpe 0.78, 过拟合近期+同维度叠加
+    - 结论: 动量维度因子工程已触及天花板; GP需全周期评估+严格去重
     """
     def __init__(self):
         super().__init__()
+        # GP factor miner: load pre-mined factors if available
+        self.gp_miner = GPFactorMiner()
+        gp_path = "core/alpha_db/gp_factors.json"
+        if self.gp_miner.load(gp_path):
+            print(f"[V11] Loaded {len(self.gp_miner.discovered_factors)} GP factors")
+        else:
+            print("[V11] No GP factors found, will use manual factors only")
 
     # col_map结构可参考 core/alpha/data_columns_info.txt
     def build_features(self, padded_raw, col_map) -> dict[str, torch.Tensor]:
@@ -488,6 +518,12 @@ class V10FactorCalculator(FactorCalculator):
         # Conclusion: Informed trading dimensions cannot be captured from daily OHLCV data.
         # These microstructure indicators require tick-level or minute-level data.
         # Restored to V10 stable state (110 factors: V9 + 10 Amihud liquidity factors)
+
+        # === GP-Mined Short-Period Factors ===
+        gp_factors = self.gp_miner.compute_factors(padded_raw, col_map)
+        if gp_factors:
+            print(f"[V11] Adding {len(gp_factors)} GP factors")
+            features.update(gp_factors)
 
         # === Beta-Neutral Label (V9 baseline + Informed Buyer Bonus) ===
         raw_ret_5 = ts_delay(C, -5) / C - 1
