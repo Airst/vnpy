@@ -1,3 +1,23 @@
+"""
+组合级风险控制模块
+
+== 当前状态 ==
+风险信号:
+  1. 组合回撤（trailing peak drawdown）→ 阶梯式减仓
+  2. 短期波动率飙升（20d vs 60d std）→ 额外减仓
+恢复机制: 非对称（减仓即时，恢复+1/cooldown周期）
+默认配置: base_max_holdings=5, 回撤阶梯[-15%,-20%,-25%,-30%,-35%], vol_threshold=2.0
+
+== 设计决策 ==
+- 阶梯式减仓而非一刀切: 避免单次回撤即清仓导致错过反弹
+- 非对称恢复: 防止快速反弹后立即满仓又遇二次下跌
+- 零持仓死锁恢复: max_holdings=0 时经过 cooldown 后重置 peak_equity
+- 波动率信号: 短期/长期 std 比值，捕捉市场恐慌但避免常态波动误触发
+- 职责边界: 只管组合级风险（回撤/波动），不管个股止损（那是策略层的事）
+
+== 失败记录 ==
+- 无（风控模块自 V8 以来参数稳定，未做过激进改动）
+"""
 from collections import deque
 from typing import Dict, List, Tuple
 import numpy as np

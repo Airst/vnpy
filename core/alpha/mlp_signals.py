@@ -1,3 +1,33 @@
+"""
+MLP 滚动训练与信号生成模块
+
+== 版本演进 ==
+初始: MLP 三层隐藏层(64/32/16), 500天窗口, 90天重训
+V9 Step 3a: MLP → FactorAttentionNetwork (d_token=64, 4heads, 1层)
+V10: 训练窗口 500天 → 700天（更多 regime 多样性）
+
+== 当前状态 ==
+模型: factor_attention (d_token=64, n_heads=4, n_attn_layers=1, d_ffn=128)
+训练窗口: 700 天
+重训周期: 90 天
+批量大小: 2048, 学习率: 0.001, weight_decay: 0.002
+早停: 40 轮无改善
+
+== 设计决策 ==
+- Factor Attention 选择: 模型结构改变 > 损失函数改造（连续3次损失函数实验失败）
+- d_token=64: 核心超参数，32不足，64最优，128无额外收益
+- n_attn_layers=1: 2层过拟合（500~700天训练数据量有限）
+- 700天窗口: 提供充足 regime 多样性，是隐式正则化
+- 90天重训: 平衡模型时效性和训练成本
+- n_jobs=1: 单线程保证可复现性
+
+== 失败记录 ==
+- IC-Loss: 改善非牛市但损害牛市(Sharpe 1.10→0.70)，梯度方向与MSE冲突
+- 混合损失(MSE+IC): 梯度冲突，效果最差
+- 多任务学习(1d/10d/20d预测头): Sharpe 1.20→0.86，辅助损失梯度冲突
+- 时间衰减采样(decay=0.995): Sharpe 0.68→0.24，丧失 regime 多样性
+- 2层Attention: 过拟合，不如1层
+"""
 from datetime import datetime, timedelta
 import polars as pl
 import numpy as np

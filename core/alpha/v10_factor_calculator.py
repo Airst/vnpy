@@ -1,14 +1,31 @@
+"""
+V10 因子计算器
+
+== 版本演进 ==
+V8 → V9: beta-neutral label, 简化 dragon_score, 加 turnover_x_bull, cord_20
+V9 → V10: 新增 Amihud 流动性因子组 + oversold_vol_confirm + vol_price_div
+           标签加入低流动性惩罚 + informed-buyer bonus
+
+== 当前状态 ==
+因子数: ~110（V9 基础 + 10 个流动性/微观结构因子）
+已被 V11 继承（V11 = V10 基线）
+
+== 设计决策 ==
+- Amihud 流动性因子: 日频 OHLCV 可计算，提供独立于量价动量的微观结构信息
+- oversold_vol_confirm: 超卖×缩量交互，IC=0.079，捕捉恐慌后反弹信号
+- price_impact_asym: 下跌日冲击/上涨日冲击的不对称性
+- kyle_lambda_20d: Kyle's Lambda 估计知情交易强度
+- 筹码分布因子已实现但 disabled（数据质量问题）
+- 知情交易因子(VPIN等)已测试并移除（日频OHLCV信息不足）
+
+== 失败记录 ==
+- 知情交易因子组(VPIN, order_flow_toxicity等 6个): 日频OHLCV数据粒度不足，全部无效
+- 筹码分布因子组(6个): 数据缺失严重，暂时 disabled
+"""
 from core.alpha.factor_calculator import FactorCalculator, device, torch, np, pl, cs_rank, ts_corr, cs_zscore, ts_delay, ts_mean, ts_min, ts_max, ts_quantile, ts_std, ts_sum, ts_rsquare, ts_slope, ta_atr, ta_rsi, cs_group_mean, ts_kdj, ts_cov
 
 class V10FactorCalculator(FactorCalculator):
-    """
-    V9 Baseline Factor Calculator
-    Base: V8 complete factor set (~100 factors)
-    Changes from V8:
-      - Phase 1: Beta-neutral label (excess return ranking)
-      - Phase 3: Simplified dragon_score (remove triple-regime hardcoding)
-      - Phase 4: Add turnover_x_bull interaction factor
-    """
+    """V10 Factor Calculator — 在 V9 基础上新增流动性因子组。"""
     def __init__(self):
         super().__init__()
 

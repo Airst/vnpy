@@ -1,14 +1,33 @@
+"""
+V9 因子计算器
+
+== 版本演进 ==
+V8 → V9: 三项关键改造，Sharpe 从 ~0.68 提升到 1.76~1.84
+  - Phase 1: beta-neutral label（截面超额收益排名，非牛市年化 5%→21%）
+  - Phase 3: 简化 dragon_score（移除三重 regime 硬编码，让模型自主学习）
+  - Phase 4: 加 turnover_x_bull 交互因子（换手率×牛市概率）
+  - Step 3a: Factor Self-Attention 替代 MLP（Sharpe 1.24→1.50）
+  - Step 4a: cord_20 量价同步性因子（Sharpe 1.50→1.76~1.84）
+
+== 当前状态 ==
+因子数: ~100
+已被 V10 继承并扩展
+
+== 设计决策 ==
+- beta-neutral label 是最关键改造：让模型学习截面排序而非预测绝对收益
+- dragon_score 简化: 移除 Bull/Bear/Chaos 三重 regime 硬编码，减少市场观点注入
+- turnover_x_bull: 验证了"因子×regime"交互方法的有效性
+- cord_20: 在 Attention 下成功（提供独立的量价关系维度），MLP 下曾失败
+
+== 失败记录 ==
+- Phase 5 四个新因子全部失败: 标签设计优先于因子工程
+- klow_2_20d(下影线占比): 即使 Attention 下仍失败，信息与波动率因子冗余
+- value_x_bear(价值×熊市交互): val_dv 因子本身无效导致交互因子也无效
+"""
 from core.alpha.factor_calculator import FactorCalculator, device, torch, np, pl, cs_rank, ts_corr, cs_zscore, ts_delay, ts_mean, ts_min, ts_max, ts_quantile, ts_std, ts_sum, ts_rsquare, ts_slope, ta_atr, ta_rsi, cs_group_mean, ts_kdj, ts_cov
 
 class V9FactorCalculator(FactorCalculator):
-    """
-    V9 Baseline Factor Calculator
-    Base: V8 complete factor set (~100 factors)
-    Changes from V8:
-      - Phase 1: Beta-neutral label (excess return ranking)
-      - Phase 3: Simplified dragon_score (remove triple-regime hardcoding)
-      - Phase 4: Add turnover_x_bull interaction factor
-    """
+    """V9 Factor Calculator — beta-neutral + Factor Attention 架构确立版本。"""
     def __init__(self):
         super().__init__()
 

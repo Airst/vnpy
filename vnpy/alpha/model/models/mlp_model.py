@@ -1,3 +1,31 @@
+"""
+Alpha 预测模型 — 支持 MLP 和 FactorAttentionNetwork 双架构
+
+== 版本演进 ==
+初始: MlpNetwork 三层隐藏层, BatchNorm + LeakyReLU + Dropout
+V10 Step 3: 新增 FactorAttentionNetwork (FT-Transformer 风格)
+V10 Step 3: MlpModel 包装类支持 model_type 切换 ("mlp" / "factor_attention")
+
+== 当前状态 ==
+主力架构: FactorAttentionNetwork
+- 每个因子投影为 d_token 维 embedding（element-wise weight + bias）
+- 可学习 [CLS] token 聚合全局信息
+- Pre-Norm Transformer Block: LayerNorm → MultiheadAttention → residual → FFN(GELU)
+- 预测头: LayerNorm → Linear → BatchNorm → LeakyReLU → Dropout → Linear → 1
+备用架构: MlpNetwork（用于对比实验基线）
+
+== 设计决策 ==
+- FT-Transformer 而非 vanilla Transformer: 因子是异构标量，需要 per-feature tokenization
+- [CLS] token: 聚合全局截面信息，比平均池化更灵活
+- Pre-Norm: 训练更稳定（相比 Post-Norm）
+- element-wise embedding（非共享Linear）: 每个因子尺度不同，需独立投影
+- early stopping + weight_decay: 防止在有限训练窗口(700天)上过拟合
+
+== 失败记录 ==
+- Gate Network 叠加在 Attention 之上: Sharpe 1.76→0.84, 功能冗余+过拟合
+- 2层 Attention: 过拟合，1层最优
+- d_token=32: 表达能力不足，64最优
+"""
 import copy
 import math
 from collections import defaultdict
@@ -277,6 +305,7 @@ class MlpModel(AlphaModel):
         # Forward and backward propagation
         predictions = self.model(batch_features)
         cur_loss = self._loss_fn(predictions, batch_labels)
+
         cur_loss.backward()
 
         # Update model parameters

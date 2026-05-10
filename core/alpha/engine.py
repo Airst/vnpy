@@ -1,3 +1,18 @@
+"""
+AlphaEngine — 因子选股系统编排器
+
+== 当前状态 ==
+职责: 数据同步 → 因子计算 → 滚动窗口IC分析 → MLP训练 → 信号生成
+版本发现: 由 training.py 动态扫描 core/alpha/v*_factor_calculator.py 并注入
+数据源: vnpy 数据库 → AlphaLab parquet 文件
+选股宇宙: FundamentalSelector 过滤（EP>0, 换手率>1%, ln_cap>=11.5, 主板）
+
+== 设计决策 ==
+- 编排器模式: Engine 不持有版本逻辑，通过依赖注入接收 FactorCalculator 实例
+- 3年数据窗口: start_date 默认回溯3年，保证训练窗口(700天)+评估窗口充足
+- IC分析: 200天滚动窗口计算因子IC/ICIR，用于因子有效性监控（非训练用）
+- 数据路径: core/alpha_db/ 下按 daily/model/signal/backtest 分目录存储
+"""
 import os
 from pathlib import Path
 from datetime import datetime, timedelta
@@ -307,7 +322,7 @@ class AlphaEngine:
 
 
     def _get_ashare_symbols(self) -> List[str]:
-        """获取A股标的（过滤ST、次新股等）"""
+        """获取A股标的"""
         all_symbols = self.selector.get_candidate_symbols()
         
         # A股代码过滤规则
