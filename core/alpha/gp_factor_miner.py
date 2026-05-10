@@ -244,122 +244,134 @@ def _is_valid_tensor(x: Optional[torch.Tensor]) -> bool:
 # Fitness Evaluation
 # ============================================================
 
+@torch.no_grad()
 def compute_rank_ic(factor: torch.Tensor, label: torch.Tensor, eval_days: int = 0) -> Tuple[float, float, float]:
     """
-    Compute daily Rank IC (Spearman correlation) between factor and label.
-    Evaluates on full time range with sub-period consistency check.
+    Compute daily Rank IC (Spearman correlation) — fully vectorized on GPU.
     
     Args:
         factor: (num_stocks, num_days) tensor
-        label: (num_stocks, num_days) tensor (forward returns)
-        eval_days: If >0, only use last N days. 0 = use all days.
+        label: (num_stocks, num_days) tensor
+        eval_days: If >0, only use last N days. 0 = use all.
     
     Returns:
-        (mean_ic, ic_ir, direction_ratio) tuple
-        direction_ratio: fraction of sub-periods with same IC sign as overall
+        (mean_ic, ic_ir, direction_ratio)
     """
     num_stocks, num_days = factor.shape
-
-    # Use all days but sample every 10th for speed
     start_t = max(0, num_days - eval_days) if eval_days > 0 else 0
     step = 10
-    f_sampled = factor[:, start_t::step]
-    l_sampled = label[:, start_t::step]
-    n_eval = f_sampled.shape[1]
 
-    ics = []
-    for t in range(n_eval):
-        f_col = f_sampled[:, t]
-        l_col = l_sampled[:, t]
+    # Sample columns: (num_stocks, n_eval)
+    f_s = factor[:, start_t::step]
+    l_s = label[:, start_t::step]
+    n_eval = f_s.shape[1]
 
-        valid = ~(torch.isnan(f_col) | torch.isnan(l_col))
-        n_valid = valid.sum().item()
-        if n_valid < 30:
-            continue
-
-        f_valid = f_col[valid]
-        l_valid = l_col[valid]
-
-        f_rank = f_valid.argsort().argsort().float()
-        l_rank = l_valid.argsort().argsort().float()
-
-        f_rank = f_rank - f_rank.mean()
-        l_rank = l_rank - l_rank.mean()
-
-        denom = f_rank.norm() * l_rank.norm()
-        if denom < 1e-10:
-            continue
-
-        ic = (f_rank * l_rank).sum() / denom
-        ics.append(ic.item())
-
-    if len(ics) < 10:
+    if n_eval < 10:
         return 0.0, 0.0, 0.0
 
-    mean_ic = np.mean(ics)
-    std_ic = np.std(ics) + 1e-8
+    # Mask: valid where both are non-NaN
+    valid = ~(torch.isnan(f_s) | torch.isnan(l_s))
+    counts = valid.sum(dim=0)  # (n_eval,)
+
+    # Replace NaN with large negative for ranking (will be masked out)
+    f_filled = f_s.clone()
+    l_filled = l_s.clone()
+    f_filled[~valid] = float('-inf')
+    l_filled[~valid] = float('-inf')
+
+    # Batch rank: argsort().argsort() along stock dimension -> (num_stocks, n_eval)
+    f_rank = f_filled.argsort(dim=0).argsort(dim=0).float()
+    l_rank = l_filled.argsort(dim=0).argsort(dim=0).float()
+
+    # Zero out invalid positions
+    f_rank[~valid] = 0.0
+    l_rank[~valid] = 0.0
+
+    # Per-day mean of ranks (only valid)
+    f_sum = f_rank.sum(dim=0)  # (n_eval,)
+    l_sum = l_rank.sum(dim=0)
+    f_mean = f_sum / counts.clamp(min=1)
+    l_mean = l_sum / counts.clamp(min=1)
+
+    # Center ranks
+    f_centered = (f_rank - f_mean.unsqueeze(0)) * valid.float()
+    l_centered = (l_rank - l_mean.unsqueeze(0)) * valid.float()
+
+    # Per-day correlation: sum(f*l) / (norm(f) * norm(l))
+    numerator = (f_centered * l_centered).sum(dim=0)  # (n_eval,)
+    f_norm = f_centered.pow(2).sum(dim=0).sqrt()
+    l_norm = l_centered.pow(2).sum(dim=0).sqrt()
+    denom = f_norm * l_norm
+
+    # Filter days with enough data
+    day_valid = (counts >= 30) & (denom > 1e-10)
+    if day_valid.sum() < 10:
+        return 0.0, 0.0, 0.0
+
+    ics = (numerator[day_valid] / denom[day_valid]).cpu().numpy()
+
+    mean_ic = float(np.mean(ics))
+    std_ic = float(np.std(ics)) + 1e-8
     ic_ir = mean_ic / std_ic
 
     # Sub-period direction consistency
-    # Split ICs into ~5 equal sub-periods
-    n_periods = min(5, len(ics) // 5)
+    n_ics = len(ics)
+    n_periods = min(5, n_ics // 5)
     if n_periods < 3:
         return mean_ic, ic_ir, 0.5
 
-    chunk_size = len(ics) // n_periods
+    chunk_size = n_ics // n_periods
     sign_overall = np.sign(mean_ic)
-    same_sign_count = 0
-    for i in range(n_periods):
-        chunk = ics[i * chunk_size: (i + 1) * chunk_size]
-        chunk_mean = np.mean(chunk)
-        if np.sign(chunk_mean) == sign_overall:
-            same_sign_count += 1
-
+    same_sign_count = sum(
+        1 for i in range(n_periods)
+        if np.sign(np.mean(ics[i * chunk_size: (i + 1) * chunk_size])) == sign_overall
+    )
     direction_ratio = same_sign_count / n_periods
 
     return mean_ic, ic_ir, direction_ratio
 
 
+@torch.no_grad()
 def compute_turnover(factor: torch.Tensor, top_pct: float = 0.1, eval_days: int = 200) -> float:
     """
-    Compute average daily turnover of top-ranked stocks.
-    High turnover = short-period factor (desirable for our goal).
-    
-    Returns:
-        Average daily turnover ratio (0 to 1).
+    Compute average daily turnover of top-ranked stocks — vectorized on GPU.
+    High turnover = short-period factor.
     """
     num_stocks, num_days = factor.shape
     start_t = max(0, num_days - eval_days)
-    f_slice = factor[:, start_t::5]  # Sample every 5th day
+    step = 5
+    f_slice = factor[:, start_t::step]  # (stocks, n_eval)
     n_eval = f_slice.shape[1]
-    
+
+    if n_eval < 2:
+        return 0.0
+
+    # Replace NaN with -inf for topk
+    f_filled = f_slice.clone()
+    f_filled[torch.isnan(f_filled)] = float('-inf')
+
+    n_top = max(int(num_stocks * top_pct), 1)
+
+    # Get top-k indices for all days at once: (n_top, n_eval)
+    _, top_indices = f_filled.topk(n_top, dim=0)  # (n_top, n_eval)
+
+    # Compute turnover between consecutive days
     turnovers = []
-    prev_top_set = None
-    
-    for t in range(n_eval):
-        f_col = f_slice[:, t]
-        valid = ~torch.isnan(f_col)
-        n_valid = valid.sum().item()
-        if n_valid < 30:
-            prev_top_set = None
-            continue
+    # Sort indices for set comparison
+    top_sorted = top_indices.sort(dim=0).values  # (n_top, n_eval)
 
-        n_top = max(int(n_valid * top_pct), 1)
-        top_indices = f_col.clone()
-        top_indices[~valid] = float('-inf')
-        _, top_idx = top_indices.topk(n_top)
-        current_set = set(top_idx.cpu().tolist())
+    for t in range(1, n_eval):
+        prev = top_sorted[:, t - 1]
+        curr = top_sorted[:, t]
+        # Count overlap: for each element in curr, check if it exists in prev
+        # Use broadcasting: (n_top, 1) == (1, n_top) -> (n_top, n_top)
+        overlap = (curr.unsqueeze(1) == prev.unsqueeze(0)).any(dim=1).sum().item()
+        turnovers.append(1.0 - overlap / n_top)
 
-        if prev_top_set is not None:
-            overlap = len(current_set & prev_top_set)
-            turnover = 1.0 - overlap / max(len(current_set), 1)
-            turnovers.append(turnover)
-
-        prev_top_set = current_set
-
-    return np.mean(turnovers) if turnovers else 0.0
+    return float(np.mean(turnovers)) if turnovers else 0.0
 
 
+@torch.no_grad()
 def fitness(node: Node, data: Dict[str, torch.Tensor], label: torch.Tensor,
             existing_factors: Optional[List[torch.Tensor]] = None,
             max_corr: float = 0.7) -> float:
@@ -554,11 +566,20 @@ class GPFactorMiner:
         random.seed(self.seed)
         np.random.seed(self.seed)
 
-        # Prepare terminal data
-        data = self._prepare_terminals(padded_raw, col_map)
+        # Trim label to match terminal window
+        max_days = 500
+        if label.shape[1] > max_days:
+            label = label[:, -max_days:]
+        
+        # Prepare terminal data (trimmed to 500 days for GP mining memory)
+        data = self._prepare_terminals(padded_raw, col_map, trim_days=500)
+        
+        # Release full padded_raw reference — only terminals needed from here
+        del padded_raw
+        torch.cuda.empty_cache()
         
         print(f"[GP Miner] Starting evolution: pop={self.population_size}, gen={self.n_generations}")
-        print(f"[GP Miner] Data shape: {padded_raw.shape[0]} stocks, {padded_raw.shape[1]} days")
+        print(f"[GP Miner] Data shape: {label.shape[0]} stocks, {label.shape[1]} days")
         print(f"[GP Miner] Targeting short-period factors (windows: {WINDOWS})")
 
         # Initialize population
@@ -573,6 +594,7 @@ class GPFactorMiner:
         factor_pool = list(existing_factor_tensors) if existing_factor_tensors else []
 
         for gen in range(self.n_generations):
+            gen_start = time.time()
             # Sort by fitness
             population.sort(key=lambda x: x[1], reverse=True)
             gen_best = population[0][1]
@@ -585,9 +607,11 @@ class GPFactorMiner:
 
             if gen % 10 == 0 or gen == self.n_generations - 1:
                 valid_count = sum(1 for _, s in population if s > -999)
+                elapsed = time.time() - gen_start
                 print(f"[GP Miner] Gen {gen:3d}: best={gen_best:.4f}, "
                       f"valid={valid_count}/{self.population_size}, "
-                      f"discovered={len(self.discovered_factors)}")
+                      f"discovered={len(self.discovered_factors)}, "
+                      f"time={elapsed:.1f}s")
 
             # Check if top individual qualifies as a new factor
             if gen_best > 0:
@@ -631,6 +655,9 @@ class GPFactorMiner:
                     new_population.append((c, s))
 
             population = new_population
+            
+            # Free GPU memory fragmentation
+            torch.cuda.empty_cache()
 
         # Final report
         print(f"\n[GP Miner] === Mining Complete ===")
@@ -645,8 +672,16 @@ class GPFactorMiner:
 
         return results
 
-    def _prepare_terminals(self, padded_raw: torch.Tensor, col_map: Dict[str, int]) -> Dict[str, torch.Tensor]:
-        """Extract terminal tensors from padded raw data."""
+    def _prepare_terminals(self, padded_raw: torch.Tensor, col_map: Dict[str, int], trim_days: int = 0) -> Dict[str, torch.Tensor]:
+        """Extract terminal tensors from padded raw data.
+        
+        Args:
+            trim_days: If >0, only use the last N days (for GP mining memory reduction).
+                       0 means use all days (for compute_factors during training).
+        """
+        if trim_days > 0 and padded_raw.shape[1] > trim_days:
+            padded_raw = padded_raw[:, -trim_days:, :]
+        
         terminal_map = {
             'O': 'open',
             'H': 'high',
@@ -660,10 +695,9 @@ class GPFactorMiner:
             if col_name in col_map:
                 data[term_name] = padded_raw[:, :, col_map[col_name]]
             else:
-                # Fallback: zeros
-                data[term_name] = torch.zeros(
-                    padded_raw.shape[0], padded_raw.shape[1],
-                    device=padded_raw.device, dtype=padded_raw.dtype
+                data[term_name] = torch.full(
+                    (padded_raw.shape[0], padded_raw.shape[1]),
+                    float('nan'), device=padded_raw.device, dtype=padded_raw.dtype
                 )
         return data
 

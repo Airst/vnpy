@@ -291,9 +291,9 @@ if __name__ == "__main__":
         print("\n[GP Mining] Starting GP factor discovery...")
         
         gp_miner = GPFactorMiner(
-            population_size=200,
-            n_generations=30,
-            max_factors=10,
+            population_size=300,
+            n_generations=40,
+            max_factors=5,
             min_ic=0.02,
             min_icir=0.3,
         )
@@ -329,11 +329,15 @@ if __name__ == "__main__":
         raw_tensor = _torch.tensor(raw_data, device=_device, dtype=_torch.float32)
         padded_raw[s_indices_t, t_indices_t, :] = raw_tensor
         
+        # Free intermediate data to reduce peak memory
+        del raw_data, raw_tensor, s_indices_t, t_indices_t, df_sorted, df_idx
+        
         # Compute label for fitness evaluation
         from core.alpha.factor_calculator import ts_delay, ts_mean, cs_rank
         C = padded_raw[:, :, col_map['close']]
         raw_ret_5 = ts_delay(C, -5) / C - 1
         label = cs_rank(raw_ret_5)  # Simple forward return rank as GP target
+        del C, raw_ret_5
         
         # Collect existing factor tensors for deduplication
         existing_tensors = []
@@ -341,6 +345,11 @@ if __name__ == "__main__":
         for fname, ftensor in features_computed.items():
             if fname != "label":
                 existing_tensors.append(ftensor)
+        del features_computed
+        
+        import gc
+        gc.collect()
+        _torch.cuda.empty_cache()
         
         # Run GP mining
         results = gp_miner.mine(
@@ -354,10 +363,9 @@ if __name__ == "__main__":
         gp_path = "core/alpha_db/gp_factors.json"
         gp_miner.save(gp_path)
         
-        del padded_raw, raw_tensor, s_indices_t, t_indices_t, label
-        import gc
+        del padded_raw, label, existing_tensors
         gc.collect()
-        _torch.cuda.empty_cache() if _torch.cuda.is_available() else None
+        _torch.cuda.empty_cache()
         
         if args.gp_only:
             print(f"\n[GP Mining] Done. Found {len(results)} factors. Saved to {gp_path}")
