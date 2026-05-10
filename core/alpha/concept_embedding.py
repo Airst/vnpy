@@ -203,19 +203,30 @@ class ConceptEmbedding:
         features_list = []
 
         # Part A: History (Before Member Data Start)
+        # NOTE: Join in quarterly chunks to avoid 50M+ row intermediate that crashes WSL
         concept_hist = concept_df.filter(pl.col("datetime") < min_mem_date)
         if not concept_hist.is_empty():
-            # Create Snapshot from the earliest available data
             mem_snapshot = mem_df.filter(pl.col("datetime") == min_mem_date).drop(["datetime", "month"])
-            # Inner Join
-            merged_hist = concept_hist.join(mem_snapshot, on="concept_code", how="inner")
-            print(f"[ConceptEmbedding] Backfilled {merged_hist.shape[0]} rows for history.")
-            
-            if not merged_hist.is_empty():
-                print("[ConceptEmbedding] Aggregating history chunk (quarterly)...")
-                features_list.extend(self._chunked_aggregate(merged_hist, "History"))
-                del merged_hist
+            # Split history by quarter, join+aggregate each chunk separately
+            concept_hist = concept_hist.with_columns(
+                (pl.col("datetime").dt.year().cast(pl.Utf8)
+                 + "Q"
+                 + pl.col("datetime").dt.quarter().cast(pl.Utf8)).alias("_qtr")
+            )
+            quarters = concept_hist["_qtr"].unique().sort().to_list()
+            agg = self._agg_exprs()
+            total_rows = 0
+            for qtr in quarters:
+                chunk = concept_hist.filter(pl.col("_qtr") == qtr).drop("_qtr")
+                merged_chunk = chunk.join(mem_snapshot, on="concept_code", how="inner")
+                total_rows += merged_chunk.shape[0]
+                if not merged_chunk.is_empty():
+                    feat = merged_chunk.lazy().group_by(["datetime", "vt_symbol"]).agg(agg).collect()
+                    features_list.append(feat)
+                    del feat
+                del chunk, merged_chunk
                 gc.collect()
+            print(f"[ConceptEmbedding] Backfilled {total_rows} rows for history ({len(quarters)} quarters).")
         
         del concept_hist
         gc.collect()

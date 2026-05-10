@@ -1,4 +1,20 @@
+"""
+多因子组合策略 — 基于 AlphaLab 信号的交易执行层
+
+== 当前状态 ==
+框架: vnpy_portfoliostrategy (StrategyTemplate)
+信号源: AlphaLab parquet 信号文件（由 mlp_signals.py 生成）
+风控集成: RiskController（组合级回撤熔断 + 波动率缩仓）
+执行特性: 日频调仓，个股止损，追踪止损，冷却期
+
+== 设计决策 ==
+- 信号驱动而非规则驱动: 策略本身不做选股判断，完全依赖模型信号排名
+- 分层风控: 个股级(止损/追踪止损) + 组合级(RiskController)
+- 冷却期: 个股止损后设置冷却天数，避免反复开平
+- 持仓数由 RiskController 动态决定（base=5，根据回撤/波动减少）
+"""
 import os
+from datetime import datetime
 
 from vnpy_portfoliostrategy import StrategyTemplate
 
