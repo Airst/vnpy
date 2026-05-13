@@ -25,6 +25,7 @@ JSON 注册表 (v2 schema) 管理因子全生命周期：
 == 算子体系 ==
 终端节点 (Terminals): O, H, L, C, V, TR (量价原子数据)
                       BL, SL, BE, SE, NMF (资金流向 — 知情者交易信号)
+                      CM5, CM20, CMX, CHR (概念板块 — 板块共振信号)
 一元时序 (Unary TS): ts_mean, ts_std, ts_max, ts_min, ts_delta, ts_rank, ts_decay_linear
 二元时序 (Binary TS): ts_corr, ts_cov
 截面 (Cross-Sectional): cs_rank, cs_zscore
@@ -58,7 +59,8 @@ from core.alpha.factor_calculator import (
 
 WINDOWS = [3, 5, 10, 20]
 TERMINALS = ['O', 'H', 'L', 'C', 'V', 'TR',
-             'BL', 'SL', 'BE', 'SE', 'NMF']  # MoneyFlow: 大单/超大单/净流
+             'BL', 'SL', 'BE', 'SE', 'NMF',  # MoneyFlow: 大单/超大单/净流
+             'CM5', 'CM20', 'CMX', 'CHR']  # Concept: 板块动量/热度
 
 @dataclass
 class Node:
@@ -898,6 +900,11 @@ class GPFactorMiner:
             'BE': 'buy_elg_amount',   # 超大单买入金额
             'SE': 'sell_elg_amount',  # 超大单卖出金额
             'NMF': 'net_mf_amount',   # 净资金流入金额
+            # Concept — 板块共振信号
+            'CM5': 'concept_mom_5d',       # 概念板块5日动量
+            'CM20': 'concept_mom_20d',     # 概念板块20日动量
+            'CMX': 'concept_mom_20d_max',  # 最强概念板块动量
+            'CHR': 'concept_hot_ratio',    # 概念热度比例
         }
         data = {}
         for term_name, col_name in terminal_map.items():
@@ -1021,6 +1028,8 @@ class GPFactorMiner:
             'BL': 'buy_lg_amount', 'SL': 'sell_lg_amount',
             'BE': 'buy_elg_amount', 'SE': 'sell_elg_amount',
             'NMF': 'net_mf_amount',
+            'CM5': 'concept_mom_5d', 'CM20': 'concept_mom_20d',
+            'CMX': 'concept_mom_20d_max', 'CHR': 'concept_hot_ratio',
         }
         data = {}
         for term_name, col_name in terminal_map.items():

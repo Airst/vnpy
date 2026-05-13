@@ -1,6 +1,6 @@
 {
   "version": 2,
-  "next_id": 11,
+  "next_id": 16,
   "factors": [
     {
       "id": "gp_001",
@@ -535,6 +535,328 @@
       },
       "discovered_at": "2026-05-13",
       "note": "Sharpe 1.17→1.34, 近期回撤逆转+22%, 资金流向因子有效"
+    },
+    {
+      "id": "gp_011",
+      "expr": "ts_cov(cs_rank(ts_delta(sub(CM20, TR), 3)), add(ts_rank(ts_mean(BL, 5), 5), V), 5)",
+      "tree": {
+        "op": "ts_cov",
+        "value": null,
+        "window": 5,
+        "children": [
+          {
+            "op": "cs_rank",
+            "value": null,
+            "window": null,
+            "children": [
+              {
+                "op": "ts_delta",
+                "value": null,
+                "window": 3,
+                "children": [
+                  {
+                    "op": "sub",
+                    "value": null,
+                    "window": null,
+                    "children": [
+                      {
+                        "op": "terminal",
+                        "value": "CM20",
+                        "window": null,
+                        "children": []
+                      },
+                      {
+                        "op": "terminal",
+                        "value": "TR",
+                        "window": null,
+                        "children": []
+                      }
+                    ]
+                  }
+                ]
+              }
+            ]
+          },
+          {
+            "op": "add",
+            "value": null,
+            "window": null,
+            "children": [
+              {
+                "op": "ts_rank",
+                "value": null,
+                "window": 5,
+                "children": [
+                  {
+                    "op": "ts_mean",
+                    "value": null,
+                    "window": 5,
+                    "children": [
+                      {
+                        "op": "terminal",
+                        "value": "BL",
+                        "window": null,
+                        "children": []
+                      }
+                    ]
+                  }
+                ]
+              },
+              {
+                "op": "terminal",
+                "value": "V",
+                "window": null,
+                "children": []
+              }
+            ]
+          }
+        ]
+      },
+      "status": "validated",
+      "mining_metrics": {
+        "ic": 0.04734042823547498,
+        "icir": 0.6257786242595704,
+        "turnover": 0.9141488732675308
+      },
+      "discovered_at": "2026-05-13",
+      "note": "Sharpe 1.26, MaxDD -28.86%(改善8%), 年化94%, 板块+资金流组合因子"
+    },
+    {
+      "id": "gp_012",
+      "expr": "ts_cov(neg(C), add(BL, V), 5)",
+      "tree": {
+        "op": "ts_cov",
+        "value": null,
+        "window": 5,
+        "children": [
+          {
+            "op": "neg",
+            "value": null,
+            "window": null,
+            "children": [
+              {
+                "op": "terminal",
+                "value": "C",
+                "window": null,
+                "children": []
+              }
+            ]
+          },
+          {
+            "op": "add",
+            "value": null,
+            "window": null,
+            "children": [
+              {
+                "op": "terminal",
+                "value": "BL",
+                "window": null,
+                "children": []
+              },
+              {
+                "op": "terminal",
+                "value": "V",
+                "window": null,
+                "children": []
+              }
+            ]
+          }
+        ]
+      },
+      "status": "validated",
+      "mining_metrics": {
+        "ic": 0.05962881241579219,
+        "icir": 0.8374779903007384,
+        "turnover": 0.8384758041179621
+      },
+      "discovered_at": "2026-05-13",
+      "note": "Sharpe 1.26, MaxDD -28.86%(改善8%), 年化94%, 板块+资金流组合因子"
+    },
+    {
+      "id": "gp_013",
+      "expr": "ts_corr(add(ts_corr(mul(CM20, SE), cs_zscore(SL), 20), V), cs_zscore(SL), 5)",
+      "tree": {
+        "op": "ts_corr",
+        "value": null,
+        "window": 5,
+        "children": [
+          {
+            "op": "add",
+            "value": null,
+            "window": null,
+            "children": [
+              {
+                "op": "ts_corr",
+                "value": null,
+                "window": 20,
+                "children": [
+                  {
+                    "op": "mul",
+                    "value": null,
+                    "window": null,
+                    "children": [
+                      {
+                        "op": "terminal",
+                        "value": "CM20",
+                        "window": null,
+                        "children": []
+                      },
+                      {
+                        "op": "terminal",
+                        "value": "SE",
+                        "window": null,
+                        "children": []
+                      }
+                    ]
+                  },
+                  {
+                    "op": "cs_zscore",
+                    "value": null,
+                    "window": null,
+                    "children": [
+                      {
+                        "op": "terminal",
+                        "value": "SL",
+                        "window": null,
+                        "children": []
+                      }
+                    ]
+                  }
+                ]
+              },
+              {
+                "op": "terminal",
+                "value": "V",
+                "window": null,
+                "children": []
+              }
+            ]
+          },
+          {
+            "op": "cs_zscore",
+            "value": null,
+            "window": null,
+            "children": [
+              {
+                "op": "terminal",
+                "value": "SL",
+                "window": null,
+                "children": []
+              }
+            ]
+          }
+        ]
+      },
+      "status": "validated",
+      "mining_metrics": {
+        "ic": -0.05768341141284669,
+        "icir": -0.8328127990977194,
+        "turnover": 0.8509283924343538
+      },
+      "discovered_at": "2026-05-13",
+      "note": "Sharpe 1.26, MaxDD -28.86%(改善8%), 年化94%, 板块+资金流组合因子"
+    },
+    {
+      "id": "gp_014",
+      "expr": "ts_corr(mul(TR, L), cs_zscore(SL), 5)",
+      "tree": {
+        "op": "ts_corr",
+        "value": null,
+        "window": 5,
+        "children": [
+          {
+            "op": "mul",
+            "value": null,
+            "window": null,
+            "children": [
+              {
+                "op": "terminal",
+                "value": "TR",
+                "window": null,
+                "children": []
+              },
+              {
+                "op": "terminal",
+                "value": "L",
+                "window": null,
+                "children": []
+              }
+            ]
+          },
+          {
+            "op": "cs_zscore",
+            "value": null,
+            "window": null,
+            "children": [
+              {
+                "op": "terminal",
+                "value": "SL",
+                "window": null,
+                "children": []
+              }
+            ]
+          }
+        ]
+      },
+      "status": "validated",
+      "mining_metrics": {
+        "ic": -0.05737955216592287,
+        "icir": -0.8431113731030127,
+        "turnover": 0.8468138332625563
+      },
+      "discovered_at": "2026-05-13",
+      "note": "Sharpe 1.26, MaxDD -28.86%(改善8%), 年化94%, 板块+资金流组合因子"
+    },
+    {
+      "id": "gp_015",
+      "expr": "ts_corr(add(C, V), cs_zscore(BL), 5)",
+      "tree": {
+        "op": "ts_corr",
+        "value": null,
+        "window": 5,
+        "children": [
+          {
+            "op": "add",
+            "value": null,
+            "window": null,
+            "children": [
+              {
+                "op": "terminal",
+                "value": "C",
+                "window": null,
+                "children": []
+              },
+              {
+                "op": "terminal",
+                "value": "V",
+                "window": null,
+                "children": []
+              }
+            ]
+          },
+          {
+            "op": "cs_zscore",
+            "value": null,
+            "window": null,
+            "children": [
+              {
+                "op": "terminal",
+                "value": "BL",
+                "window": null,
+                "children": []
+              }
+            ]
+          }
+        ]
+      },
+      "status": "validated",
+      "mining_metrics": {
+        "ic": -0.05532940044615637,
+        "icir": -0.8462762291508927,
+        "turnover": 0.8593110120295603
+      },
+      "discovered_at": "2026-05-13",
+      "note": "Sharpe 1.26, MaxDD -28.86%(改善8%), 年化94%, 板块+资金流组合因子"
     }
   ]
 }
