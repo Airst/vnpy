@@ -83,6 +83,7 @@ class MlpModel(AlphaModel):
         attn_dropout: float = 0.15,
         ffn_dropout: float = 0.15,
         head_dropout: float = 0.10,
+        attn_activation: str = "softmax",
     ) -> None:
         """
         Initialize MLP model
@@ -111,6 +112,8 @@ class MlpModel(AlphaModel):
             Random seed for reproducibility
         device : str, default "cpu"
             Training device
+        attn_activation : str, default "softmax"
+            Attention activation: "softmax" or "entmax15" (sparse)
         """
         # Save model hyperparameters
         self.input_size: int = input_size
@@ -146,6 +149,7 @@ class MlpModel(AlphaModel):
                 attn_dropout=attn_dropout,
                 ffn_dropout=ffn_dropout,
                 head_dropout=head_dropout,
+                attn_activation=attn_activation,
             )
         else:
             self.model: nn.Module = MlpNetwork(
@@ -603,6 +607,82 @@ class AverageMeter:
         self.avg = self.sum / self.count
 
 
+# ============================================================
+# Sparse Attention: entmax-1.5 (self-contained, no external dep)
+# ============================================================
+
+def _entmax_threshold_and_support(z: torch.Tensor, dim: int = -1):
+    """Core entmax-1.5 algorithm: find threshold tau via sorting."""
+    z_sorted, _ = z.sort(dim=dim, descending=True)
+    z_cumsum = z_sorted.cumsum(dim=dim)
+    k = torch.arange(1, z.shape[dim] + 1, device=z.device, dtype=z.dtype)
+    shape = [1] * z.ndim
+    shape[dim] = -1
+    k = k.view(shape)
+    # For alpha=1.5: threshold condition
+    support = ((k * z_sorted - z_cumsum + 1) > 0).sum(dim=dim, keepdim=True).float()
+    tau = (z_cumsum.gather(dim, (support - 1).long().clamp(min=0)) - 1) / support
+    return tau
+
+
+def entmax15(z: torch.Tensor, dim: int = -1) -> torch.Tensor:
+    """
+    Entmax-1.5 activation: sparse alternative to softmax.
+    Produces exact zeros for low-scoring entries.
+    """
+    tau = _entmax_threshold_and_support(z, dim=dim)
+    p = (z - tau).clamp(min=0)
+    p = p ** 2  # alpha=1.5 uses squared ReLU
+    p = p / (p.sum(dim=dim, keepdim=True) + 1e-10)
+    return p
+
+
+class SparseMultiheadAttention(nn.Module):
+    """
+    Multi-head attention with configurable activation (softmax or entmax-1.5).
+    Drop-in replacement for nn.MultiheadAttention (batch_first=True only).
+    """
+
+    _compiled_entmax = None  # class-level cache for compiled entmax
+
+    def __init__(self, embed_dim: int, num_heads: int, dropout: float = 0.0,
+                 activation: str = "softmax"):
+        super().__init__()
+        assert embed_dim % num_heads == 0
+        self.embed_dim = embed_dim
+        self.num_heads = num_heads
+        self.head_dim = embed_dim // num_heads
+        self.activation = activation
+
+        self.qkv_proj = nn.Linear(embed_dim, 3 * embed_dim)
+        self.out_proj = nn.Linear(embed_dim, embed_dim)
+        self.dropout = nn.Dropout(dropout)
+        self._scale = self.head_dim ** -0.5
+
+    def forward(self, query: torch.Tensor, key: torch.Tensor, value: torch.Tensor,
+                **kwargs) -> tuple[torch.Tensor, None]:
+        # query == key == value for self-attention
+        B, N, D = query.shape
+        H, Dh = self.num_heads, self.head_dim
+
+        qkv = self.qkv_proj(query).reshape(B, N, 3, H, Dh).permute(2, 0, 3, 1, 4)
+        q, k, v = qkv[0], qkv[1], qkv[2]  # each: (B, H, N, Dh)
+
+        attn_scores = (q @ k.transpose(-2, -1)) * self._scale  # (B, H, N, N)
+
+        if self.activation == "entmax15":
+            if SparseMultiheadAttention._compiled_entmax is None:
+                SparseMultiheadAttention._compiled_entmax = torch.compile(entmax15)
+            attn_weights = SparseMultiheadAttention._compiled_entmax(attn_scores, dim=-1)
+        else:
+            attn_weights = torch.softmax(attn_scores, dim=-1)
+
+        attn_weights = self.dropout(attn_weights)
+        out = (attn_weights @ v).transpose(1, 2).reshape(B, N, D)  # (B, N, D)
+        out = self.out_proj(out)
+        return out, None
+
+
 class FactorAttentionNetwork(nn.Module):
     """
     Factor Self-Attention Network (FT-Transformer style)
@@ -623,6 +703,7 @@ class FactorAttentionNetwork(nn.Module):
         attn_dropout: float = 0.15,
         ffn_dropout: float = 0.15,
         head_dropout: float = 0.10,
+        attn_activation: str = "softmax",
     ) -> None:
         super().__init__()
         self.input_size = input_size
@@ -639,14 +720,23 @@ class FactorAttentionNetwork(nn.Module):
         # === Transformer Blocks ===
         self.blocks = nn.ModuleList()
         for _ in range(n_layers):
-            self.blocks.append(nn.ModuleDict({
-                'norm1': nn.LayerNorm(d_token),
-                'attn': nn.MultiheadAttention(
+            if attn_activation == "softmax":
+                attn_module = nn.MultiheadAttention(
                     embed_dim=d_token,
                     num_heads=n_heads,
                     dropout=attn_dropout,
                     batch_first=True,
-                ),
+                )
+            else:
+                attn_module = SparseMultiheadAttention(
+                    embed_dim=d_token,
+                    num_heads=n_heads,
+                    dropout=attn_dropout,
+                    activation=attn_activation,
+                )
+            self.blocks.append(nn.ModuleDict({
+                'norm1': nn.LayerNorm(d_token),
+                'attn': attn_module,
                 'norm2': nn.LayerNorm(d_token),
                 'ffn': nn.Sequential(
                     nn.Linear(d_token, d_ffn),

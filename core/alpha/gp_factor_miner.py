@@ -5,16 +5,26 @@
 补充当前慢因子体系（120d/60d/20d 为主），发现 3-20 天衰减的短周期因子，
 增加模型信号的时效性和变异性，缓解"分数横线→入场时机差"问题。
 
+== 因子生命周期管理 ==
+JSON 注册表 (v2 schema) 管理因子全生命周期：
+- discovered: 新挖掘，待验证
+- testing: 正在验证中（已进入训练流程）
+- validated: 验证通过，参与模型训练
+- rejected: 验证失败，永不使用，但保留用于去重
+
+挖掘增量追加，不覆盖已有因子。rejected 因子的表达式参与去重防止重复挖掘。
+
 == 设计决策 ==
 - 复用 factor_calculator.py 中的 GPU 张量算子（ts_mean/ts_std/cs_rank 等）
 - 适应度函数: Rank IC (Spearman) 在滚动 OOS 窗口上评估
 - 窗口参数限制在 {3, 5, 10, 20} 强制短周期特征
 - 相关性去重: 与现有因子池相关 > 0.7 的因子丢弃
 - 复杂度惩罚 (parsimony): 树深度 > 5 的表达式被惩罚
-- 基于 DEAP 框架实现，GPU 加速因子计算
+- GPU 加速因子计算
 
 == 算子体系 ==
 终端节点 (Terminals): O, H, L, C, V, TR (量价原子数据)
+                      BL, SL, BE, SE, NMF (资金流向 — 知情者交易信号)
 一元时序 (Unary TS): ts_mean, ts_std, ts_max, ts_min, ts_delta, ts_rank, ts_decay_linear
 二元时序 (Binary TS): ts_corr, ts_cov
 截面 (Cross-Sectional): cs_rank, cs_zscore
@@ -22,10 +32,12 @@
 窗口参数 (Windows): 3, 5, 10, 20
 """
 
+import os
 import random
 import copy
 import json
 import time
+from datetime import date
 from pathlib import Path
 from typing import Dict, List, Tuple, Optional
 from dataclasses import dataclass, field
@@ -45,7 +57,8 @@ from core.alpha.factor_calculator import (
 # ============================================================
 
 WINDOWS = [3, 5, 10, 20]
-TERMINALS = ['O', 'H', 'L', 'C', 'V', 'TR']
+TERMINALS = ['O', 'H', 'L', 'C', 'V', 'TR',
+             'BL', 'SL', 'BE', 'SE', 'NMF']  # MoneyFlow: 大单/超大单/净流
 
 @dataclass
 class Node:
@@ -244,134 +257,122 @@ def _is_valid_tensor(x: Optional[torch.Tensor]) -> bool:
 # Fitness Evaluation
 # ============================================================
 
-@torch.no_grad()
 def compute_rank_ic(factor: torch.Tensor, label: torch.Tensor, eval_days: int = 0) -> Tuple[float, float, float]:
     """
-    Compute daily Rank IC (Spearman correlation) — fully vectorized on GPU.
+    Compute daily Rank IC (Spearman correlation) between factor and label.
+    Evaluates on full time range with sub-period consistency check.
     
     Args:
         factor: (num_stocks, num_days) tensor
-        label: (num_stocks, num_days) tensor
-        eval_days: If >0, only use last N days. 0 = use all.
+        label: (num_stocks, num_days) tensor (forward returns)
+        eval_days: If >0, only use last N days. 0 = use all days.
     
     Returns:
-        (mean_ic, ic_ir, direction_ratio)
+        (mean_ic, ic_ir, direction_ratio) tuple
+        direction_ratio: fraction of sub-periods with same IC sign as overall
     """
     num_stocks, num_days = factor.shape
+
+    # Use all days but sample every 10th for speed
     start_t = max(0, num_days - eval_days) if eval_days > 0 else 0
     step = 10
+    f_sampled = factor[:, start_t::step]
+    l_sampled = label[:, start_t::step]
+    n_eval = f_sampled.shape[1]
 
-    # Sample columns: (num_stocks, n_eval)
-    f_s = factor[:, start_t::step]
-    l_s = label[:, start_t::step]
-    n_eval = f_s.shape[1]
+    ics = []
+    for t in range(n_eval):
+        f_col = f_sampled[:, t]
+        l_col = l_sampled[:, t]
 
-    if n_eval < 10:
+        valid = ~(torch.isnan(f_col) | torch.isnan(l_col))
+        n_valid = valid.sum().item()
+        if n_valid < 30:
+            continue
+
+        f_valid = f_col[valid]
+        l_valid = l_col[valid]
+
+        f_rank = f_valid.argsort().argsort().float()
+        l_rank = l_valid.argsort().argsort().float()
+
+        f_rank = f_rank - f_rank.mean()
+        l_rank = l_rank - l_rank.mean()
+
+        denom = f_rank.norm() * l_rank.norm()
+        if denom < 1e-10:
+            continue
+
+        ic = (f_rank * l_rank).sum() / denom
+        ics.append(ic.item())
+
+    if len(ics) < 10:
         return 0.0, 0.0, 0.0
 
-    # Mask: valid where both are non-NaN
-    valid = ~(torch.isnan(f_s) | torch.isnan(l_s))
-    counts = valid.sum(dim=0)  # (n_eval,)
-
-    # Replace NaN with large negative for ranking (will be masked out)
-    f_filled = f_s.clone()
-    l_filled = l_s.clone()
-    f_filled[~valid] = float('-inf')
-    l_filled[~valid] = float('-inf')
-
-    # Batch rank: argsort().argsort() along stock dimension -> (num_stocks, n_eval)
-    f_rank = f_filled.argsort(dim=0).argsort(dim=0).float()
-    l_rank = l_filled.argsort(dim=0).argsort(dim=0).float()
-
-    # Zero out invalid positions
-    f_rank[~valid] = 0.0
-    l_rank[~valid] = 0.0
-
-    # Per-day mean of ranks (only valid)
-    f_sum = f_rank.sum(dim=0)  # (n_eval,)
-    l_sum = l_rank.sum(dim=0)
-    f_mean = f_sum / counts.clamp(min=1)
-    l_mean = l_sum / counts.clamp(min=1)
-
-    # Center ranks
-    f_centered = (f_rank - f_mean.unsqueeze(0)) * valid.float()
-    l_centered = (l_rank - l_mean.unsqueeze(0)) * valid.float()
-
-    # Per-day correlation: sum(f*l) / (norm(f) * norm(l))
-    numerator = (f_centered * l_centered).sum(dim=0)  # (n_eval,)
-    f_norm = f_centered.pow(2).sum(dim=0).sqrt()
-    l_norm = l_centered.pow(2).sum(dim=0).sqrt()
-    denom = f_norm * l_norm
-
-    # Filter days with enough data
-    day_valid = (counts >= 30) & (denom > 1e-10)
-    if day_valid.sum() < 10:
-        return 0.0, 0.0, 0.0
-
-    ics = (numerator[day_valid] / denom[day_valid]).cpu().numpy()
-
-    mean_ic = float(np.mean(ics))
-    std_ic = float(np.std(ics)) + 1e-8
+    mean_ic = np.mean(ics)
+    std_ic = np.std(ics) + 1e-8
     ic_ir = mean_ic / std_ic
 
     # Sub-period direction consistency
-    n_ics = len(ics)
-    n_periods = min(5, n_ics // 5)
+    # Split ICs into ~5 equal sub-periods
+    n_periods = min(5, len(ics) // 5)
     if n_periods < 3:
         return mean_ic, ic_ir, 0.5
 
-    chunk_size = n_ics // n_periods
+    chunk_size = len(ics) // n_periods
     sign_overall = np.sign(mean_ic)
-    same_sign_count = sum(
-        1 for i in range(n_periods)
-        if np.sign(np.mean(ics[i * chunk_size: (i + 1) * chunk_size])) == sign_overall
-    )
+    same_sign_count = 0
+    for i in range(n_periods):
+        chunk = ics[i * chunk_size: (i + 1) * chunk_size]
+        chunk_mean = np.mean(chunk)
+        if np.sign(chunk_mean) == sign_overall:
+            same_sign_count += 1
+
     direction_ratio = same_sign_count / n_periods
 
     return mean_ic, ic_ir, direction_ratio
 
 
-@torch.no_grad()
 def compute_turnover(factor: torch.Tensor, top_pct: float = 0.1, eval_days: int = 200) -> float:
     """
-    Compute average daily turnover of top-ranked stocks — vectorized on GPU.
-    High turnover = short-period factor.
+    Compute average daily turnover of top-ranked stocks.
+    High turnover = short-period factor (desirable for our goal).
+    
+    Returns:
+        Average daily turnover ratio (0 to 1).
     """
     num_stocks, num_days = factor.shape
     start_t = max(0, num_days - eval_days)
-    step = 5
-    f_slice = factor[:, start_t::step]  # (stocks, n_eval)
+    f_slice = factor[:, start_t::5]  # Sample every 5th day
     n_eval = f_slice.shape[1]
-
-    if n_eval < 2:
-        return 0.0
-
-    # Replace NaN with -inf for topk
-    f_filled = f_slice.clone()
-    f_filled[torch.isnan(f_filled)] = float('-inf')
-
-    n_top = max(int(num_stocks * top_pct), 1)
-
-    # Get top-k indices for all days at once: (n_top, n_eval)
-    _, top_indices = f_filled.topk(n_top, dim=0)  # (n_top, n_eval)
-
-    # Compute turnover between consecutive days
+    
     turnovers = []
-    # Sort indices for set comparison
-    top_sorted = top_indices.sort(dim=0).values  # (n_top, n_eval)
+    prev_top_set = None
+    
+    for t in range(n_eval):
+        f_col = f_slice[:, t]
+        valid = ~torch.isnan(f_col)
+        n_valid = valid.sum().item()
+        if n_valid < 30:
+            prev_top_set = None
+            continue
 
-    for t in range(1, n_eval):
-        prev = top_sorted[:, t - 1]
-        curr = top_sorted[:, t]
-        # Count overlap: for each element in curr, check if it exists in prev
-        # Use broadcasting: (n_top, 1) == (1, n_top) -> (n_top, n_top)
-        overlap = (curr.unsqueeze(1) == prev.unsqueeze(0)).any(dim=1).sum().item()
-        turnovers.append(1.0 - overlap / n_top)
+        n_top = max(int(n_valid * top_pct), 1)
+        top_indices = f_col.clone()
+        top_indices[~valid] = float('-inf')
+        _, top_idx = top_indices.topk(n_top)
+        current_set = set(top_idx.cpu().tolist())
 
-    return float(np.mean(turnovers)) if turnovers else 0.0
+        if prev_top_set is not None:
+            overlap = len(current_set & prev_top_set)
+            turnover = 1.0 - overlap / max(len(current_set), 1)
+            turnovers.append(turnover)
+
+        prev_top_set = current_set
+
+    return np.mean(turnovers) if turnovers else 0.0
 
 
-@torch.no_grad()
 def fitness(node: Node, data: Dict[str, torch.Tensor], label: torch.Tensor,
             existing_factors: Optional[List[torch.Tensor]] = None,
             max_corr: float = 0.7) -> float:
@@ -511,10 +512,13 @@ def tournament_select(population: List[Tuple[Node, float]], k: int = 5) -> Node:
 
 class GPFactorMiner:
     """
-    Genetic Programming Factor Miner.
+    Genetic Programming Factor Miner with lifecycle registry management.
     
     Discovers short-period alpha factors via evolutionary search on GPU tensors.
+    Manages factor lifecycle: discovered → testing → validated/rejected.
     """
+
+    VALID_STATUSES = ('discovered', 'testing', 'validated', 'rejected')
 
     def __init__(
         self,
@@ -543,6 +547,185 @@ class GPFactorMiner:
         self.seed = seed
 
         self.discovered_factors: List[Tuple[Node, float, float, float]] = []  # (tree, ic, icir, turnover)
+        self._factor_ids: List[str] = []  # parallel to discovered_factors, stable IDs
+
+    # ============================================================
+    # Registry I/O (v2 schema with lifecycle management)
+    # ============================================================
+
+    @staticmethod
+    def load_registry(path: str) -> dict:
+        """Load the full registry from JSON, auto-migrating v1 format if needed."""
+        p = Path(path)
+        if not p.exists():
+            return {"version": 2, "next_id": 1, "factors": []}
+        with open(p) as f:
+            data = json.load(f)
+        # v1 detection: top-level is a list
+        if isinstance(data, list):
+            return GPFactorMiner._migrate_v1(data)
+        return data
+
+    @staticmethod
+    def save_registry(path: str, registry: dict):
+        """Atomically write registry to JSON."""
+        Path(path).parent.mkdir(parents=True, exist_ok=True)
+        tmp_path = path + ".tmp"
+        with open(tmp_path, 'w') as f:
+            json.dump(registry, f, indent=2, ensure_ascii=False)
+        os.replace(tmp_path, path)
+
+    @staticmethod
+    def _migrate_v1(records: list) -> dict:
+        """Migrate v1 flat list to v2 registry. Existing factors become validated."""
+        factors = []
+        for i, rec in enumerate(records):
+            factors.append({
+                "id": f"gp_{i+1:03d}",
+                "expr": rec["expr"],
+                "tree": rec["tree"],
+                "status": "validated",
+                "mining_metrics": {
+                    "ic": rec.get("ic", 0),
+                    "icir": rec.get("icir", 0),
+                    "turnover": rec.get("turnover", 0),
+                },
+                "discovered_at": "2026-05-08",
+                "note": "migrated from v1",
+            })
+        return {"version": 2, "next_id": len(records) + 1, "factors": factors}
+
+    def load(self, path: str, status_filter: Optional[List[str]] = None) -> bool:
+        """
+        Load factors from registry into discovered_factors for computation.
+        
+        Args:
+            path: Path to gp_factors.json
+            status_filter: If provided, only load factors with these statuses.
+                          e.g. ["validated"] for production, ["validated", "testing"] for validation run.
+                          None = load all (for mining dedup).
+        """
+        registry = self.load_registry(path)
+        factors = registry.get("factors", [])
+        if not factors:
+            return False
+
+        self.discovered_factors = []
+        self._factor_ids = []
+        for rec in factors:
+            if status_filter and rec["status"] not in status_filter:
+                continue
+            tree = self._deserialize_tree(rec["tree"])
+            metrics = rec.get("mining_metrics", {})
+            self.discovered_factors.append((
+                tree,
+                metrics.get("ic", 0),
+                metrics.get("icir", 0),
+                metrics.get("turnover", 0),
+            ))
+            self._factor_ids.append(rec["id"])
+
+        if self.discovered_factors:
+            filter_desc = f" (filter={status_filter})" if status_filter else ""
+            print(f"[GP Miner] Loaded {len(self.discovered_factors)} factors from {path}{filter_desc}")
+            return True
+        return False
+
+    def append_discovered(self, path: str, new_factors: List[Tuple[Node, float, float, float]]):
+        """
+        Append newly mined factors to registry as 'discovered' status.
+        Deduplicates against ALL existing factors (any status) by expression string.
+        """
+        registry = self.load_registry(path)
+        existing_exprs = {f["expr"] for f in registry["factors"]}
+
+        added = 0
+        for tree, ic, icir, turnover in new_factors:
+            expr = tree.to_expr()
+            if expr in existing_exprs:
+                continue
+            fid = f"gp_{registry['next_id']:03d}"
+            registry["next_id"] += 1
+            registry["factors"].append({
+                "id": fid,
+                "expr": expr,
+                "tree": self._serialize_tree(tree),
+                "status": "discovered",
+                "mining_metrics": {"ic": ic, "icir": icir, "turnover": turnover},
+                "discovered_at": str(date.today()),
+                "note": "",
+            })
+            existing_exprs.add(expr)
+            added += 1
+
+        self.save_registry(path, registry)
+        print(f"[GP Miner] Appended {added} new factors (skipped {len(new_factors) - added} duplicates)")
+
+    @staticmethod
+    def set_status(path: str, ids: List[str], status: str, note: str = ""):
+        """
+        Change status of factors by ID.
+        
+        Args:
+            path: Registry file path
+            ids: List of factor IDs (e.g. ["gp_003", "gp_004"])
+            status: Target status (discovered/testing/validated/rejected)
+            note: Optional note to attach
+        """
+        if status not in GPFactorMiner.VALID_STATUSES:
+            print(f"[GP Miner] Error: invalid status '{status}'. Valid: {GPFactorMiner.VALID_STATUSES}")
+            return
+
+        registry = GPFactorMiner.load_registry(path)
+        id_set = set(ids)
+        updated = 0
+        for factor in registry["factors"]:
+            if factor["id"] in id_set:
+                factor["status"] = status
+                if note:
+                    factor["note"] = note
+                updated += 1
+                id_set.discard(factor["id"])
+
+        if id_set:
+            print(f"[GP Miner] Warning: IDs not found: {id_set}")
+        if updated:
+            GPFactorMiner.save_registry(path, registry)
+            print(f"[GP Miner] Updated {updated} factors → status='{status}'")
+
+    @staticmethod
+    def print_status(path: str):
+        """Print a summary of the factor registry."""
+        registry = GPFactorMiner.load_registry(path)
+        factors = registry.get("factors", [])
+
+        if not factors:
+            print("[GP Registry] Empty — no factors registered.")
+            return
+
+        # Group by status
+        by_status: Dict[str, list] = {}
+        for f in factors:
+            by_status.setdefault(f["status"], []).append(f)
+
+        print(f"\n[GP Registry] {len(factors)} factors total:")
+        print("-" * 60)
+        for status in ('validated', 'testing', 'discovered', 'rejected'):
+            group = by_status.get(status, [])
+            if not group:
+                continue
+            print(f"\n  {status.upper()} ({len(group)}):")
+            for f in group:
+                metrics = f.get("mining_metrics", {})
+                ic = metrics.get("icir", 0)
+                note = f.get("note", "")
+                note_str = f"  | {note}" if note else ""
+                print(f"    {f['id']}: {f['expr']:<45} ICIR={ic:.2f}{note_str}")
+        print()
+
+    # ============================================================
+    # GP Evolution Engine
+    # ============================================================
 
     def mine(
         self,
@@ -550,6 +733,7 @@ class GPFactorMiner:
         col_map: Dict[str, int],
         label: torch.Tensor,
         existing_factor_tensors: Optional[List[torch.Tensor]] = None,
+        registry_path: Optional[str] = None,
     ) -> List[Tuple[str, Node]]:
         """
         Run GP evolution to discover new factors.
@@ -559,6 +743,7 @@ class GPFactorMiner:
             col_map: Column name -> index mapping
             label: (num_stocks, max_len) forward return label
             existing_factor_tensors: List of existing factor tensors for deduplication
+            registry_path: If provided, load all existing exprs for dedup (prevents re-mining rejected)
             
         Returns:
             List of (factor_name, expression_tree) tuples
@@ -566,20 +751,19 @@ class GPFactorMiner:
         random.seed(self.seed)
         np.random.seed(self.seed)
 
-        # Trim label to match terminal window
-        max_days = 500
-        if label.shape[1] > max_days:
-            label = label[:, -max_days:]
-        
-        # Prepare terminal data (trimmed to 500 days for GP mining memory)
-        data = self._prepare_terminals(padded_raw, col_map, trim_days=500)
-        
-        # Release full padded_raw reference — only terminals needed from here
-        del padded_raw
-        torch.cuda.empty_cache()
+        # Load existing expressions for dedup (all statuses including rejected)
+        self._existing_exprs: set = set()
+        if registry_path:
+            registry = self.load_registry(registry_path)
+            self._existing_exprs = {f["expr"] for f in registry.get("factors", [])}
+            if self._existing_exprs:
+                print(f"[GP Miner] Loaded {len(self._existing_exprs)} existing expressions for dedup")
+
+        # Prepare terminal data
+        data = self._prepare_terminals(padded_raw, col_map)
         
         print(f"[GP Miner] Starting evolution: pop={self.population_size}, gen={self.n_generations}")
-        print(f"[GP Miner] Data shape: {label.shape[0]} stocks, {label.shape[1]} days")
+        print(f"[GP Miner] Data shape: {padded_raw.shape[0]} stocks, {padded_raw.shape[1]} days")
         print(f"[GP Miner] Targeting short-period factors (windows: {WINDOWS})")
 
         # Initialize population
@@ -594,7 +778,6 @@ class GPFactorMiner:
         factor_pool = list(existing_factor_tensors) if existing_factor_tensors else []
 
         for gen in range(self.n_generations):
-            gen_start = time.time()
             # Sort by fitness
             population.sort(key=lambda x: x[1], reverse=True)
             gen_best = population[0][1]
@@ -607,11 +790,9 @@ class GPFactorMiner:
 
             if gen % 10 == 0 or gen == self.n_generations - 1:
                 valid_count = sum(1 for _, s in population if s > -999)
-                elapsed = time.time() - gen_start
                 print(f"[GP Miner] Gen {gen:3d}: best={gen_best:.4f}, "
                       f"valid={valid_count}/{self.population_size}, "
-                      f"discovered={len(self.discovered_factors)}, "
-                      f"time={elapsed:.1f}s")
+                      f"discovered={len(self.discovered_factors)}")
 
             # Check if top individual qualifies as a new factor
             if gen_best > 0:
@@ -655,9 +836,6 @@ class GPFactorMiner:
                     new_population.append((c, s))
 
             population = new_population
-            
-            # Free GPU memory fragmentation
-            torch.cuda.empty_cache()
 
         # Final report
         print(f"\n[GP Miner] === Mining Complete ===")
@@ -672,16 +850,41 @@ class GPFactorMiner:
 
         return results
 
-    def _prepare_terminals(self, padded_raw: torch.Tensor, col_map: Dict[str, int], trim_days: int = 0) -> Dict[str, torch.Tensor]:
-        """Extract terminal tensors from padded raw data.
-        
-        Args:
-            trim_days: If >0, only use the last N days (for GP mining memory reduction).
-                       0 means use all days (for compute_factors during training).
+    # ============================================================
+    # Factor Computation (used during training)
+    # ============================================================
+
+    def compute_factors(
+        self, padded_raw: torch.Tensor, col_map: Dict[str, int]
+    ) -> Dict[str, torch.Tensor]:
         """
-        if trim_days > 0 and padded_raw.shape[1] > trim_days:
-            padded_raw = padded_raw[:, -trim_days:, :]
+        Compute loaded GP factors on new data.
+        Uses stable IDs from registry when available.
         
+        Returns:
+            Dict of factor_name -> (num_stocks, max_len) tensor
+        """
+        if not self.discovered_factors:
+            return {}
+
+        data = self._prepare_terminals(padded_raw, col_map)
+        result = {}
+
+        for i, (tree, _, _, _) in enumerate(self.discovered_factors):
+            # Use stable ID if available, fallback to index-based name
+            name = self._factor_ids[i] if i < len(self._factor_ids) else f"gp_alpha_{i:03d}"
+            factor = evaluate_tree(tree, data)
+            if _is_valid_tensor(factor):
+                result[name] = factor
+
+        return result
+
+    # ============================================================
+    # Internal Helpers
+    # ============================================================
+
+    def _prepare_terminals(self, padded_raw: torch.Tensor, col_map: Dict[str, int]) -> Dict[str, torch.Tensor]:
+        """Extract terminal tensors from padded raw data."""
         terminal_map = {
             'O': 'open',
             'H': 'high',
@@ -689,15 +892,21 @@ class GPFactorMiner:
             'C': 'close',
             'V': 'volume',
             'TR': 'turnover_rate',
+            # MoneyFlow — 知情者交易信号
+            'BL': 'buy_lg_amount',    # 大单买入金额
+            'SL': 'sell_lg_amount',   # 大单卖出金额
+            'BE': 'buy_elg_amount',   # 超大单买入金额
+            'SE': 'sell_elg_amount',  # 超大单卖出金额
+            'NMF': 'net_mf_amount',   # 净资金流入金额
         }
         data = {}
         for term_name, col_name in terminal_map.items():
             if col_name in col_map:
                 data[term_name] = padded_raw[:, :, col_map[col_name]]
             else:
-                data[term_name] = torch.full(
-                    (padded_raw.shape[0], padded_raw.shape[1]),
-                    float('nan'), device=padded_raw.device, dtype=padded_raw.dtype
+                data[term_name] = torch.zeros(
+                    padded_raw.shape[0], padded_raw.shape[1],
+                    device=padded_raw.device, dtype=padded_raw.dtype
                 )
         return data
 
@@ -706,8 +915,10 @@ class GPFactorMiner:
         label: torch.Tensor, factor_pool: List[torch.Tensor]
     ):
         """Try to add a factor to the discovered pool after validation."""
-        # Expression deduplication
+        # Expression deduplication (against current session + registry)
         expr_str = tree.to_expr()
+        if expr_str in self._existing_exprs:
+            return
         for existing_tree, _, _, _ in self.discovered_factors:
             if existing_tree.to_expr() == expr_str:
                 return
@@ -723,7 +934,6 @@ class GPFactorMiner:
             return
         if abs(ic_ir) < self.min_icir:
             return
-        # Direction consistency gate
         if direction_ratio < 0.6:
             return
 
@@ -737,7 +947,7 @@ class GPFactorMiner:
                 if valid.sum() < 100:
                     continue
                 corr = torch.corrcoef(torch.stack([f_flat[valid], e_flat[valid]]))[0, 1].item()
-                if abs(corr) > 0.5:  # Stricter for inter-GP diversity
+                if abs(corr) > 0.5:
                     return
 
         turnover = compute_turnover(factor)
@@ -746,60 +956,6 @@ class GPFactorMiner:
         print(f"[GP Miner] +++ New factor discovered! IC={mean_ic:.4f}, ICIR={ic_ir:.4f}, "
               f"dir={direction_ratio:.2f}, turnover={turnover:.3f}")
         print(f"           expr: {expr_str}")
-
-    def compute_factors(
-        self, padded_raw: torch.Tensor, col_map: Dict[str, int]
-    ) -> Dict[str, torch.Tensor]:
-        """
-        Compute discovered GP factors on new data.
-        Called by the factor calculator during normal operation.
-        
-        Returns:
-            Dict of factor_name -> (num_stocks, max_len) tensor
-        """
-        if not self.discovered_factors:
-            return {}
-
-        data = self._prepare_terminals(padded_raw, col_map)
-        result = {}
-
-        for i, (tree, _, _, _) in enumerate(self.discovered_factors):
-            name = f"gp_alpha_{i:03d}"
-            factor = evaluate_tree(tree, data)
-            if _is_valid_tensor(factor):
-                result[name] = factor
-
-        return result
-
-    def save(self, path: str):
-        """Save discovered factors to JSON."""
-        records = []
-        for tree, ic, icir, turnover in self.discovered_factors:
-            records.append({
-                'expr': tree.to_expr(),
-                'tree': self._serialize_tree(tree),
-                'ic': ic,
-                'icir': icir,
-                'turnover': turnover,
-            })
-        Path(path).parent.mkdir(parents=True, exist_ok=True)
-        with open(path, 'w') as f:
-            json.dump(records, f, indent=2)
-        print(f"[GP Miner] Saved {len(records)} factors to {path}")
-
-    def load(self, path: str) -> bool:
-        """Load discovered factors from JSON."""
-        p = Path(path)
-        if not p.exists():
-            return False
-        with open(p) as f:
-            records = json.load(f)
-        self.discovered_factors = []
-        for rec in records:
-            tree = self._deserialize_tree(rec['tree'])
-            self.discovered_factors.append((tree, rec['ic'], rec['icir'], rec['turnover']))
-        print(f"[GP Miner] Loaded {len(self.discovered_factors)} factors from {path}")
-        return True
 
     def _serialize_tree(self, node: Node) -> dict:
         return {
@@ -811,4 +967,158 @@ class GPFactorMiner:
 
     def _deserialize_tree(self, d: dict) -> Node:
         children = [self._deserialize_tree(c) for c in d.get('children', [])]
+        return Node(op=d['op'], children=children, value=d.get('value'), window=d.get('window'))
+
+    # Legacy compatibility
+    def save(self, path: str):
+        """Legacy save — redirects to append_discovered for backward compat."""
+        self.append_discovered(path, self.discovered_factors)
+
+    # ============================================================
+    # Automatic Validation Gate
+    # ============================================================
+
+    @staticmethod
+    def validate_discovered(
+        path: str,
+        padded_raw: torch.Tensor,
+        col_map: Dict[str, int],
+        label: torch.Tensor,
+        min_rolling_ic: float = 0.03,
+        n_windows: int = 5,
+        window_size: int = 200,
+    ) -> Tuple[List[str], List[str]]:
+        """
+        Auto-validate 'discovered' factors using rolling IC.
+        
+        Computes IC in multiple non-overlapping windows. Factors that pass
+        the threshold in majority of windows are promoted to 'testing';
+        others are rejected.
+        
+        Args:
+            path: Registry JSON path
+            padded_raw: (num_stocks, max_len, features) GPU tensor
+            col_map: Column name -> index mapping
+            label: (num_stocks, max_len) forward return label
+            min_rolling_ic: Minimum |IC| to pass (default 0.03)
+            n_windows: Number of rolling windows to evaluate
+            window_size: Days per window
+            
+        Returns:
+            (accepted_ids, rejected_ids) tuple
+        """
+        registry = GPFactorMiner.load_registry(path)
+        discovered = [f for f in registry["factors"] if f["status"] == "discovered"]
+        
+        if not discovered:
+            print("[GP Validate] No discovered factors to validate.")
+            return [], []
+
+        # Prepare terminal data
+        terminal_map = {
+            'O': 'open', 'H': 'high', 'L': 'low', 
+            'C': 'close', 'V': 'volume', 'TR': 'turnover_rate',
+            'BL': 'buy_lg_amount', 'SL': 'sell_lg_amount',
+            'BE': 'buy_elg_amount', 'SE': 'sell_elg_amount',
+            'NMF': 'net_mf_amount',
+        }
+        data = {}
+        for term_name, col_name in terminal_map.items():
+            if col_name in col_map:
+                data[term_name] = padded_raw[:, :, col_map[col_name]]
+            else:
+                data[term_name] = torch.zeros(
+                    padded_raw.shape[0], padded_raw.shape[1],
+                    device=padded_raw.device, dtype=padded_raw.dtype
+                )
+
+        num_days = padded_raw.shape[1]
+        total_eval_days = n_windows * window_size
+        if total_eval_days > num_days:
+            n_windows = max(2, num_days // window_size)
+            total_eval_days = n_windows * window_size
+
+        print(f"[GP Validate] Validating {len(discovered)} factors "
+              f"({n_windows} windows x {window_size} days, min |IC| = {min_rolling_ic})")
+
+        accepted_ids = []
+        rejected_ids = []
+
+        for rec in discovered:
+            tree = GPFactorMiner._deserialize_tree_static(rec["tree"])
+            factor = evaluate_tree(tree, data)
+            
+            if not _is_valid_tensor(factor):
+                rejected_ids.append(rec["id"])
+                print(f"  {rec['id']}: REJECTED (invalid tensor)")
+                continue
+
+            # Compute IC in each window
+            window_ics = []
+            for w in range(n_windows):
+                end_t = num_days - w * window_size
+                start_t = end_t - window_size
+                if start_t < 0:
+                    break
+                
+                f_win = factor[:, start_t:end_t]
+                l_win = label[:, start_t:end_t]
+                
+                # Compute daily IC within this window (sample every 5th day)
+                ics = []
+                for t in range(0, window_size, 5):
+                    f_col = f_win[:, t]
+                    l_col = l_win[:, t]
+                    valid = ~(torch.isnan(f_col) | torch.isnan(l_col))
+                    n_valid = valid.sum().item()
+                    if n_valid < 30:
+                        continue
+                    f_valid = f_col[valid]
+                    l_valid = l_col[valid]
+                    f_rank = f_valid.argsort().argsort().float()
+                    l_rank = l_valid.argsort().argsort().float()
+                    f_rank = f_rank - f_rank.mean()
+                    l_rank = l_rank - l_rank.mean()
+                    denom = f_rank.norm() * l_rank.norm()
+                    if denom < 1e-10:
+                        continue
+                    ic = (f_rank * l_rank).sum() / denom
+                    ics.append(ic.item())
+                
+                if ics:
+                    window_ics.append(np.mean(ics))
+
+            if len(window_ics) < 2:
+                rejected_ids.append(rec["id"])
+                print(f"  {rec['id']}: REJECTED (insufficient data)")
+                continue
+
+            mean_ic = np.mean([abs(ic) for ic in window_ics])
+            # Check: majority of windows must pass threshold
+            pass_count = sum(1 for ic in window_ics if abs(ic) >= min_rolling_ic)
+            pass_ratio = pass_count / len(window_ics)
+
+            if mean_ic >= min_rolling_ic and pass_ratio >= 0.6:
+                accepted_ids.append(rec["id"])
+                print(f"  {rec['id']}: ACCEPTED (mean |IC|={mean_ic:.4f}, "
+                      f"pass={pass_count}/{len(window_ics)})")
+            else:
+                rejected_ids.append(rec["id"])
+                print(f"  {rec['id']}: REJECTED (mean |IC|={mean_ic:.4f}, "
+                      f"pass={pass_count}/{len(window_ics)})")
+
+        # Update registry
+        if accepted_ids:
+            GPFactorMiner.set_status(path, accepted_ids, "testing",
+                                     note=f"auto-validated: rolling IC >= {min_rolling_ic}")
+        if rejected_ids:
+            GPFactorMiner.set_status(path, rejected_ids, "rejected",
+                                     note=f"auto-rejected: rolling IC < {min_rolling_ic}")
+
+        return accepted_ids, rejected_ids
+
+    @staticmethod
+    def _deserialize_tree_static(d: dict) -> 'Node':
+        """Static version of _deserialize_tree for use without instance."""
+        children = [GPFactorMiner._deserialize_tree_static(c) for c in d.get('children', [])]
         return Node(op=d['op'], children=children, value=d.get('value'), window=d.get('window'))

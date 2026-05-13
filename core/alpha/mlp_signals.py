@@ -98,6 +98,7 @@ class MLPSignals:
             "attn_dropout": 0.15,
             "ffn_dropout": 0.15,
             "head_dropout": 0.10,
+            "attn_activation": "softmax",  # "entmax15" available but ~40x slower
             # Training hyperparameters (unchanged from Step 1)
             "n_epochs": 1000,
             "batch_size": 2048,
@@ -424,6 +425,7 @@ class MLPSignals:
             attn_dropout=self.model_settings.get("attn_dropout", 0.15),
             ffn_dropout=self.model_settings.get("ffn_dropout", 0.15),
             head_dropout=self.model_settings.get("head_dropout", 0.10),
+            attn_activation=self.model_settings.get("attn_activation", "softmax"),
         )
         
         try:
