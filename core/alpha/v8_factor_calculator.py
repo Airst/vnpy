@@ -1,8 +1,8 @@
 from core.alpha.factor_calculator import FactorCalculator, device, torch, np, pl, cs_rank, ts_corr, cs_zscore, ts_delay, ts_mean, ts_min, ts_max, ts_quantile, ts_std, ts_sum, ts_rsquare, ts_slope, ta_atr, ta_rsi, cs_group_mean, ts_kdj, ts_cov
 
 class V8FactorCalculator(FactorCalculator):
-    def __init__(self):
-        super().__init__()
+    def __init__(self, **kwargs):
+        super().__init__(**kwargs)
 
     # col_map结构可参考 core/alpha/data_columns_info.txt
     def build_features(self, padded_raw, col_map) -> dict[str, torch.Tensor]:

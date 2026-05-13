@@ -1,5 +1,4 @@
 from core.alpha.factor_calculator import FactorCalculator, device, torch, np, pl, cs_rank, ts_corr, cs_zscore, ts_delay, ts_mean, ts_min, ts_max, ts_quantile, ts_std, ts_sum, ts_rsquare, ts_slope, ta_atr, ta_rsi, cs_group_mean, ts_kdj, ts_cov
-from core.alpha.gp_factor_miner import GPFactorMiner
 
 class V11FactorCalculator(FactorCalculator):
     """
@@ -11,17 +10,19 @@ class V11FactorCalculator(FactorCalculator):
     V9 → V10: 新增 Amihud 流动性因子组, 标签加入低流动性惩罚 + informed-buyer bonus
     V10 → V11: 动量崩溃检测 4 次尝试全部失败，回退到 V10 基线
     V11-5: GP 遗传编程因子挖掘 — 发现 2 个短周期因子 (Sharpe +33%)
+    V11-7: GP 因子生命周期管理 — 注册表 v2 schema, 增量挖掘, 状态机
 
     == 当前状态 ==
-    手工因子: ~110, GP因子: 2 (从 gp_factors.json 动态加载)
+    手工因子: ~110, GP因子: 由注册表管理 (core/alpha/gp_factors.json)
     模型: FactorAttentionNetwork (d_token=64, 1层Attention, 4heads, d_ffn=128)
-    回测指标: Sharpe 1.33, 年化 97%, MaxDD -29.37% (2022-01 ~ 2026-05)
+    GP加载: 统一在父类 FactorCalculator 中，通过 gp_status_filter 参数控制
 
     == 设计决策 ==
     - 因子体系以换手率、动量、流动性三大维度为主导
     - GP 因子补充短周期信号维度，增加模型输出变异性
     - beta-neutral label 使模型学习截面相对排序而非绝对收益
-    - GP 因子通过 gp_factors.json 动态加载，与手工因子解耦
+    - GP 因子通过注册表 (v2 schema) 管理生命周期: discovered→testing→validated/rejected
+    - GP 加载统一在基类，子类无需关心
 
     == 失败记录 ==
     - V11-1 单日差分动量加速度: Sharpe 1.13, 金融时序差分=白噪声
@@ -30,17 +31,11 @@ class V11FactorCalculator(FactorCalculator):
     - V11-4 Gate Network条件化因子加权: Sharpe 0.84, Attention已实现动态加权
     - V11-5a informed-buyer bonus加质量门槛: 标签改动牵连太广，全面下滑
     - V11-5b GP因子v1(7因子同质化): Sharpe 0.78, 过拟合近期+同维度叠加
-    - 结论: 动量维度因子工程已触及天花板; GP需全周期评估+严格去重
+    - V11-6 GP因子5个同质化: Sharpe 1.07, 短周期协方差因子同维度叠加+过拟合
+    - 结论: 动量维度因子工程已触及天花板; GP需全周期评估+严格去重+生命周期管理
     """
-    def __init__(self):
-        super().__init__()
-        # GP factor miner: load pre-mined factors if available
-        self.gp_miner = GPFactorMiner()
-        gp_path = "core/alpha_db/gp_factors.json"
-        if self.gp_miner.load(gp_path):
-            print(f"[V11] Loaded {len(self.gp_miner.discovered_factors)} GP factors")
-        else:
-            print("[V11] No GP factors found, will use manual factors only")
+    def __init__(self, **kwargs):
+        super().__init__(**kwargs)
 
     # col_map结构可参考 core/alpha/data_columns_info.txt
     def build_features(self, padded_raw, col_map) -> dict[str, torch.Tensor]:

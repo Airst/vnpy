@@ -89,7 +89,7 @@ class StockRatingScreener:
                 temperature=0.2,
                 max_tokens=2048,
             )
-            return self._parse_response(vt_symbol, raw)
+            return self._parse_response(vt_symbol, raw, system, user)
         except Exception as e:
             return self._error_result(vt_symbol, str(e))
 
@@ -171,18 +171,40 @@ class StockRatingScreener:
 
         return final_results
 
-    def _parse_response(self, vt_symbol: str, raw: str) -> StockRating:
-        """Parse and validate LLM JSON response."""
+    def _parse_response(self, vt_symbol: str, raw: str, system: str = "", user: str = "") -> StockRating:
+        """Parse and validate LLM JSON response. Retries once on JSON errors using original session."""
         extracted = _extract_json(raw)
         try:
             data = json.loads(extracted)
         except json.JSONDecodeError as e:
-            return self._error_result(vt_symbol, f"Invalid JSON: {e}", raw=raw)
+            # Retry: continue original conversation asking LLM to fix its JSON
+            data = self._retry_json_fix(raw, system, user)
+            if data is None:
+                return self._error_result(vt_symbol, f"Invalid JSON: {e}", raw=raw)
 
         try:
             return self._build_result_from_dict(vt_symbol, data, raw=raw)
         except Exception as e:
             return self._error_result(vt_symbol, f"Validation error: {e}", raw=raw)
+
+    def _retry_json_fix(self, malformed_response: str, system: str, user: str) -> Optional[Dict[str, Any]]:
+        """Continue original session to ask LLM to fix its malformed JSON response."""
+        messages = [
+            {"role": "system", "content": system},
+            {"role": "user", "content": user},
+            {"role": "assistant", "content": malformed_response},
+            {"role": "user", "content": "你的回复JSON格式有误，无法解析。请重新输出正确的JSON，只返回JSON，不要有其他内容。"},
+        ]
+        try:
+            retry_raw = self.client.chat_messages(
+                messages=messages,
+                temperature=0.0,
+                max_tokens=2048,
+            )
+            extracted = _extract_json(retry_raw)
+            return json.loads(extracted)
+        except Exception:
+            return None
 
     def _build_result_from_dict(
         self,

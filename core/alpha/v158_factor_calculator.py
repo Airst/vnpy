@@ -12,8 +12,8 @@ class V158FactorCalculator(FactorCalculator):
     Alpha158 Factor Calculator
     Migrated from vnpy/alpha/dataset/datasets/alpha_158.py
     """
-    def __init__(self):
-        super().__init__()
+    def __init__(self, **kwargs):
+        super().__init__(**kwargs)
 
     def build_features(self, padded_raw: torch.Tensor, col_map: dict) -> dict[str, torch.Tensor]:
         def get_col(name: str) -> torch.Tensor:

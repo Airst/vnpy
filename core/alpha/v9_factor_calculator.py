@@ -28,8 +28,8 @@ from core.alpha.factor_calculator import FactorCalculator, device, torch, np, pl
 
 class V9FactorCalculator(FactorCalculator):
     """V9 Factor Calculator — beta-neutral + Factor Attention 架构确立版本。"""
-    def __init__(self):
-        super().__init__()
+    def __init__(self, **kwargs):
+        super().__init__(**kwargs)
 
     # col_map结构可参考 core/alpha/data_columns_info.txt
     def build_features(self, padded_raw, col_map) -> dict[str, torch.Tensor]:

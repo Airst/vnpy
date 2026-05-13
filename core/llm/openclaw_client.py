@@ -131,6 +131,38 @@ class OpenClawClient:
         response = self.client.chat.completions.create(**kwargs)
         return response.choices[0].message.content or ""
 
+    def chat_messages(
+        self,
+        messages: List[Dict[str, str]],
+        temperature: float = 0.2,
+        max_tokens: int = 2048,
+    ) -> str:
+        """
+        Send a multi-turn chat request and return the assistant text.
+
+        Parameters
+        ----------
+        messages : list of dict
+            Full conversation history (system/user/assistant messages).
+        temperature : float
+            Sampling temperature.
+        max_tokens : int
+            Max completion tokens.
+
+        Returns
+        -------
+        str
+            The assistant's final text response.
+        """
+        kwargs: Dict[str, Any] = {
+            "model": self.model,
+            "messages": messages,
+            "temperature": temperature,
+            "max_tokens": max_tokens,
+        }
+        response = self.client.chat.completions.create(**kwargs)
+        return response.choices[0].message.content or ""
+
     def chat_json(
         self,
         system: str,

@@ -11,12 +11,29 @@ device = "cuda" if torch.cuda.is_available() else "cpu"
 class FactorCalculator:
     """
     Base class for A-Share Factor Calculators.
-    Provides common methods for symbol retrieval and data loading.
+    Provides common methods for symbol retrieval, data loading, and GP factor management.
+
+    == GP 因子生命周期管理 ==
+    基类统一加载 GP 因子 (core/alpha/gp_factors.json)，通过 gp_status_filter 参数控制：
+    - 默认 ["validated"]: 生产训练只使用已验证因子
+    - ["validated", "testing"]: 验证训练时包含待测因子
+    - None → ["validated"]
+    子类通过 **kwargs 透传参数，无需关心 GP 加载逻辑。
     """
     BASE_COLS = ["open", "high", "low", "close", "volume", "turnover", "turnover_rate", "pe", "pb", "ps", "dv_ratio", "total_mv"]
 
-    def __init__(self) -> None:
+    def __init__(self, gp_status_filter=None) -> None:
         print(f"[FactorCalculator] Using device: {device}")
+        # GP factor loading (shared across all versions)
+        from core.alpha.gp_factor_miner import GPFactorMiner
+        self.gp_miner = GPFactorMiner()
+        gp_path = "core/alpha/gp_factors.json"
+        if gp_status_filter is None:
+            gp_status_filter = ["validated"]
+        if self.gp_miner.load(gp_path, status_filter=gp_status_filter):
+            print(f"[FactorCalculator] Loaded {len(self.gp_miner.discovered_factors)} GP factors (filter={gp_status_filter})")
+        else:
+            print("[FactorCalculator] No GP factors found")
 
     def calculate_features(self, df: pl.DataFrame) -> pl.DataFrame:
         """

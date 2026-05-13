@@ -225,29 +225,25 @@ def _get_single_stock_rating(vt_symbol: str, signal_name: str = ""):
         if not isinstance(history, list) or not history:
             raise HTTPException(status_code=404, detail=f"No rating found for: {vt_symbol}")
         
-        # Attach signal scores if signal_name is provided
+        # Attach latest signal score if signal_name is provided
         if signal_name:
             try:
                 signal_df = core_service.lab.load_signal(signal_name)
                 if signal_df is not None and not signal_df.is_empty():
-                    # Build score map from all dates
-                    score_map = {}
-                    for row in signal_df.iter_rows(named=True):
-                        date_str = row.get('datetime')
-                        if date_str:
-                            if hasattr(date_str, 'strftime'):
-                                date_str = date_str.strftime("%Y-%m-%d")
-                            else:
-                                date_str = str(date_str)[:10]  # YYYY-MM-DD
-                            score = row.get('final_signal') or row.get('total_score') or 0
-                            key = f"{vt_symbol}_{date_str}"
-                            score_map[key] = score
+                    # Get latest score for this stock
+                    latest_dt = signal_df['datetime'].max()
+                    latest_df = signal_df.filter(
+                        (pl.col('datetime') == latest_dt) &
+                        (pl.col('vt_symbol') == vt_symbol)
+                    )
+                    latest_score = None
+                    if not latest_df.is_empty():
+                        row = latest_df.row(0, named=True)
+                        latest_score = row.get('final_signal') or row.get('total_score') or 0
                     
-                    # Attach scores to history entries
+                    # Attach latest score to all history entries
                     for entry in history:
-                        entry_date = entry.get("date", "")
-                        key = f"{vt_symbol}_{entry_date}"
-                        entry['score'] = score_map.get(key)
+                        entry['score'] = latest_score
             except Exception:
                 pass  # Signal loading is optional
         

@@ -26,8 +26,8 @@ from core.alpha.factor_calculator import FactorCalculator, device, torch, np, pl
 
 class V10FactorCalculator(FactorCalculator):
     """V10 Factor Calculator — 在 V9 基础上新增流动性因子组。"""
-    def __init__(self):
-        super().__init__()
+    def __init__(self, **kwargs):
+        super().__init__(**kwargs)
 
     # col_map结构可参考 core/alpha/data_columns_info.txt
     def build_features(self, padded_raw, col_map) -> dict[str, torch.Tensor]:

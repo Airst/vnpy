@@ -8,8 +8,8 @@ from core.alpha.factor_calculator import (
 )
 
 class V101FactorCalculator(FactorCalculator): 
-    def __init__(self):
-        super().__init__()
+    def __init__(self, **kwargs):
+        super().__init__(**kwargs)
 
     def build_features(self, padded_raw: torch.Tensor, col_map: dict) -> dict[str, torch.Tensor]:
         def get_col(name: str) -> torch.Tensor:
