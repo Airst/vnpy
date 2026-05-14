@@ -26,6 +26,7 @@ JSON 注册表 (v2 schema) 管理因子全生命周期：
 终端节点 (Terminals): O, H, L, C, V, TR (量价原子数据)
                       BL, SL, BE, SE, NMF (资金流向 — 知情者交易信号)
                       CM5, CM20, CMX, CHR (概念板块 — 板块共振信号)
+                      MR (市场收益 — 逆大盘/beta不对称信号)
 一元时序 (Unary TS): ts_mean, ts_std, ts_max, ts_min, ts_delta, ts_rank, ts_decay_linear
 二元时序 (Binary TS): ts_corr, ts_cov
 截面 (Cross-Sectional): cs_rank, cs_zscore
@@ -60,7 +61,8 @@ from core.alpha.factor_calculator import (
 WINDOWS = [3, 5, 10, 20]
 TERMINALS = ['O', 'H', 'L', 'C', 'V', 'TR',
              'BL', 'SL', 'BE', 'SE', 'NMF',  # MoneyFlow: 大单/超大单/净流
-             'CM5', 'CM20', 'CMX', 'CHR']  # Concept: 板块动量/热度
+             'CM5', 'CM20', 'CMX', 'CHR',  # Concept: 板块动量/热度
+             'MR']  # Market Return: 大盘日收益
 
 @dataclass
 class Node:
@@ -915,6 +917,18 @@ class GPFactorMiner:
                     padded_raw.shape[0], padded_raw.shape[1],
                     device=padded_raw.device, dtype=padded_raw.dtype
                 )
+
+        # Computed terminal: Market Return (截面均值日收益, 广播到所有股票)
+        C = data['C']
+        C_prev = torch.roll(C, shifts=1, dims=1)
+        C_prev[:, 0] = C[:, 0]
+        ret_1 = C / (C_prev + 1e-8) - 1
+        ret_1_clean = torch.nan_to_num(ret_1, nan=0.0)
+        valid_mask = ~torch.isnan(ret_1)
+        valid_cnt = valid_mask.sum(dim=0).clamp(min=1)
+        mkt_ret = ret_1_clean.sum(dim=0) / valid_cnt  # (max_len,)
+        data['MR'] = mkt_ret.unsqueeze(0).expand_as(C)  # 广播到每只股票
+
         return data
 
     def _try_add_factor(
@@ -1040,6 +1054,17 @@ class GPFactorMiner:
                     padded_raw.shape[0], padded_raw.shape[1],
                     device=padded_raw.device, dtype=padded_raw.dtype
                 )
+
+        # Computed terminal: Market Return
+        C = data['C']
+        C_prev = torch.roll(C, shifts=1, dims=1)
+        C_prev[:, 0] = C[:, 0]
+        ret_1 = C / (C_prev + 1e-8) - 1
+        ret_1_clean = torch.nan_to_num(ret_1, nan=0.0)
+        valid_mask = ~torch.isnan(ret_1)
+        valid_cnt = valid_mask.sum(dim=0).clamp(min=1)
+        mkt_ret = ret_1_clean.sum(dim=0) / valid_cnt
+        data['MR'] = mkt_ret.unsqueeze(0).expand_as(C)
 
         num_days = padded_raw.shape[1]
         total_eval_days = n_windows * window_size

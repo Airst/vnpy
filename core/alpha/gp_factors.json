@@ -1,6 +1,6 @@
 {
   "version": 2,
-  "next_id": 21,
+  "next_id": 31,
   "factors": [
     {
       "id": "gp_001",
@@ -1183,6 +1183,582 @@
       },
       "discovered_at": "2026-05-14",
       "note": "Sharpe 1.26→1.39, MaxDD -21.44%, 收益回撤比6.21, 超大单+板块动量变化因子"
+    },
+    {
+      "id": "gp_021",
+      "expr": "cs_zscore(ts_max(cs_rank(ts_cov(C, V, 3)), 5))",
+      "tree": {
+        "op": "cs_zscore",
+        "value": null,
+        "window": null,
+        "children": [
+          {
+            "op": "ts_max",
+            "value": null,
+            "window": 5,
+            "children": [
+              {
+                "op": "cs_rank",
+                "value": null,
+                "window": null,
+                "children": [
+                  {
+                    "op": "ts_cov",
+                    "value": null,
+                    "window": 3,
+                    "children": [
+                      {
+                        "op": "terminal",
+                        "value": "C",
+                        "window": null,
+                        "children": []
+                      },
+                      {
+                        "op": "terminal",
+                        "value": "V",
+                        "window": null,
+                        "children": []
+                      }
+                    ]
+                  }
+                ]
+              }
+            ]
+          }
+        ]
+      },
+      "status": "rejected",
+      "mining_metrics": {
+        "ic": -0.07136100636300227,
+        "icir": -0.7531837928927544,
+        "turnover": 0.5302868729757353
+      },
+      "discovered_at": "2026-05-14",
+      "note": "Sharpe 1.39→1.35, 收益回撤比6.21→2.99, 同质化冗余"
+    },
+    {
+      "id": "gp_022",
+      "expr": "ts_max(ts_cov(C, V, 3), 3)",
+      "tree": {
+        "op": "ts_max",
+        "value": null,
+        "window": 3,
+        "children": [
+          {
+            "op": "ts_cov",
+            "value": null,
+            "window": 3,
+            "children": [
+              {
+                "op": "terminal",
+                "value": "C",
+                "window": null,
+                "children": []
+              },
+              {
+                "op": "terminal",
+                "value": "V",
+                "window": null,
+                "children": []
+              }
+            ]
+          }
+        ]
+      },
+      "status": "rejected",
+      "mining_metrics": {
+        "ic": -0.06356864414730637,
+        "icir": -0.7411589876806118,
+        "turnover": 0.6047250727197298
+      },
+      "discovered_at": "2026-05-14",
+      "note": "Sharpe 1.39→1.35, 收益回撤比6.21→2.99, 同质化冗余"
+    },
+    {
+      "id": "gp_023",
+      "expr": "ts_corr(cs_rank(cs_zscore(SL)), V, 5)",
+      "tree": {
+        "op": "ts_corr",
+        "value": null,
+        "window": 5,
+        "children": [
+          {
+            "op": "cs_rank",
+            "value": null,
+            "window": null,
+            "children": [
+              {
+                "op": "cs_zscore",
+                "value": null,
+                "window": null,
+                "children": [
+                  {
+                    "op": "terminal",
+                    "value": "SL",
+                    "window": null,
+                    "children": []
+                  }
+                ]
+              }
+            ]
+          },
+          {
+            "op": "terminal",
+            "value": "V",
+            "window": null,
+            "children": []
+          }
+        ]
+      },
+      "status": "rejected",
+      "mining_metrics": {
+        "ic": -0.03408720535260406,
+        "icir": -0.7488698561238633,
+        "turnover": 0.8837908157247123
+      },
+      "discovered_at": "2026-05-14",
+      "note": "Sharpe 1.39→1.35, 收益回撤比6.21→2.99, 同质化冗余"
+    },
+    {
+      "id": "gp_024",
+      "expr": "ts_corr(H, cs_zscore(SL), 5)",
+      "tree": {
+        "op": "ts_corr",
+        "value": null,
+        "window": 5,
+        "children": [
+          {
+            "op": "terminal",
+            "value": "H",
+            "window": null,
+            "children": []
+          },
+          {
+            "op": "cs_zscore",
+            "value": null,
+            "window": null,
+            "children": [
+              {
+                "op": "terminal",
+                "value": "SL",
+                "window": null,
+                "children": []
+              }
+            ]
+          }
+        ]
+      },
+      "status": "rejected",
+      "mining_metrics": {
+        "ic": -0.05185269374701688,
+        "icir": -0.8134441295220604,
+        "turnover": 0.861932651327991
+      },
+      "discovered_at": "2026-05-14",
+      "note": "Sharpe 1.39→1.35, 收益回撤比6.21→2.99, 同质化冗余"
+    },
+    {
+      "id": "gp_025",
+      "expr": "ts_corr(V, cs_zscore(SL), 5)",
+      "tree": {
+        "op": "ts_corr",
+        "value": null,
+        "window": 5,
+        "children": [
+          {
+            "op": "terminal",
+            "value": "V",
+            "window": null,
+            "children": []
+          },
+          {
+            "op": "cs_zscore",
+            "value": null,
+            "window": null,
+            "children": [
+              {
+                "op": "terminal",
+                "value": "SL",
+                "window": null,
+                "children": []
+              }
+            ]
+          }
+        ]
+      },
+      "status": "rejected",
+      "mining_metrics": {
+        "ic": -0.05734867453112897,
+        "icir": -0.8214719987171172,
+        "turnover": 0.8489915491128994
+      },
+      "discovered_at": "2026-05-14",
+      "note": "Sharpe 1.39→1.35, 收益回撤比6.21→2.99, 同质化冗余"
+    },
+    {
+      "id": "gp_026",
+      "expr": "mul(ts_std(cs_zscore(V), 5), add(cs_rank(ts_cov(C, V, 3)), cs_rank(cs_zscore(H))))",
+      "tree": {
+        "op": "mul",
+        "value": null,
+        "window": null,
+        "children": [
+          {
+            "op": "ts_std",
+            "value": null,
+            "window": 5,
+            "children": [
+              {
+                "op": "cs_zscore",
+                "value": null,
+                "window": null,
+                "children": [
+                  {
+                    "op": "terminal",
+                    "value": "V",
+                    "window": null,
+                    "children": []
+                  }
+                ]
+              }
+            ]
+          },
+          {
+            "op": "add",
+            "value": null,
+            "window": null,
+            "children": [
+              {
+                "op": "cs_rank",
+                "value": null,
+                "window": null,
+                "children": [
+                  {
+                    "op": "ts_cov",
+                    "value": null,
+                    "window": 3,
+                    "children": [
+                      {
+                        "op": "terminal",
+                        "value": "C",
+                        "window": null,
+                        "children": []
+                      },
+                      {
+                        "op": "terminal",
+                        "value": "V",
+                        "window": null,
+                        "children": []
+                      }
+                    ]
+                  }
+                ]
+              },
+              {
+                "op": "cs_rank",
+                "value": null,
+                "window": null,
+                "children": [
+                  {
+                    "op": "cs_zscore",
+                    "value": null,
+                    "window": null,
+                    "children": [
+                      {
+                        "op": "terminal",
+                        "value": "H",
+                        "window": null,
+                        "children": []
+                      }
+                    ]
+                  }
+                ]
+              }
+            ]
+          }
+        ]
+      },
+      "status": "rejected",
+      "mining_metrics": {
+        "ic": -0.0673108018715592,
+        "icir": -0.7693872042937143,
+        "turnover": 0.5852071511976578
+      },
+      "discovered_at": "2026-05-14",
+      "note": "Sharpe 1.39→1.01, MaxDD -43%, ts_cov(C,V)同质化严重过拟合"
+    },
+    {
+      "id": "gp_027",
+      "expr": "neg(ts_mean(ts_cov(C, V, 3), 3))",
+      "tree": {
+        "op": "neg",
+        "value": null,
+        "window": null,
+        "children": [
+          {
+            "op": "ts_mean",
+            "value": null,
+            "window": 3,
+            "children": [
+              {
+                "op": "ts_cov",
+                "value": null,
+                "window": 3,
+                "children": [
+                  {
+                    "op": "terminal",
+                    "value": "C",
+                    "window": null,
+                    "children": []
+                  },
+                  {
+                    "op": "terminal",
+                    "value": "V",
+                    "window": null,
+                    "children": []
+                  }
+                ]
+              }
+            ]
+          }
+        ]
+      },
+      "status": "rejected",
+      "mining_metrics": {
+        "ic": 0.06141748662925004,
+        "icir": 0.8612328448396753,
+        "turnover": 0.8371741700592861
+      },
+      "discovered_at": "2026-05-14",
+      "note": "Sharpe 1.39→1.01, MaxDD -43%, ts_cov(C,V)同质化严重过拟合"
+    },
+    {
+      "id": "gp_028",
+      "expr": "ts_min(neg(ts_cov(ts_cov(C, V, 3), V, 3)), 3)",
+      "tree": {
+        "op": "ts_min",
+        "value": null,
+        "window": 3,
+        "children": [
+          {
+            "op": "neg",
+            "value": null,
+            "window": null,
+            "children": [
+              {
+                "op": "ts_cov",
+                "value": null,
+                "window": 3,
+                "children": [
+                  {
+                    "op": "ts_cov",
+                    "value": null,
+                    "window": 3,
+                    "children": [
+                      {
+                        "op": "terminal",
+                        "value": "C",
+                        "window": null,
+                        "children": []
+                      },
+                      {
+                        "op": "terminal",
+                        "value": "V",
+                        "window": null,
+                        "children": []
+                      }
+                    ]
+                  },
+                  {
+                    "op": "terminal",
+                    "value": "V",
+                    "window": null,
+                    "children": []
+                  }
+                ]
+              }
+            ]
+          }
+        ]
+      },
+      "status": "rejected",
+      "mining_metrics": {
+        "ic": 0.06716131983591755,
+        "icir": 0.8599717403889361,
+        "turnover": 0.8834149101886886
+      },
+      "discovered_at": "2026-05-14",
+      "note": "Sharpe 1.39→1.01, MaxDD -43%, ts_cov(C,V)同质化严重过拟合"
+    },
+    {
+      "id": "gp_029",
+      "expr": "ts_min(neg(ts_cov(ts_cov(C, cs_zscore(V), 3), cs_rank(V), 3)), 3)",
+      "tree": {
+        "op": "ts_min",
+        "value": null,
+        "window": 3,
+        "children": [
+          {
+            "op": "neg",
+            "value": null,
+            "window": null,
+            "children": [
+              {
+                "op": "ts_cov",
+                "value": null,
+                "window": 3,
+                "children": [
+                  {
+                    "op": "ts_cov",
+                    "value": null,
+                    "window": 3,
+                    "children": [
+                      {
+                        "op": "terminal",
+                        "value": "C",
+                        "window": null,
+                        "children": []
+                      },
+                      {
+                        "op": "cs_zscore",
+                        "value": null,
+                        "window": null,
+                        "children": [
+                          {
+                            "op": "terminal",
+                            "value": "V",
+                            "window": null,
+                            "children": []
+                          }
+                        ]
+                      }
+                    ]
+                  },
+                  {
+                    "op": "cs_rank",
+                    "value": null,
+                    "window": null,
+                    "children": [
+                      {
+                        "op": "terminal",
+                        "value": "V",
+                        "window": null,
+                        "children": []
+                      }
+                    ]
+                  }
+                ]
+              }
+            ]
+          }
+        ]
+      },
+      "status": "rejected",
+      "mining_metrics": {
+        "ic": 0.059955497208403354,
+        "icir": 0.9182340990437197,
+        "turnover": 0.8884240258622024
+      },
+      "discovered_at": "2026-05-14",
+      "note": "Sharpe 1.39→1.01, MaxDD -43%, ts_cov(C,V)同质化严重过拟合"
+    },
+    {
+      "id": "gp_030",
+      "expr": "ts_min(neg(ts_cov(ts_cov(cs_rank(V), V, 3), ts_cov(ts_cov(C, V, 3), cs_zscore(V), 3), 3)), 3)",
+      "tree": {
+        "op": "ts_min",
+        "value": null,
+        "window": 3,
+        "children": [
+          {
+            "op": "neg",
+            "value": null,
+            "window": null,
+            "children": [
+              {
+                "op": "ts_cov",
+                "value": null,
+                "window": 3,
+                "children": [
+                  {
+                    "op": "ts_cov",
+                    "value": null,
+                    "window": 3,
+                    "children": [
+                      {
+                        "op": "cs_rank",
+                        "value": null,
+                        "window": null,
+                        "children": [
+                          {
+                            "op": "terminal",
+                            "value": "V",
+                            "window": null,
+                            "children": []
+                          }
+                        ]
+                      },
+                      {
+                        "op": "terminal",
+                        "value": "V",
+                        "window": null,
+                        "children": []
+                      }
+                    ]
+                  },
+                  {
+                    "op": "ts_cov",
+                    "value": null,
+                    "window": 3,
+                    "children": [
+                      {
+                        "op": "ts_cov",
+                        "value": null,
+                        "window": 3,
+                        "children": [
+                          {
+                            "op": "terminal",
+                            "value": "C",
+                            "window": null,
+                            "children": []
+                          },
+                          {
+                            "op": "terminal",
+                            "value": "V",
+                            "window": null,
+                            "children": []
+                          }
+                        ]
+                      },
+                      {
+                        "op": "cs_zscore",
+                        "value": null,
+                        "window": null,
+                        "children": [
+                          {
+                            "op": "terminal",
+                            "value": "V",
+                            "window": null,
+                            "children": []
+                          }
+                        ]
+                      }
+                    ]
+                  }
+                ]
+              }
+            ]
+          }
+        ]
+      },
+      "status": "rejected",
+      "mining_metrics": {
+        "ic": 0.06125263323640105,
+        "icir": 0.9457462717695275,
+        "turnover": 0.8557842349764095
+      },
+      "discovered_at": "2026-05-14",
+      "note": "Sharpe 1.39→1.01, MaxDD -43%, ts_cov(C,V)同质化严重过拟合"
     }
   ]
 }
