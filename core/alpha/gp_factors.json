@@ -1,6 +1,6 @@
 {
   "version": 2,
-  "next_id": 16,
+  "next_id": 21,
   "factors": [
     {
       "id": "gp_001",
@@ -857,6 +857,332 @@
       },
       "discovered_at": "2026-05-13",
       "note": "Sharpe 1.26, MaxDD -28.86%(改善8%), 年化94%, 板块+资金流组合因子"
+    },
+    {
+      "id": "gp_016",
+      "expr": "ts_cov(cs_rank(BE), add(ts_rank(ts_mean(BL, 5), 5), V), 5)",
+      "tree": {
+        "op": "ts_cov",
+        "value": null,
+        "window": 5,
+        "children": [
+          {
+            "op": "cs_rank",
+            "value": null,
+            "window": null,
+            "children": [
+              {
+                "op": "terminal",
+                "value": "BE",
+                "window": null,
+                "children": []
+              }
+            ]
+          },
+          {
+            "op": "add",
+            "value": null,
+            "window": null,
+            "children": [
+              {
+                "op": "ts_rank",
+                "value": null,
+                "window": 5,
+                "children": [
+                  {
+                    "op": "ts_mean",
+                    "value": null,
+                    "window": 5,
+                    "children": [
+                      {
+                        "op": "terminal",
+                        "value": "BL",
+                        "window": null,
+                        "children": []
+                      }
+                    ]
+                  }
+                ]
+              },
+              {
+                "op": "terminal",
+                "value": "V",
+                "window": null,
+                "children": []
+              }
+            ]
+          }
+        ]
+      },
+      "status": "validated",
+      "mining_metrics": {
+        "ic": -0.04281950526555567,
+        "icir": -0.6940210673126423,
+        "turnover": 0.7329537368265444
+      },
+      "discovered_at": "2026-05-14",
+      "note": "Sharpe 1.26→1.39, MaxDD -21.44%, 收益回撤比6.21, 超大单+板块动量变化因子"
+    },
+    {
+      "id": "gp_017",
+      "expr": "ts_cov(cs_rank(BE), neg(H), 5)",
+      "tree": {
+        "op": "ts_cov",
+        "value": null,
+        "window": 5,
+        "children": [
+          {
+            "op": "cs_rank",
+            "value": null,
+            "window": null,
+            "children": [
+              {
+                "op": "terminal",
+                "value": "BE",
+                "window": null,
+                "children": []
+              }
+            ]
+          },
+          {
+            "op": "neg",
+            "value": null,
+            "window": null,
+            "children": [
+              {
+                "op": "terminal",
+                "value": "H",
+                "window": null,
+                "children": []
+              }
+            ]
+          }
+        ]
+      },
+      "status": "validated",
+      "mining_metrics": {
+        "ic": 0.0380465458677394,
+        "icir": 0.6917994827090616,
+        "turnover": 0.8472863543557805
+      },
+      "discovered_at": "2026-05-14",
+      "note": "Sharpe 1.26→1.39, MaxDD -21.44%, 收益回撤比6.21, 超大单+板块动量变化因子"
+    },
+    {
+      "id": "gp_018",
+      "expr": "ts_cov(cs_rank(ts_delta(neg(H), 3)), add(ts_rank(ts_mean(BL, 5), 5), V), 5)",
+      "tree": {
+        "op": "ts_cov",
+        "value": null,
+        "window": 5,
+        "children": [
+          {
+            "op": "cs_rank",
+            "value": null,
+            "window": null,
+            "children": [
+              {
+                "op": "ts_delta",
+                "value": null,
+                "window": 3,
+                "children": [
+                  {
+                    "op": "neg",
+                    "value": null,
+                    "window": null,
+                    "children": [
+                      {
+                        "op": "terminal",
+                        "value": "H",
+                        "window": null,
+                        "children": []
+                      }
+                    ]
+                  }
+                ]
+              }
+            ]
+          },
+          {
+            "op": "add",
+            "value": null,
+            "window": null,
+            "children": [
+              {
+                "op": "ts_rank",
+                "value": null,
+                "window": 5,
+                "children": [
+                  {
+                    "op": "ts_mean",
+                    "value": null,
+                    "window": 5,
+                    "children": [
+                      {
+                        "op": "terminal",
+                        "value": "BL",
+                        "window": null,
+                        "children": []
+                      }
+                    ]
+                  }
+                ]
+              },
+              {
+                "op": "terminal",
+                "value": "V",
+                "window": null,
+                "children": []
+              }
+            ]
+          }
+        ]
+      },
+      "status": "validated",
+      "mining_metrics": {
+        "ic": 0.05447775186467505,
+        "icir": 0.7998097569944104,
+        "turnover": 0.8527200950854462
+      },
+      "discovered_at": "2026-05-14",
+      "note": "Sharpe 1.26→1.39, MaxDD -21.44%, 收益回撤比6.21, 超大单+板块动量变化因子"
+    },
+    {
+      "id": "gp_019",
+      "expr": "ts_cov(cs_rank(ts_delta(sub(CM20, V), 3)), cs_rank(ts_delta(neg(C), 3)), 5)",
+      "tree": {
+        "op": "ts_cov",
+        "value": null,
+        "window": 5,
+        "children": [
+          {
+            "op": "cs_rank",
+            "value": null,
+            "window": null,
+            "children": [
+              {
+                "op": "ts_delta",
+                "value": null,
+                "window": 3,
+                "children": [
+                  {
+                    "op": "sub",
+                    "value": null,
+                    "window": null,
+                    "children": [
+                      {
+                        "op": "terminal",
+                        "value": "CM20",
+                        "window": null,
+                        "children": []
+                      },
+                      {
+                        "op": "terminal",
+                        "value": "V",
+                        "window": null,
+                        "children": []
+                      }
+                    ]
+                  }
+                ]
+              }
+            ]
+          },
+          {
+            "op": "cs_rank",
+            "value": null,
+            "window": null,
+            "children": [
+              {
+                "op": "ts_delta",
+                "value": null,
+                "window": 3,
+                "children": [
+                  {
+                    "op": "neg",
+                    "value": null,
+                    "window": null,
+                    "children": [
+                      {
+                        "op": "terminal",
+                        "value": "C",
+                        "window": null,
+                        "children": []
+                      }
+                    ]
+                  }
+                ]
+              }
+            ]
+          }
+        ]
+      },
+      "status": "validated",
+      "mining_metrics": {
+        "ic": -0.0476975743419162,
+        "icir": -0.8494487687084148,
+        "turnover": 0.7627705233660773
+      },
+      "discovered_at": "2026-05-14",
+      "note": "Sharpe 1.26→1.39, MaxDD -21.44%, 收益回撤比6.21, 超大单+板块动量变化因子"
+    },
+    {
+      "id": "gp_020",
+      "expr": "ts_cov(C, cs_rank(ts_delta(sub(CM20, V), 3)), 5)",
+      "tree": {
+        "op": "ts_cov",
+        "value": null,
+        "window": 5,
+        "children": [
+          {
+            "op": "terminal",
+            "value": "C",
+            "window": null,
+            "children": []
+          },
+          {
+            "op": "cs_rank",
+            "value": null,
+            "window": null,
+            "children": [
+              {
+                "op": "ts_delta",
+                "value": null,
+                "window": 3,
+                "children": [
+                  {
+                    "op": "sub",
+                    "value": null,
+                    "window": null,
+                    "children": [
+                      {
+                        "op": "terminal",
+                        "value": "CM20",
+                        "window": null,
+                        "children": []
+                      },
+                      {
+                        "op": "terminal",
+                        "value": "V",
+                        "window": null,
+                        "children": []
+                      }
+                    ]
+                  }
+                ]
+              }
+            ]
+          }
+        ]
+      },
+      "status": "validated",
+      "mining_metrics": {
+        "ic": 0.042085298591829245,
+        "icir": 0.83175937708059,
+        "turnover": 0.8268064329242076
+      },
+      "discovered_at": "2026-05-14",
+      "note": "Sharpe 1.26→1.39, MaxDD -21.44%, 收益回撤比6.21, 超大单+板块动量变化因子"
     }
   ]
 }
