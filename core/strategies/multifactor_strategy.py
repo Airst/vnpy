@@ -385,8 +385,9 @@ class MultiFactorStrategy(StrategyTemplate):
                 
                 if vt_symbol not in bars:
                     continue
-                    
-                price = bars[vt_symbol].close_price
+                
+                bar = bars[vt_symbol]
+                price = bar.close_price
                 if price <= 0:
                     continue
                     

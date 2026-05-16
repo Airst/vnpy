@@ -1,6 +1,10 @@
 """
 遗传编程(GP)因子挖掘模块 — 自动发现短周期 Alpha 因子
 
+== 入口脚本 ==
+独立运行: python gp_mining.py -v{版本号} (支持 --pop/--gen/--max-factors 等超参数)
+注册表管理: python gp_mining.py -v{版本号} --status/--accept/--reject/--test/--note
+
 == 设计目标 ==
 补充当前慢因子体系（120d/60d/20d 为主），发现 3-20 天衰减的短周期因子，
 增加模型信号的时效性和变异性，缓解"分数横线→入场时机差"问题。
@@ -21,12 +25,18 @@ JSON 注册表 (v2 schema) 管理因子全生命周期：
 - 相关性去重: 与现有因子池相关 > 0.7 的因子丢弃
 - 复杂度惩罚 (parsimony): 树深度 > 5 的表达式被惩罚
 - GPU 加速因子计算
+- 向量化 Rank IC: 全矩阵 argsort 替代逐天循环
+- 并行 fitness: ThreadPoolExecutor 8线程并行评估
 
 == 算子体系 ==
 终端节点 (Terminals): O, H, L, C, V, TR (量价原子数据)
                       BL, SL, BE, SE, NMF (资金流向 — 知情者交易信号)
                       CM5, CM20, CMX, CHR (概念板块 — 板块共振信号)
                       MR (市场收益 — 逆大盘/beta不对称信号)
+                      PE, PB, PS (估值因子)
+                      MV, CMV (市值 — 总市值/流通市值)
+                      TRF (自由流通换手率)
+                      BSM, SSM, BMD, SMD (散户/中单委托 — 零售行为信号)
 一元时序 (Unary TS): ts_mean, ts_std, ts_max, ts_min, ts_delta, ts_rank, ts_decay_linear
 二元时序 (Binary TS): ts_corr, ts_cov
 截面 (Cross-Sectional): cs_rank, cs_zscore
@@ -62,7 +72,11 @@ WINDOWS = [3, 5, 10, 20]
 TERMINALS = ['O', 'H', 'L', 'C', 'V', 'TR',
              'BL', 'SL', 'BE', 'SE', 'NMF',  # MoneyFlow: 大单/超大单/净流
              'CM5', 'CM20', 'CMX', 'CHR',  # Concept: 板块动量/热度
-             'MR']  # Market Return: 大盘日收益
+             'MR',  # Market Return: 大盘日收益
+             'PE', 'PB', 'PS',  # 估值: 市盈率/市净率/市销率
+             'MV', 'CMV',  # 市值: 总市值/流通市值
+             'TRF',  # 自由流通换手率
+             'BSM', 'SSM', 'BMD', 'SMD']  # 散户/中单: 小单买卖/中单买卖
 
 @dataclass
 class Node:
@@ -264,7 +278,7 @@ def _is_valid_tensor(x: Optional[torch.Tensor]) -> bool:
 def compute_rank_ic(factor: torch.Tensor, label: torch.Tensor, eval_days: int = 0) -> Tuple[float, float, float]:
     """
     Compute daily Rank IC (Spearman correlation) between factor and label.
-    Evaluates on full time range with sub-period consistency check.
+    Vectorized GPU implementation — no Python per-day loop.
     
     Args:
         factor: (num_stocks, num_days) tensor
@@ -273,61 +287,76 @@ def compute_rank_ic(factor: torch.Tensor, label: torch.Tensor, eval_days: int = 
     
     Returns:
         (mean_ic, ic_ir, direction_ratio) tuple
-        direction_ratio: fraction of sub-periods with same IC sign as overall
     """
     num_stocks, num_days = factor.shape
 
-    # Use all days but sample every 10th for speed
+    # Sample every 10th day for speed
     start_t = max(0, num_days - eval_days) if eval_days > 0 else 0
     step = 10
-    f_sampled = factor[:, start_t::step]
+    f_sampled = factor[:, start_t::step]  # (stocks, n_eval)
     l_sampled = label[:, start_t::step]
-    n_eval = f_sampled.shape[1]
 
-    ics = []
-    for t in range(n_eval):
-        f_col = f_sampled[:, t]
-        l_col = l_sampled[:, t]
+    # Valid mask: both factor and label are not NaN
+    valid = ~(torch.isnan(f_sampled) | torch.isnan(l_sampled))  # (stocks, n_eval)
+    valid_counts = valid.sum(dim=0)  # (n_eval,)
 
-        valid = ~(torch.isnan(f_col) | torch.isnan(l_col))
-        n_valid = valid.sum().item()
-        if n_valid < 30:
-            continue
-
-        f_valid = f_col[valid]
-        l_valid = l_col[valid]
-
-        f_rank = f_valid.argsort().argsort().float()
-        l_rank = l_valid.argsort().argsort().float()
-
-        f_rank = f_rank - f_rank.mean()
-        l_rank = l_rank - l_rank.mean()
-
-        denom = f_rank.norm() * l_rank.norm()
-        if denom < 1e-10:
-            continue
-
-        ic = (f_rank * l_rank).sum() / denom
-        ics.append(ic.item())
-
-    if len(ics) < 10:
+    # Need at least 30 valid stocks per day, and at least 10 valid days total
+    day_mask = valid_counts >= 30  # (n_eval,)
+    n_valid_days = day_mask.sum().item()
+    if n_valid_days < 10:
         return 0.0, 0.0, 0.0
 
-    mean_ic = np.mean(ics)
-    std_ic = np.std(ics) + 1e-8
+    # Replace invalid with NaN for ranking, then fill with 0 rank contribution
+    f_filled = f_sampled.clone()
+    l_filled = l_sampled.clone()
+    f_filled[~valid] = float('-inf')  # will get rank 0
+    l_filled[~valid] = float('-inf')
+
+    # Rank along stock dimension (dim=0): (stocks, n_eval)
+    f_rank = f_filled.argsort(dim=0).argsort(dim=0).float()
+    l_rank = l_filled.argsort(dim=0).argsort(dim=0).float()
+
+    # Zero out invalid entries so they don't contribute
+    f_rank[~valid] = 0.0
+    l_rank[~valid] = 0.0
+
+    # Demean per day (only over valid entries)
+    f_sum = f_rank.sum(dim=0)  # (n_eval,)
+    l_sum = l_rank.sum(dim=0)
+    f_mean = f_sum / (valid_counts.float() + 1e-8)  # (n_eval,)
+    l_mean = l_sum / (valid_counts.float() + 1e-8)
+
+    f_centered = f_rank - f_mean.unsqueeze(0)  # broadcast (stocks, n_eval)
+    l_centered = l_rank - l_mean.unsqueeze(0)
+    f_centered[~valid] = 0.0
+    l_centered[~valid] = 0.0
+
+    # IC per day = dot(f, l) / (norm(f) * norm(l))
+    numerator = (f_centered * l_centered).sum(dim=0)  # (n_eval,)
+    f_norm = (f_centered ** 2).sum(dim=0).sqrt()
+    l_norm = (l_centered ** 2).sum(dim=0).sqrt()
+    denom = f_norm * l_norm
+    denom = torch.clamp(denom, min=1e-10)
+
+    ics_tensor = numerator / denom  # (n_eval,)
+
+    # Apply day_mask
+    ics_valid = ics_tensor[day_mask].cpu().numpy()
+
+    mean_ic = float(np.mean(ics_valid))
+    std_ic = float(np.std(ics_valid)) + 1e-8
     ic_ir = mean_ic / std_ic
 
     # Sub-period direction consistency
-    # Split ICs into ~5 equal sub-periods
-    n_periods = min(5, len(ics) // 5)
+    n_periods = min(5, len(ics_valid) // 5)
     if n_periods < 3:
         return mean_ic, ic_ir, 0.5
 
-    chunk_size = len(ics) // n_periods
+    chunk_size = len(ics_valid) // n_periods
     sign_overall = np.sign(mean_ic)
     same_sign_count = 0
     for i in range(n_periods):
-        chunk = ics[i * chunk_size: (i + 1) * chunk_size]
+        chunk = ics_valid[i * chunk_size: (i + 1) * chunk_size]
         chunk_mean = np.mean(chunk)
         if np.sign(chunk_mean) == sign_overall:
             same_sign_count += 1
@@ -772,10 +801,13 @@ class GPFactorMiner:
 
         # Initialize population
         population = []
-        for _ in range(self.population_size):
-            tree = random_tree(max_depth=self.max_tree_depth)
-            score = fitness(tree, data, label, existing_factor_tensors, self.max_corr_with_pool)
-            population.append((tree, score))
+        init_trees = [random_tree(max_depth=self.max_tree_depth) for _ in range(self.population_size)]
+        from concurrent.futures import ThreadPoolExecutor, as_completed
+        with ThreadPoolExecutor(max_workers=8) as executor:
+            futures = {executor.submit(fitness, t, data, label, existing_factor_tensors, self.max_corr_with_pool): t for t in init_trees}
+            for future in as_completed(futures):
+                t = futures[future]
+                population.append((t, future.result()))
 
         best_ever_score = -999.0
         stagnation = 0
@@ -812,7 +844,7 @@ class GPFactorMiner:
                 print(f"[GP Miner] Reached max factors ({self.max_factors}), stopping.")
                 break
 
-            # Create next generation
+            # Create next generation — batch generate offspring first
             new_population = []
 
             # Elitism: keep top 5%
@@ -820,24 +852,29 @@ class GPFactorMiner:
             for i in range(elite_size):
                 new_population.append(population[i])
 
-            # Fill rest with crossover and mutation
-            while len(new_population) < self.population_size:
+            # Batch generate all offspring trees
+            offspring_trees = []
+            while len(offspring_trees) + len(new_population) < self.population_size:
                 if random.random() < self.crossover_prob:
                     p1 = tournament_select(population, self.tournament_size)
                     p2 = tournament_select(population, self.tournament_size)
                     c1, c2 = crossover(p1, p2)
                     c1 = mutate(c1, self.mutation_prob)
                     c2 = mutate(c2, self.mutation_prob)
-                    s1 = fitness(c1, data, label, factor_pool, self.max_corr_with_pool)
-                    s2 = fitness(c2, data, label, factor_pool, self.max_corr_with_pool)
-                    new_population.append((c1, s1))
-                    if len(new_population) < self.population_size:
-                        new_population.append((c2, s2))
+                    offspring_trees.append(c1)
+                    if len(offspring_trees) + len(new_population) < self.population_size:
+                        offspring_trees.append(c2)
                 else:
                     p = tournament_select(population, self.tournament_size)
                     c = mutate(p, prob=0.5)
-                    s = fitness(c, data, label, factor_pool, self.max_corr_with_pool)
-                    new_population.append((c, s))
+                    offspring_trees.append(c)
+
+            # Parallel fitness evaluation
+            with ThreadPoolExecutor(max_workers=8) as executor:
+                futures = {executor.submit(fitness, t, data, label, factor_pool, self.max_corr_with_pool): t for t in offspring_trees}
+                for future in as_completed(futures):
+                    t = futures[future]
+                    new_population.append((t, future.result()))
 
             population = new_population
 
@@ -907,6 +944,20 @@ class GPFactorMiner:
             'CM20': 'concept_mom_20d',     # 概念板块20日动量
             'CMX': 'concept_mom_20d_max',  # 最强概念板块动量
             'CHR': 'concept_hot_ratio',    # 概念热度比例
+            # 估值
+            'PE': 'pe',
+            'PB': 'pb',
+            'PS': 'ps',
+            # 市值
+            'MV': 'total_mv',
+            'CMV': 'circ_mv',
+            # 自由流通换手率
+            'TRF': 'turnover_rate_f',
+            # 散户/中单行为
+            'BSM': 'buy_sm_amount',
+            'SSM': 'sell_sm_amount',
+            'BMD': 'buy_md_amount',
+            'SMD': 'sell_md_amount',
         }
         data = {}
         for term_name, col_name in terminal_map.items():
@@ -1044,6 +1095,11 @@ class GPFactorMiner:
             'NMF': 'net_mf_amount',
             'CM5': 'concept_mom_5d', 'CM20': 'concept_mom_20d',
             'CMX': 'concept_mom_20d_max', 'CHR': 'concept_hot_ratio',
+            'PE': 'pe', 'PB': 'pb', 'PS': 'ps',
+            'MV': 'total_mv', 'CMV': 'circ_mv',
+            'TRF': 'turnover_rate_f',
+            'BSM': 'buy_sm_amount', 'SSM': 'sell_sm_amount',
+            'BMD': 'buy_md_amount', 'SMD': 'sell_md_amount',
         }
         data = {}
         for term_name, col_name in terminal_map.items():

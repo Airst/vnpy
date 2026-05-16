@@ -27,11 +27,11 @@ const LlmEvaluation = () => {
     const filterRatingRef = useRef(filterRating);
     const pageRef = useRef(page);
     const pageSizeRef = useRef(pageSize);
-    const selectedSignalRef = useRef('ashare_mlp_signal_v9');
+    const selectedSignalRef = useRef(null);
 
     // Signal selection
     const [signals, setSignals] = useState([]);
-    const [selectedSignal, setSelectedSignal] = useState('ashare_mlp_signal_v9');
+    const [selectedSignal, setSelectedSignal] = useState(null);
     const [signalDate, setSignalDate] = useState(null);
 
     // Stock search related state
@@ -122,13 +122,8 @@ const LlmEvaluation = () => {
             const data = await res.json();
             if (data.signals && data.signals.length > 0) {
                 setSignals(data.signals);
-                // Default to v9 signal if available
-                const v9Signal = data.signals.find(s => s.includes('v9'));
-                if (v9Signal) {
-                    setSelectedSignal(v9Signal);
-                } else {
-                    setSelectedSignal(data.signals[0]);
-                }
+                // Default to the latest (last) signal
+                setSelectedSignal(data.signals[data.signals.length - 1]);
             }
         } catch (error) {
             console.error("Failed to load signals", error);
@@ -712,7 +707,7 @@ const LlmEvaluation = () => {
                         </Button>,
                         <Button key="close" onClick={handleCloseDetail}>关闭</Button>
                     ]}
-                    width={800}
+                    width={900}
                 >
                     {taskStatus && (
                         <Alert
@@ -726,7 +721,117 @@ const LlmEvaluation = () => {
                             style={{ marginBottom: 16 }}
                         />
                     )}
-                    <Empty description={rating.reason} />
+                    <Tabs defaultActiveKey="evaluation" items={[
+                        {
+                            key: 'evaluation',
+                            label: 'LLM 评估',
+                            children: <Empty description={rating.reason} />,
+                        },
+                        {
+                            key: 'signal',
+                            label: '信号趋势',
+                            children: (
+                                <>
+                                    <div style={{ marginBottom: 12 }}>
+                                        <Row gutter={[12, 8]} align="middle">
+                                            <Col flex="auto">
+                                                <Select
+                                                    style={{ width: '100%' }}
+                                                    placeholder="选择信号"
+                                                    options={signals.map(s => ({ value: s, label: s }))}
+                                                    value={detailSignal}
+                                                    onChange={(value) => {
+                                                        setDetailSignal(value);
+                                                        loadDetailSignalChart(rating.vt_symbol, value, detailDateRange);
+                                                    }}
+                                                />
+                                            </Col>
+                                            <Col>
+                                                <RangePicker
+                                                    value={detailDateRange}
+                                                    onChange={(dates) => {
+                                                        setDetailDateRange(dates);
+                                                        if (detailSignal && dates && dates[0] && dates[1]) {
+                                                            loadDetailSignalChart(rating.vt_symbol, detailSignal, dates);
+                                                        }
+                                                    }}
+                                                    format="YYYY-MM-DD"
+                                                />
+                                            </Col>
+                                        </Row>
+                                    </div>
+                                    <Spin spinning={detailChartLoading}>
+                                        {detailChartData.length > 0 ? (
+                                            <div style={{ height: 300, width: '100%' }}>
+                                                <ResponsiveContainer width="100%" height="100%">
+                                                    <LineChart data={detailChartData} margin={{ top: 5, right: 20, left: 0, bottom: 5 }}>
+                                                        <CartesianGrid strokeDasharray="3 3" />
+                                                        <XAxis dataKey="date" tick={{ fontSize: 11 }} />
+                                                        <YAxis tick={{ fontSize: 11 }} />
+                                                        <Tooltip />
+                                                        <Legend />
+                                                        {detailChartSeries.map((s, idx) => (
+                                                            <Line
+                                                                key={s.name}
+                                                                type="monotone"
+                                                                dataKey={s.name}
+                                                                stroke={signalColors[idx % signalColors.length]}
+                                                                dot={false}
+                                                                connectNulls
+                                                            />
+                                                        ))}
+                                                    </LineChart>
+                                                </ResponsiveContainer>
+                                            </div>
+                                        ) : (
+                                            <Empty description={detailSignal ? "暂无数据" : "请选择信号查看趋势"} image={Empty.PRESENTED_IMAGE_SIMPLE} />
+                                        )}
+                                    </Spin>
+                                </>
+                            ),
+                        },
+                        {
+                            key: 'kline',
+                            label: 'K线图',
+                            children: (
+                                <>
+                                    <div style={{ marginBottom: 12 }}>
+                                        <Row gutter={[12, 8]} align="middle">
+                                            <Col flex="auto">
+                                                <RangePicker
+                                                    style={{ width: '100%' }}
+                                                    value={klineDateRange}
+                                                    onChange={(dates) => {
+                                                        setKlineDateRange(dates);
+                                                        if (dates && dates[0] && dates[1]) {
+                                                            loadKlineData(rating.vt_symbol, dates);
+                                                        }
+                                                    }}
+                                                    format="YYYY-MM-DD"
+                                                />
+                                            </Col>
+                                            <Col>
+                                                <Button
+                                                    type="primary"
+                                                    onClick={() => loadKlineData(rating.vt_symbol, klineDateRange)}
+                                                    loading={klineLoading}
+                                                >
+                                                    查询
+                                                </Button>
+                                            </Col>
+                                        </Row>
+                                    </div>
+                                    <Spin spinning={klineLoading}>
+                                        {klineData.length > 0 ? (
+                                            <div ref={klineContainerRef} style={{ width: '100%', height: 400 }} />
+                                        ) : (
+                                            <Empty description="选择日期范围后点击查询" image={Empty.PRESENTED_IMAGE_SIMPLE} />
+                                        )}
+                                    </Spin>
+                                </>
+                            ),
+                        },
+                    ]} />
                 </Modal>
             );
         }

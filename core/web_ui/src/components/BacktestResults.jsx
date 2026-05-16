@@ -287,12 +287,14 @@ const BacktestResults = ({ result }) => {
                     )}
                     {tradeData && tradeData.length > 0 ? (
                         <Card title="All Trades" bordered={false}>
+                            <style>{`.holding-row td { background-color: #fff1f0 !important; color: #cf1322; }`}</style>
                             <Table 
                                 columns={tradeColumns}
                                 dataSource={tradeData}
                                 pagination={{ pageSize: 20, showTotal: (total) => `Total ${total} trades` }}
                                 size="small"
                                 scroll={{ x: 600 }}
+                                rowClassName={(record) => record.holding ? 'holding-row' : ''}
                             />
                         </Card>
                     ) : (

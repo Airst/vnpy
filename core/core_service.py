@@ -66,13 +66,15 @@ class CoreService:
             print(f"Signal path does not exist: {SIGNAL_PATH}")
             return []
             
-        signals = []
+        signal_files = []
         for filename in os.listdir(SIGNAL_PATH):
             if filename.endswith(".parquet"):
-                signals.append(os.path.splitext(filename)[0])
+                filepath = SIGNAL_PATH / filename
+                signal_files.append((os.path.splitext(filename)[0], filepath.stat().st_mtime))
         
-        # print(f"Found signals in {SIGNAL_PATH}: {signals}")
-        return sorted(signals)
+        # Sort by modification time ascending (latest last)
+        signal_files.sort(key=lambda x: x[1])
+        return [name for name, _ in signal_files]
 
     def get_candidate_symbols(self) -> List[str]:
         return self.selector.get_candidate_symbols()
@@ -259,10 +261,10 @@ class CoreService:
             })
 
         # Calculate PnL for trades (FIFO)
-        # Tracks buy positions: {symbol: [{"price": price, "volume": volume}, ...]}
+        # Tracks buy positions: {symbol: [{"idx": index, "price": price, "volume": volume}, ...]}
         position_tracker = {}
         
-        for trade in trades:
+        for idx, trade in enumerate(trades):
             symbol = trade["symbol"]
             direction = trade["direction"]
             price = trade["price"]
@@ -273,7 +275,7 @@ class CoreService:
             
             # Assuming "多" is Buy/Long and "空" is Sell/Short/Close
             if direction == "多":
-                position_tracker[symbol].append({"price": price, "volume": volume})
+                position_tracker[symbol].append({"idx": idx, "price": price, "volume": volume})
             elif direction == "空":
                 realized_pnl = 0.0
                 remaining_sell_volume = volume
@@ -297,6 +299,16 @@ class CoreService:
                         position_tracker[symbol].pop(0)
                 
                 trade["pnl"] = round(realized_pnl, 2)
+
+        # Mark uncancelled buy trades as holding
+        holding_indices = set()
+        for positions in position_tracker.values():
+            for pos in positions:
+                if pos["volume"] > 1e-6:
+                    holding_indices.add(pos["idx"])
+        for idx, trade in enumerate(trades):
+            if idx in holding_indices:
+                trade["holding"] = True
 
         # Compute benchmark index returns
         benchmark_data = self._compute_benchmarks(daily_data, capital)
@@ -415,10 +427,8 @@ class CoreService:
         files = []
         for filename in os.listdir(BACKTEST_DB_PATH):
             if filename.endswith(".json"):
-                filepath = os.path.join(BACKTEST_DB_PATH, filename)
                 try:
-                    stat = os.stat(filepath)
-                    # Parse filename for metadata: strategy_start_end_timestamp.json
+                    # Parse filename: {signal_name}_{start}_{end}_{date}_{time}.json
                     parts = filename.replace(".json", "").split("_")
                     if len(parts) >= 4:
                         timestamp_str = parts[-2] + "_" + parts[-1]
@@ -431,12 +441,12 @@ class CoreService:
                             "strategy": strategy_name,
                             "start_date": start_date,
                             "end_date": end_date,
-                            "timestamp": datetime.fromtimestamp(stat.st_mtime).strftime("%Y-%m-%d %H:%M:%S")
+                            "timestamp": timestamp_str
                         })
                 except Exception as e:
                     print(f"Error parsing backtest file {filename}: {e}")
                     
-        # Sort by timestamp descending
+        # Sort by timestamp descending (yyyymmdd_hhmmss format sorts lexically)
         return sorted(files, key=lambda x: x["timestamp"], reverse=True)
 
     def get_backtest_result(self, filename: str) -> Dict:

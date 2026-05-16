@@ -22,6 +22,7 @@ from data_manager.ts_downloader.stock_info_manager import StockInfoManager
 from data_manager.ts_downloader.concept_manager import ConceptManager
 from data_manager.ts_downloader.fina_indicator_manager import FinaIndicatorManager
 from data_manager.ts_downloader.moneyflow_manager import MoneyFlowManager
+from data_manager.ts_downloader.margin_manager import MarginManager
 from data_manager.ts_downloader.namechange_manager import NamechangeManager
 from data_manager.ts_downloader.download_index import download_all as download_index_all
 
@@ -178,13 +179,7 @@ if __name__ == "__main__":
 
     parser.add_argument("-t", "--total", action="store_true", help="Force retrain all models (Total/Full Rolling)")
 
-    parser.add_argument("--gp", action="store_true", help="Run GP factor mining before training")
-    parser.add_argument("--gp-only", action="store_true", help="Only run GP factor mining (no training)")
-    parser.add_argument("--gp-status", action="store_true", help="Show GP factor registry status and exit")
-    parser.add_argument("--gp-test", type=str, metavar="IDS", help="Mark factor IDs as testing (comma-separated)")
-    parser.add_argument("--gp-accept", type=str, metavar="IDS", help="Mark factor IDs as validated (comma-separated)")
-    parser.add_argument("--gp-reject", type=str, metavar="IDS", help="Mark factor IDs as rejected (comma-separated)")
-    parser.add_argument("--gp-note", type=str, metavar="ID:NOTE", help="Add note to a factor (format: 'gp_001:note text')")
+    parser.add_argument("--gp-test", action="store_true", help="Include GP testing factors in training")
 
     parser.add_argument("-m", "--max", help="Max Holdings", default=5)
 
@@ -213,60 +208,13 @@ if __name__ == "__main__":
         print(f"Error: Unknown version '{version}'. Supported versions: {', '.join(VERSION_CONFIG.keys())}")
         sys.exit(1)
     
-    # === GP Registry Commands (no data needed, early exit before logger) ===
-    gp_path = "core/alpha/gp_factors.json"
-
-    if args.gp_status:
-        from core.alpha.gp_factor_miner import GPFactorMiner
-        GPFactorMiner.print_status(gp_path)
-        sys.exit(0)
-
-    if args.gp_accept:
-        from core.alpha.gp_factor_miner import GPFactorMiner
-        ids = [x.strip() for x in args.gp_accept.split(",")]
-        GPFactorMiner.set_status(gp_path, ids, "validated")
-        sys.exit(0)
-
-    if args.gp_reject:
-        from core.alpha.gp_factor_miner import GPFactorMiner
-        ids = [x.strip() for x in args.gp_reject.split(",")]
-        note = ""
-        if args.gp_note:
-            parts = args.gp_note.split(":", 1)
-            note = parts[1] if len(parts) > 1 else parts[0]
-        GPFactorMiner.set_status(gp_path, ids, "rejected", note=note)
-        sys.exit(0)
-
-    if args.gp_note and not args.gp_reject:
-        from core.alpha.gp_factor_miner import GPFactorMiner
-        parts = args.gp_note.split(":", 1)
-        if len(parts) == 2:
-            factor_id, note = parts[0].strip(), parts[1].strip()
-            registry = GPFactorMiner.load_registry(gp_path)
-            for f in registry["factors"]:
-                if f["id"] == factor_id:
-                    f["note"] = note
-                    GPFactorMiner.save_registry(gp_path, registry)
-                    print(f"[GP] Note added to {factor_id}: {note}")
-                    break
-            else:
-                print(f"[GP] Factor {factor_id} not found")
-        sys.exit(0)
-
     setup_logger(version)
     
     print(f"Initializing Alpha Engine for {version.upper()}...")
     
     CalcClass, description = VERSION_CONFIG[version]
 
-    # If --gp-test, mark factors as testing before calculator init
-    gp_filter = None  # default: ["validated"] inside calculator
-    if args.gp_test:
-        from core.alpha.gp_factor_miner import GPFactorMiner
-        ids = [x.strip() for x in args.gp_test.split(",")]
-        GPFactorMiner.set_status(gp_path, ids, "testing")
-        gp_filter = ["validated", "testing"]
-
+    gp_filter = ["validated", "testing"] if args.gp_test else None
     calculator = CalcClass(gp_status_filter=gp_filter)
     signal_name = f"ashare_mlp_signal_{version}"
     
@@ -315,6 +263,10 @@ if __name__ == "__main__":
         mf_manager = MoneyFlowManager()
         mf_manager.download_all()
 
+        print("\n开始更新融资融券数据...")
+        margin_manager = MarginManager()
+        margin_manager.download_all()
+
         print("\n开始更新筹码分布数据...")
         from data_manager.ts_downloader.cyq_manager import CyqPerfManager
         cyq_manager = CyqPerfManager()
@@ -338,115 +290,6 @@ if __name__ == "__main__":
     
     data_df = engine.load_data()
     signal_df = engine.calculate_factors(data_df)
-
-    # === GP Factor Mining ===
-    if args.gp or args.gp_only:
-        from core.alpha.gp_factor_miner import GPFactorMiner
-        print("\n[GP Mining] Starting GP factor discovery...")
-        
-        gp_miner = GPFactorMiner(
-            population_size=300,
-            n_generations=40,
-            max_factors=5,
-            min_ic=0.02,
-            min_icir=0.3,
-        )
-        
-        # Re-run factor calculation to get GPU tensors for GP
-        # We need raw padded tensor and label
-        import torch as _torch
-        from core.alpha.factor_calculator import device as _device
-        
-        # Prepare data same way as FactorCalculator.calculate_features
-        df_sorted = data_df.sort(["vt_symbol", "datetime"])
-        exclude_cols = {"datetime", "vt_symbol", "industry"}
-        cols = [c for c in df_sorted.columns if c not in exclude_cols]
-        col_map = {name: i for i, name in enumerate(cols)}
-        
-        import numpy as _np
-        raw_data = df_sorted.select(cols).to_numpy().astype(_np.float32)
-        symbols = df_sorted["vt_symbol"].to_numpy()
-        unique_symbols, inverse_indices, counts = _np.unique(symbols, return_inverse=True, return_counts=True)
-        num_stocks = len(unique_symbols)
-        max_len = counts.max()
-        
-        padded_raw = _torch.full((num_stocks, max_len, len(cols)), float('nan'), device=_device, dtype=_torch.float32)
-        
-        df_idx = df_sorted.select(["vt_symbol"]).with_columns([
-            __import__('polars').int_range(0, __import__('polars').len()).over("vt_symbol").alias("t_idx")
-        ])
-        t_indices = df_idx["t_idx"].to_numpy()
-        s_indices = inverse_indices
-        
-        s_indices_t = _torch.tensor(s_indices, dtype=_torch.long, device=_device)
-        t_indices_t = _torch.tensor(t_indices, dtype=_torch.long, device=_device)
-        raw_tensor = _torch.tensor(raw_data, device=_device, dtype=_torch.float32)
-        padded_raw[s_indices_t, t_indices_t, :] = raw_tensor
-        
-        # Free intermediate data to reduce peak memory
-        del raw_data, raw_tensor, s_indices_t, t_indices_t, df_sorted, df_idx
-        
-        # Compute label for fitness evaluation
-        from core.alpha.factor_calculator import ts_delay, ts_mean, cs_rank
-        C = padded_raw[:, :, col_map['close']]
-        raw_ret_5 = ts_delay(C, -5) / C - 1
-        label = cs_rank(raw_ret_5)  # Simple forward return rank as GP target
-        del C, raw_ret_5
-        
-        # Collect existing factor tensors for deduplication
-        existing_tensors = []
-        features_computed = calculator.build_features(padded_raw, col_map)
-        for fname, ftensor in features_computed.items():
-            if fname != "label":
-                existing_tensors.append(ftensor)
-        del features_computed
-        
-        import gc
-        gc.collect()
-        _torch.cuda.empty_cache()
-        
-        # Run GP mining (with registry dedup to avoid re-mining rejected factors)
-        results = gp_miner.mine(
-            padded_raw=padded_raw,
-            col_map=col_map,
-            label=label,
-            existing_factor_tensors=existing_tensors[:10],  # Use top-10 for speed
-            registry_path=gp_path,
-        )
-        
-        # Append newly discovered factors to registry (incremental, not overwrite)
-        gp_miner.append_discovered(gp_path, gp_miner.discovered_factors)
-        
-        # === Auto-validation gate: rolling IC filter ===
-        if gp_miner.discovered_factors:
-            print("\n[GP Validate] Running rolling IC validation on discovered factors...")
-            accepted, rejected = GPFactorMiner.validate_discovered(
-                path=gp_path,
-                padded_raw=padded_raw,
-                col_map=col_map,
-                label=label,
-                min_rolling_ic=0.03,
-                n_windows=5,
-                window_size=200,
-            )
-            print(f"[GP Validate] Result: {len(accepted)} accepted, {len(rejected)} rejected")
-        
-        del padded_raw, label, existing_tensors
-        gc.collect()
-        _torch.cuda.empty_cache()
-        
-        if args.gp_only:
-            print(f"\n[GP Mining] Done. Found {len(results)} new factors.")
-            GPFactorMiner.print_status(gp_path)
-            save_log_dump(version)
-            cleanup_logger()
-            sys.exit(0)
-        
-        # Reload calculator to pick up new GP factors
-        calculator = CalcClass()
-        engine.factor_calculator = calculator
-        signal_df = engine.calculate_factors(data_df)
-        print("[GP Mining] Factors recomputed with GP additions.")
 
     signal_df = engine.analyze_factor_performance(signal_df)
 

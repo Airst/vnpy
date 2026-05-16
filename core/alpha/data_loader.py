@@ -243,6 +243,34 @@ class DataLoader:
         except Exception as e:
             print(f"加载筹码分布数据失败: {e}")
 
+        # 8. 加载融资融券数据 (Margin Detail - 知情交易者信号)
+        print("加载融资融券数据 (Margin Detail)...")
+        try:
+            from data_manager.ts_downloader.margin_manager import MarginManager
+            margin_manager = MarginManager()
+            margin_df_pd = margin_manager.load_data(symbols, s_date_str, e_date_str)
+
+            if not margin_df_pd.empty:
+                margin_df = pl.from_pandas(margin_df_pd)
+                if "datetime" in margin_df.columns:
+                    margin_df = margin_df.with_columns(pl.col("datetime").cast(pl.Datetime("us")))
+
+                cols_to_drop = ["ts_code", "trade_date"]
+                margin_df = margin_df.drop([c for c in cols_to_drop if c in margin_df.columns])
+
+                price_df = price_df.join(margin_df, on=["vt_symbol", "datetime"], how="left")
+
+                margin_cols = ["rzye", "rzmre", "rzche", "rqye", "rqyl", "rqmcl", "rqchl", "rzrqye"]
+                price_df = price_df.sort(["vt_symbol", "datetime"])
+                price_df = price_df.with_columns([
+                    pl.col(col).forward_fill().over("vt_symbol")
+                    for col in margin_cols if col in price_df.columns
+                ])
+
+                print(f"融资融券数据加载完成，维度: {price_df.shape}")
+        except Exception as e:
+            print(f"加载融资融券数据失败: {e}")
+
         return price_df
 
     def _load_financial_data(self, symbols: List[str], start_date: str, end_date: str) -> pl.DataFrame:

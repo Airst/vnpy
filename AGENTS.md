@@ -18,6 +18,8 @@
 - 操作系统：WSL Ubuntu
 - Python 路径：`/home/airst/Workspace/.venv/bin/python`
 - 训练命令：`python training.py -v{版本号} -t`（版本动态发现自 `core/alpha/v*_factor_calculator.py`）
+- GP 挖掘命令：`python gp_mining.py -v{版本号}`（独立脚本，支持 `--pop`/`--gen`/`--max-factors` 等超参数）
+- GP 注册表管理：`python gp_mining.py -v{版本号} --status/--accept/--reject/--test/--note`
 - 训练日志：`trainingV{版本号}.txt`（项目根目录）
 - 回测结果：`core/alpha_db/backtest/` 下 JSON 文件
 
@@ -35,6 +37,8 @@ AI 在工作时应按需读取以下位置获取信息，而非依赖本文件�
 | 历史迭代的详细实验数据 | `docs/iterations/` 下对应版本文档 |
 | 量化研究知识沉淀 | `docs/knowledge/` 下各知识条目 |
 | 各版本的因子演进和失败记录 | 对应版本 `v*_factor_calculator.py` 文件头部 docstring |
+| GP 因子注册表（生命周期状态） | `core/alpha/gp_factors.json` |
+| GP 挖掘模块设计与算子体系 | `core/alpha/gp_factor_miner.py` 文件头部 docstring |
 
 ### 1.4 代码目录
 
@@ -44,6 +48,8 @@ core/
 │   ├── factor_calculator.py      # 基类：GPU 张量准备、横截面/时间序列辅助函数
 │   ├── v*_factor_calculator.py   # 各版本因子计算器（v8/v9/v10/v11/v101/v158）
 │   ├── data_loader.py            # 数据加载：OHLCV、日频基础、财务、概念、资金流、筹码
+│   ├── gp_factor_miner.py        # GP 遗传编程因子挖掘模块
+│   ├── gp_factors.json           # GP 因子注册表（生命周期管理）
 │   ├── engine.py                 # AlphaEngine 编排器
 │   ├── mlp_signals.py            # 滚动训练与信号生成
 │   └── concept_embedding.py      # 概念板块特征
@@ -68,6 +74,7 @@ docs/knowledge/                   # 量化知识库
 - `main.py`: FastAPI/Uvicorn Web UI 服务器
 - `run.py`: vnpy 桌面 GUI
 - `training.py`: 主训练脚本（动态版本发现 → 数据下载 → 因子计算 → 训练 → 回测）
+- `gp_mining.py`: GP 因子挖掘独立脚本（因子发现 → 滚动IC验证 → 注册表管理）
 
 ---
 
