@@ -1,11 +1,112 @@
-import React, { useState, useMemo } from 'react';
-import { Tabs, Card, Table, Row, Col, Statistic, Empty, Alert } from 'antd';
+import React, { useState, useMemo, useEffect, useRef } from 'react';
+import { Tabs, Card, Table, Row, Col, Statistic, Empty, Alert, Modal, Button, Tag, Divider, Typography, message } from 'antd';
+import { EyeOutlined, ReloadOutlined, LoadingOutlined } from '@ant-design/icons';
 import { LineChart, Line, BarChart, Bar, XAxis, YAxis, CartesianGrid, Tooltip, Legend, ResponsiveContainer } from 'recharts';
+import StockDetailTabs from './StockDetailTabs';
+
+const { Text, Paragraph } = Typography;
 
 const BacktestResults = ({ result }) => {
     const stats = result.statistics || {};
     const dailyData = result.daily_data || [];
     const trades = result.trades || [];
+
+    const [detailModal, setDetailModal] = useState({ visible: false, record: null });
+    const [llmRating, setLlmRating] = useState(null);
+    const [llmLoading, setLlmLoading] = useState(false);
+    const [taskStatus, setTaskStatus] = useState(null);
+    const pollTimerRef = useRef(null);
+
+    // Cleanup poll timer on unmount
+    useEffect(() => {
+        return () => { if (pollTimerRef.current) clearInterval(pollTimerRef.current); };
+    }, []);
+
+    // Fetch LLM rating when detail modal opens
+    useEffect(() => {
+        if (!detailModal.visible || !detailModal.record) {
+            setLlmRating(null);
+            setTaskStatus(null);
+            if (pollTimerRef.current) { clearInterval(pollTimerRef.current); pollTimerRef.current = null; }
+            return;
+        }
+        setLlmLoading(true);
+        setLlmRating(null);
+        fetch(`/api/llm_ratings?vt_symbol=${detailModal.record.symbol}`)
+            .then(res => res.json())
+            .then(data => {
+                const history = data.history || [];
+                if (history.length > 0) {
+                    setLlmRating(history[history.length - 1]);
+                } else {
+                    setLlmRating({ not_evaluated: true, reason: '该股票尚未被 LLM 评估' });
+                }
+            })
+            .catch(() => setLlmRating(null))
+            .finally(() => setLlmLoading(false));
+    }, [detailModal.visible, detailModal.record?.symbol]);
+
+    const startPolling = (vt_symbol) => {
+        if (pollTimerRef.current) clearInterval(pollTimerRef.current);
+        pollTimerRef.current = setInterval(async () => {
+            try {
+                const res = await fetch(`/api/llm_ratings/task_status/${vt_symbol}`);
+                const data = await res.json();
+                setTaskStatus(data);
+                if (data.status === 'completed' || data.status === 'failed') {
+                    clearInterval(pollTimerRef.current);
+                    pollTimerRef.current = null;
+                    if (data.status === 'completed') message.success(`${vt_symbol} 评估完成`);
+                    // Refresh rating data
+                    const ratingRes = await fetch(`/api/llm_ratings?vt_symbol=${vt_symbol}`);
+                    const ratingData = await ratingRes.json();
+                    const history = ratingData.history || [];
+                    if (history.length > 0) {
+                        setLlmRating(history[history.length - 1]);
+                    }
+                }
+            } catch (error) {
+                console.error('Failed to poll task status', error);
+            }
+        }, 3000);
+    };
+
+    const handleReevaluate = async (vt_symbol, score) => {
+        setTaskStatus({ status: 'running', message: 'LLM 评估中...' });
+        try {
+            const url = `/api/llm_ratings/reevaluate?vt_symbol=${vt_symbol}&score=${score || 0}`;
+            const res = await fetch(url, { method: 'POST' });
+            if (!res.ok) {
+                const errData = await res.json();
+                throw new Error(errData.detail || '提交失败');
+            }
+            message.success(`${vt_symbol} 评估任务已提交，后台执行中...`);
+            startPolling(vt_symbol);
+        } catch (error) {
+            setTaskStatus({ status: 'failed', message: error.message });
+            message.error(`提交失败: ${error.message}`);
+        }
+    };
+
+    const handleRefreshDetail = async (vt_symbol) => {
+        setTaskStatus(null);
+        try {
+            const res = await fetch(`/api/llm_ratings?vt_symbol=${vt_symbol}`);
+            if (res.ok) {
+                const data = await res.json();
+                const history = data.history || [];
+                const latest = history.length > 0 ? history[history.length - 1] : null;
+                if (latest) {
+                    setLlmRating(latest);
+                    message.success(`${vt_symbol} 数据已刷新`);
+                } else {
+                    setLlmRating({ not_evaluated: true, reason: '该股票尚未被 LLM 评估' });
+                }
+            }
+        } catch (error) {
+            console.error('Failed to refresh detail', error);
+        }
+    };
 
     // Benchmark color palette
     const BENCHMARK_COLORS = {
@@ -96,6 +197,20 @@ const BacktestResults = ({ result }) => {
             key: 'pnl',
             width: 80,
             render: (v) => typeof v === 'number' ? v.toFixed(2) : v
+        },
+        {
+            title: '操作',
+            key: 'operations',
+            width: 80,
+            render: (_, record) => (
+                <Button
+                    type="link"
+                    icon={<EyeOutlined />}
+                    onClick={() => setDetailModal({ visible: true, record })}
+                >
+                    详情
+                </Button>
+            ),
         }
     ];
 
@@ -307,12 +422,191 @@ const BacktestResults = ({ result }) => {
         }
     ];
 
+    const getActionTag = (record) => {
+        const action = record?.action?.toLowerCase();
+        const rating = record?.rating?.toLowerCase();
+        const finalAction = (action && ['buy_now', 'wait', 'avoid'].includes(action)) ? action
+            : { good: 'buy_now', bad: 'avoid', neutral: 'wait' }[rating] || 'wait';
+        const config = {
+            buy_now: { color: 'green', text: '建议进场' },
+            avoid: { color: 'red', text: '建议回避' },
+            wait: { color: 'orange', text: '等待时机' },
+        };
+        const c = config[finalAction] || config.wait;
+        return <Tag color={c.color}>{c.text}</Tag>;
+    };
+
+    const renderLlmEvaluation = () => {
+        if (llmLoading) return <Empty description="加载中..." />;
+        if (!llmRating) return <Empty description="无评估数据" />;
+        if (llmRating.not_evaluated) return <Empty description={llmRating.reason} />;
+
+        const dimensions = llmRating.analysis_dimensions || {};
+        const keyFactors = llmRating.key_factors || [];
+        const positiveFactors = keyFactors.filter(f => f.type === 'positive');
+        const negativeFactors = keyFactors.filter(f => f.type === 'negative');
+
+        return (
+            <>
+                {llmRating.date && (
+                    <div style={{ marginBottom: 12 }}>
+                        <Text type="secondary">评估日期：</Text>
+                        <Text strong>{llmRating.date}</Text>
+                    </div>
+                )}
+                <div style={{ marginBottom: 16 }}>
+                    <Row gutter={[16, 16]}>
+                        <Col span={8}>
+                            <Text type="secondary">进场建议：</Text>
+                            {getActionTag(llmRating)}
+                        </Col>
+                        <Col span={8}>
+                            <Text type="secondary">置信度：</Text>
+                            <Text strong>{(llmRating.confidence * 100).toFixed(0)}%</Text>
+                        </Col>
+                        {llmRating.score != null && (
+                            <Col span={8}>
+                                <Text type="secondary">模型分数：</Text>
+                                <Text code>{llmRating.score.toFixed(4)}</Text>
+                            </Col>
+                        )}
+                    </Row>
+                </div>
+
+                <div style={{ marginBottom: 16 }}>
+                    <Text type="secondary">评估理由：</Text>
+                    <Paragraph style={{ marginTop: 4 }}>{llmRating.reason}</Paragraph>
+                </div>
+
+                {Object.keys(dimensions).length > 0 && (
+                    <>
+                        <Divider orientation="left">分析维度</Divider>
+                        <Row gutter={[8, 12]}>
+                            {Object.entries(dimensions).map(([key, val]) => (
+                                <Col span={12} key={key}>
+                                    <Text type="secondary">{key}：</Text>
+                                    <div>{val}</div>
+                                </Col>
+                            ))}
+                        </Row>
+                    </>
+                )}
+
+                {(positiveFactors.length > 0 || negativeFactors.length > 0) && (
+                    <>
+                        <Divider orientation="left">关键因素</Divider>
+                        <Row gutter={16}>
+                            {positiveFactors.length > 0 && (
+                                <Col span={12}>
+                                    <Text type="success">正面因素：</Text>
+                                    <ul style={{ paddingLeft: 20, marginTop: 4 }}>
+                                        {positiveFactors.map((f, i) => (
+                                            <li key={i}><Text>{f.content}</Text></li>
+                                        ))}
+                                    </ul>
+                                </Col>
+                            )}
+                            {negativeFactors.length > 0 && (
+                                <Col span={12}>
+                                    <Text type="danger">负面因素：</Text>
+                                    <ul style={{ paddingLeft: 20, marginTop: 4 }}>
+                                        {negativeFactors.map((f, i) => (
+                                            <li key={i}><Text>{f.content}</Text></li>
+                                        ))}
+                                    </ul>
+                                </Col>
+                            )}
+                        </Row>
+                    </>
+                )}
+
+                {llmRating.error && (
+                    <Alert message="LLM 调用错误" description={llmRating.error} type="error" showIcon style={{ marginTop: 12 }} />
+                )}
+            </>
+        );
+    };
+
+    const renderDetailModal = () => {
+        const { visible, record } = detailModal;
+        if (!record) return null;
+
+        const extraTabs = [{
+            key: 'llm',
+            label: 'LLM 评估',
+            children: renderLlmEvaluation(),
+        }];
+
+        const reevaluateBtnText = taskStatus?.status === 'running' ? '评估中...'
+            : taskStatus?.status === 'completed' ? '重新评估'
+            : taskStatus?.status === 'failed' ? '重试'
+            : '重新评估';
+
+        return (
+            <Modal
+                title={`${record.symbol} - 详情`}
+                open={visible}
+                onCancel={() => { setDetailModal({ visible: false, record: null }); setTaskStatus(null); }}
+                footer={[
+                    <Button
+                        key="reevaluate"
+                        icon={taskStatus?.status === 'running' ? <LoadingOutlined spin /> : <ReloadOutlined />}
+                        onClick={() => handleReevaluate(record.symbol, llmRating?.score)}
+                        loading={taskStatus?.status === 'running'}
+                        disabled={taskStatus?.status === 'running'}
+                    >
+                        {reevaluateBtnText}
+                    </Button>,
+                    <Button
+                        key="refresh"
+                        icon={<ReloadOutlined />}
+                        onClick={() => handleRefreshDetail(record.symbol)}
+                    >
+                        刷新
+                    </Button>,
+                    <Button key="close" type="primary" onClick={() => { setDetailModal({ visible: false, record: null }); setTaskStatus(null); }}>关闭</Button>,
+                ]}
+                width={900}
+                destroyOnClose
+            >
+                {taskStatus && (
+                    <Alert
+                        message={taskStatus.status === 'running' ? '任务执行中' :
+                                 taskStatus.status === 'completed' ? '评估完成' : '评估失败'}
+                        description={taskStatus.message}
+                        type={taskStatus.status === 'running' ? 'info' :
+                              taskStatus.status === 'completed' ? 'success' : 'error'}
+                        showIcon
+                        icon={taskStatus?.status === 'running' ? <LoadingOutlined spin /> : undefined}
+                        style={{ marginBottom: 16 }}
+                    />
+                )}
+                <div style={{ marginBottom: 16 }}>
+                    <Row gutter={[16, 8]}>
+                        <Col span={6}><span style={{ color: '#888' }}>日期：</span>{record.date}</Col>
+                        <Col span={6}><span style={{ color: '#888' }}>方向：</span>{record.direction}</Col>
+                        <Col span={6}><span style={{ color: '#888' }}>价格：</span>{typeof record.price === 'number' ? record.price.toFixed(2) : record.price}</Col>
+                        <Col span={6}><span style={{ color: '#888' }}>PnL：</span><span style={{ color: (record.pnl || 0) >= 0 ? '#52c41a' : '#ff4d4f' }}>{typeof record.pnl === 'number' ? record.pnl.toFixed(2) : record.pnl}</span></Col>
+                    </Row>
+                </div>
+                <StockDetailTabs
+                    vtSymbol={record.symbol}
+                    defaultTab="llm"
+                    extraTabs={extraTabs}
+                />
+            </Modal>
+        );
+    };
+
     return (
+        <>
         <Tabs 
             items={tabs} 
             defaultActiveKey="metrics"
             style={{ background: 'white', padding: '20px', borderRadius: '4px' }}
         />
+        {renderDetailModal()}
+        </>
     );
 };
 

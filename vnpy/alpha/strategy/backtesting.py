@@ -621,6 +621,10 @@ class BacktestingEngine:
         for order in list(self.active_limit_orders.values()):
             bar: BarData = self.bars[order.vt_symbol]
 
+            # Skip suspended stocks (volume=0)
+            if bar.volume == 0:
+                continue
+
             long_cross_price: float = bar.low_price
             short_cross_price: float = bar.high_price
             long_best_price: float = bar.open_price

@@ -30,10 +30,10 @@ class FactorCalculator:
         gp_path = "core/alpha/gp_factors.json"
         if gp_status_filter is None:
             gp_status_filter = ["validated"]
-        if self.gp_miner.load(gp_path, status_filter=gp_status_filter):
+        if gp_status_filter and self.gp_miner.load(gp_path, status_filter=gp_status_filter):
             print(f"[FactorCalculator] Loaded {len(self.gp_miner.discovered_factors)} GP factors (filter={gp_status_filter})")
         else:
-            print("[FactorCalculator] No GP factors found")
+            print("[FactorCalculator] No GP factors loaded")
 
     def calculate_features(self, df: pl.DataFrame) -> pl.DataFrame:
         """

@@ -170,7 +170,7 @@ if __name__ == "__main__":
         parser.add_argument(f"-{ver}", action="store_true", help=f"Run {ver.upper()}")
     
     parser.add_argument("-a", "--ans", action="store_true", help="Only calculate factors (no signal model)")
-    parser.add_argument("-s", "--skip", action="store_true", help="Skip Sync data before running")
+    parser.add_argument("-s", "--skip", action="store_true", help="Skip exec data.")
 
     parser.add_argument("-b", "--basic", action="store_true", help="Sync Stock Basic data before running")
     parser.add_argument("-d", "--download", action="store_true", help="force download daily data")
@@ -180,6 +180,8 @@ if __name__ == "__main__":
     parser.add_argument("-t", "--total", action="store_true", help="Force retrain all models (Total/Full Rolling)")
 
     parser.add_argument("--gp-test", action="store_true", help="Include GP testing factors in training")
+    parser.add_argument("--no-gp", action="store_true", help="Disable all GP factors")
+    parser.add_argument("--index", help="Filter stocks to index constituents (e.g. 000300.SH)")
 
     parser.add_argument("-m", "--max", help="Max Holdings", default=5)
 
@@ -214,7 +216,12 @@ if __name__ == "__main__":
     
     CalcClass, description = VERSION_CONFIG[version]
 
-    gp_filter = ["validated", "testing"] if args.gp_test else None
+    if args.no_gp:
+        gp_filter = []
+    elif args.gp_test:
+        gp_filter = ["validated", "testing"]
+    else:
+        gp_filter = None
     calculator = CalcClass(gp_status_filter=gp_filter)
     signal_name = f"ashare_mlp_signal_{version}"
     
@@ -233,7 +240,8 @@ if __name__ == "__main__":
         selector=selector,
         signal_name=actual_signal_name,
         start_date="2019-12-28",
-        end_date= last_trading_date.strftime("%Y-%m-%d")
+        end_date= last_trading_date.strftime("%Y-%m-%d"),
+        index_filter=args.index
     )
 
     if args.basic:
@@ -242,7 +250,7 @@ if __name__ == "__main__":
         stock_manager.download_all()
 
     manager = DailyBasicManager()
-    if args.download or (latest_date < last_trading_date and not args.skip):
+    if args.download or (latest_date < last_trading_date):
         print("开始下载历史数据...")
         download_data(end_date=last_trading_date.strftime("%Y%m%d"))
 
@@ -288,6 +296,10 @@ if __name__ == "__main__":
         print("强制更新数据同步到alpha lab...")
         engine.sync_data()
     
+    if args.skip:
+        print("跳过执行")
+        exit(0)
+
     data_df = engine.load_data()
     signal_df = engine.calculate_factors(data_df)
 
@@ -308,7 +320,6 @@ if __name__ == "__main__":
             }
         )
     
-    save_log_dump(version)
     
     # === Memory Cleanup ===
     # Release major objects and force garbage collection
