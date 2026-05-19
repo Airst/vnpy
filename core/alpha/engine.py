@@ -30,7 +30,7 @@ from core.alpha.data_loader import DataLoader
 ALPHA_DB_PATH = "core/alpha_db"
 
 class AlphaEngine:
-    def __init__(self, factor_calculator: FactorCalculator, mlp_signals: MLPSignals, selector: FundamentalSelector, signal_name: str, start_date: Optional[str] = None, end_date: Optional[str] = None):
+    def __init__(self, factor_calculator: FactorCalculator, mlp_signals: MLPSignals, selector: FundamentalSelector, signal_name: str, start_date: Optional[str] = None, end_date: Optional[str] = None, index_filter: Optional[str] = None):
         self.project_root = Path(os.getcwd())
         self.lab_path = self.project_root / ALPHA_DB_PATH
         self.lab = AlphaLab(str(self.lab_path))
@@ -40,6 +40,7 @@ class AlphaEngine:
         self.signal_name = signal_name
         self.database = get_database()
         self.data_loader = DataLoader(self.lab)
+        self.index_filter = index_filter
         # 1. Configuration & Scope
         if not end_date:
             end_date = datetime.now().strftime("%Y-%m-%d")
@@ -332,7 +333,49 @@ class AlphaEngine:
             if any(symbol.startswith(prefix) for prefix in ['000', '002', '300', '600', '601', '603', '688']):
                 ashare_symbols.append(symbol)
         
+        # 指数成分股过滤（支持逗号分隔多指数）
+        if self.index_filter:
+            index_codes = [c.strip() for c in self.index_filter.split(',')]
+            all_index_symbols = set()
+            for code in index_codes:
+                index_symbols = self._get_index_constituents(code)
+                if index_symbols:
+                    all_index_symbols.update(index_symbols)
+            if all_index_symbols:
+                ashare_symbols = [s for s in ashare_symbols if s in all_index_symbols]
+                print(f"[AlphaEngine] Index filter '{self.index_filter}' ({len(index_codes)} indices): {len(ashare_symbols)} symbols")
+        
         return ashare_symbols
+
+    def _get_index_constituents(self, index_code: str) -> set:
+        """获取指数历史所有成分股（使用tushare index_weight）"""
+        import tushare as ts
+        from vnpy.trader.setting import SETTINGS
+        
+        try:
+            pro = ts.pro_api(SETTINGS["datafeed.password"])
+            # 获取当前成分股
+            df = pro.index_weight(index_code=index_code, start_date=self.start_date.replace("-", ""), end_date=self.end_date.replace("-", ""))
+            if df is None or df.empty:
+                # fallback: 只取最新一期
+                df = pro.index_weight(index_code=index_code)
+            
+            if df is not None and not df.empty:
+                # tushare con_code 格式: 000001.SZ -> 转换为 000001.SZSE
+                symbols = set()
+                for code in df["con_code"].unique():
+                    parts = code.split(".")
+                    if len(parts) == 2:
+                        if parts[1] == "SZ":
+                            symbols.add(f"{parts[0]}.SZSE")
+                        elif parts[1] == "SH":
+                            symbols.add(f"{parts[0]}.SSE")
+                print(f"[AlphaEngine] Loaded {len(symbols)} index constituents from {index_code}")
+                return symbols
+        except Exception as e:
+            print(f"[AlphaEngine] Warning: Failed to load index constituents: {e}")
+        
+        return set()
 
     def save_signals(self, signal_df):
         if signal_df is not None:
