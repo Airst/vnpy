@@ -9,7 +9,9 @@ class V15FactorCalculator(FactorCalculator):
     V15-初版: 5个regime特征+全截面排名, 2024年-15.5%失败
     V15-Size-Neutral: Size-Neutral 标签 + Size相对因子, Sharpe 0.31 失败
     V15.0: 恢复V14标签 + 5个regime因子, Sharpe 1.33, 收益回撤比6.52, 但每年都不如单池最优
-    V15.1-当前: 升级 regime 信号到 13 个，Sharpe 1.51 / 年化 89.7% / MaxDD -23.5% （超越两个单池）
+    V15.1: 升级 regime 信号到 13 个，Sharpe 1.51 / 年化 89.7% / MaxDD -23.5% （超越两个单池）
+    V15.2-当前: 标签改为 5 日 beta-neutral, Sharpe 1.36 / 年化 74.8% / MaxDD -25.0% /
+                收益回撤比 7.29 / MaxDD 持续 64 天 （更稳健, 锁定为基线）
 
     == 设计决策 ==
     在双股票池（CSI 1000 + CSI 2000）混合训练下，让模型识别当前风格偏向：
@@ -21,7 +23,7 @@ class V15FactorCalculator(FactorCalculator):
     - mom_x_regime_align/contrarian: 个股动量与当前风格的交互
     - pool_size_x_regime: 个股市值排名 × 风格方向（核心 timing 交互）
     - pool_size_x_regime_change: 个股市值排名 × 风格切换方向
-    标签仍用 V14 全截面 beta-neutral 10日标签。
+    标签: 5 日 beta-neutral 收益（V15.2 起改用短窗口，回撤更短、鲁棒性更好）。
 
     == 失败记录 ==
     - V15-初版 5 regime+全截面排名: 2024年 -15.5%, 风格轮动信号滞后被甩
@@ -215,6 +217,7 @@ class V15FactorCalculator(FactorCalculator):
         
         # 6. Fundamental / Daily Basic
         features["turnover_mean_5d"] = ts_mean(TR, 5)
+        features["turnover_mean_10d"] = ts_mean(TR, 10)
         features["turnover_mean_20d"] = ts_mean(TR, 20)
         features["turnover_std_20d"] = ts_std(TR, 20)
         features["fund_turnover_growth"] = TR / (ts_delay(TR, 20) + 1e-8) - 1
@@ -582,15 +585,15 @@ class V15FactorCalculator(FactorCalculator):
         regime_change_dir = torch.tanh(features["style_regime_change"] * 10.0)
         features["pool_size_x_regime_change"] = features["pool_size_rank"] * regime_change_dir
 
-        # === Beta-Neutral Label (V14: 10日, 全截面排名) ===
-        raw_ret_10 = ts_delay(C, -10) / C - 1
-        mkt_ret_10 = torch.nanmean(raw_ret_10, dim=0, keepdim=True)
-        excess_ret_10 = raw_ret_10 - features["beta_20d"] * mkt_ret_10
+        # === Beta-Neutral Label (V15.2: 5日, 全截面排名) ===
+        raw_ret_5 = ts_delay(C, -5) / C - 1
+        mkt_ret_5 = torch.nanmean(raw_ret_5, dim=0, keepdim=True)
+        excess_ret_5 = raw_ret_5 - features["beta_20d"] * mkt_ret_5
 
         # 低流动性惩罚
-        low_liq_penalty = (features["turnover_mean_20d"] < 1.0).float() * 0.05
-        excess_ret_10 = excess_ret_10 - low_liq_penalty
+        low_liq_penalty = (features["turnover_mean_10d"] < 1.0).float() * 0.05
+        excess_ret_5 = excess_ret_5 - low_liq_penalty
 
-        features["label"] = cs_rank(excess_ret_10)
+        features["label"] = cs_rank(excess_ret_5)
 
         return features
