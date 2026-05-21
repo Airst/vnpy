@@ -10,8 +10,10 @@ class V15FactorCalculator(FactorCalculator):
     V15-Size-Neutral: Size-Neutral 标签 + Size相对因子, Sharpe 0.31 失败
     V15.0: 恢复V14标签 + 5个regime因子, Sharpe 1.33, 收益回撤比6.52, 但每年都不如单池最优
     V15.1: 升级 regime 信号到 13 个，Sharpe 1.51 / 年化 89.7% / MaxDD -23.5% （超越两个单池）
-    V15.2-当前: 标签改为 5 日 beta-neutral, Sharpe 1.36 / 年化 74.8% / MaxDD -25.0% /
-                收益回撤比 7.29 / MaxDD 持续 64 天 （更稳健, 锁定为基线）
+    V15.2: 标签改为 5 日 beta-neutral, Sharpe 1.36 / 年化 74.8% / MaxDD -25.0% /
+            收益回撤比 7.29 / MaxDD 持续 64 天 （更稳健, 锁定为基线）
+    V15.3-当前: GP因子去重(22→13) + 验证集50→100天 + 3-seed ensemble,
+            Sharpe 1.74 / 年化 113.9% / MaxDD -21.1% / 收益回撤比 7.25 / MaxDD持续 26 天
 
     == 设计决策 ==
     在双股票池（CSI 1000 + CSI 2000）混合训练下，让模型识别当前风格偏向：

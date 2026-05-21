@@ -347,14 +347,14 @@
           }
         ]
       },
-      "status": "validated",
+      "status": "rejected",
       "mining_metrics": {
         "ic": -0.04162397746489767,
         "icir": -0.746529727116421,
         "turnover": 0.8668342984759212
       },
       "discovered_at": "2026-05-13",
-      "note": "Sharpe 1.17→1.34, 近期回撤逆转+22%, 资金流向因子有效"
+      "note": "dedup: add(SL,TR) structure同质于gp_009, ICIR更弱(-0.75 vs -0.86)"
     },
     {
       "id": "gp_008",
@@ -385,14 +385,14 @@
           }
         ]
       },
-      "status": "validated",
+      "status": "rejected",
       "mining_metrics": {
         "ic": -0.05089893838842673,
         "icir": -0.8014084819937518,
         "turnover": 0.8689567969735859
       },
       "discovered_at": "2026-05-13",
-      "note": "Sharpe 1.17→1.34, 近期回撤逆转+22%, 资金流向因子有效"
+      "note": "dedup: cs_zscore(BL) structure同质于gp_009/015, 保留gp_009"
     },
     {
       "id": "gp_009",
@@ -612,14 +612,14 @@
           }
         ]
       },
-      "status": "validated",
+      "status": "rejected",
       "mining_metrics": {
         "ic": 0.04734042823547498,
         "icir": 0.6257786242595704,
         "turnover": 0.9141488732675308
       },
       "discovered_at": "2026-05-13",
-      "note": "Sharpe 1.26, MaxDD -28.86%(改善8%), 年化94%, 板块+资金流组合因子"
+      "note": "dedup: ts_delta(sub(CM20,X))同质于gp_019, 2nd arg同质于gp_018, ICIR最弱(0.63)"
     },
     {
       "id": "gp_012",
@@ -747,14 +747,14 @@
           }
         ]
       },
-      "status": "validated",
+      "status": "rejected",
       "mining_metrics": {
         "ic": -0.05768341141284669,
         "icir": -0.8328127990977194,
         "turnover": 0.8509283924343538
       },
       "discovered_at": "2026-05-13",
-      "note": "Sharpe 1.26, MaxDD -28.86%(改善8%), 年化94%, 板块+资金流组合因子"
+      "note": "dedup: cs_zscore(SL)同质于gp_014, 结构过复杂"
     },
     {
       "id": "gp_014",
@@ -849,14 +849,14 @@
           }
         ]
       },
-      "status": "validated",
+      "status": "rejected",
       "mining_metrics": {
         "ic": -0.05532940044615637,
         "icir": -0.8462762291508927,
         "turnover": 0.8593110120295603
       },
       "discovered_at": "2026-05-13",
-      "note": "Sharpe 1.26, MaxDD -28.86%(改善8%), 年化94%, 板块+资金流组合因子"
+      "note": "dedup: cs_zscore(BL) structure同质于gp_009, 保留gp_009"
     },
     {
       "id": "gp_016",
@@ -914,14 +914,14 @@
           }
         ]
       },
-      "status": "validated",
+      "status": "rejected",
       "mining_metrics": {
         "ic": -0.04281950526555567,
         "icir": -0.6940210673126423,
         "turnover": 0.7329537368265444
       },
       "discovered_at": "2026-05-14",
-      "note": "Sharpe 1.26→1.39, MaxDD -21.44%, 收益回撤比6.21, 超大单+板块动量变化因子"
+      "note": "dedup: add(ts_rank(ts_mean(BL,5),5),V)同质于gp_018, ICIR更弱(-0.69 vs +0.80)"
     },
     {
       "id": "gp_017",
@@ -1175,14 +1175,14 @@
           }
         ]
       },
-      "status": "validated",
+      "status": "rejected",
       "mining_metrics": {
         "ic": 0.042085298591829245,
         "icir": 0.83175937708059,
         "turnover": 0.8268064329242076
       },
       "discovered_at": "2026-05-14",
-      "note": "Sharpe 1.26→1.39, MaxDD -21.44%, 收益回撤比6.21, 超大单+板块动量变化因子"
+      "note": "dedup: cs_rank(ts_delta(sub(CM20,V),3))同质于gp_019, 保留gp_019"
     },
     {
       "id": "gp_021",
@@ -2085,14 +2085,14 @@
           }
         ]
       },
-      "status": "validated",
+      "status": "rejected",
       "mining_metrics": {
         "ic": -0.0427887924015522,
         "icir": -0.7199606177186386,
         "turnover": 0.8449254771174675
       },
       "discovered_at": "2026-05-16",
-      "note": "auto-validated: rolling IC >= 0.03"
+      "note": "dedup: cs_zscore(BMD)同质于gp_038, ICIR更弱(-0.72 vs +0.84)"
     },
     {
       "id": "gp_038",
@@ -2194,14 +2194,14 @@
           }
         ]
       },
-      "status": "validated",
+      "status": "rejected",
       "mining_metrics": {
         "ic": 0.044383455067873,
         "icir": 0.8320222901610707,
         "turnover": 0.843132160796258
       },
       "discovered_at": "2026-05-16",
-      "note": "auto-validated: rolling IC >= 0.03"
+      "note": "dedup: sub(SMD,V)同质于gp_038, 保留gp_038"
     },
     {
       "id": "gp_040",

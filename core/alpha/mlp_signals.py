@@ -5,13 +5,15 @@ MLP 滚动训练与信号生成模块
 初始: MLP 三层隐藏层(64/32/16), 500天窗口, 90天重训
 V9 Step 3a: MLP → FactorAttentionNetwork (d_token=64, 4heads, 1层)
 V10: 训练窗口 500天 → 700天（更多 regime 多样性）
+V15.2: 验证集 50天 → 100天, 3-seed ensemble 降低variance
 
 == 当前状态 ==
 模型: factor_attention (d_token=64, n_heads=4, n_attn_layers=1, d_ffn=128)
-训练窗口: 700 天
+训练窗口: 700 天 (600训练 + 100验证)
 重训周期: 90 天
 批量大小: 2048, 学习率: 0.001, weight_decay: 0.002
 早停: 40 轮无改善
+Ensemble: 3-seed (42, 123, 2024), 预测均值聚合
 
 == 设计决策 ==
 - Factor Attention 选择: 模型结构改变 > 损失函数改造（连续3次损失函数实验失败）
@@ -19,6 +21,8 @@ V10: 训练窗口 500天 → 700天（更多 regime 多样性）
 - n_attn_layers=1: 2层过拟合（500~700天训练数据量有限）
 - 700天窗口: 提供充足 regime 多样性，是隐式正则化
 - 90天重训: 平衡模型时效性和训练成本
+- 100天验证集: 覆盖~4个月行情，避免early stopping被短期市场偏差误导
+- 3-seed ensemble: 消除单次训练的随机性，提高OOS信号稳定性
 - n_jobs=1: 单线程保证可复现性
 
 == 失败记录 ==
@@ -72,11 +76,11 @@ def set_seed(seed: int = 42):
 
 class MLPSignals:
 
-    def __init__(self, signal_name: str = "mlp_signal", force_retrain: bool = False, retrain_days: int = 90, ensemble_size: int = 1):
+    def __init__(self, signal_name: str = "mlp_signal", force_retrain: bool = False, retrain_days: int = 90, ensemble_size: int = 3):
         self.signal_name = signal_name
         self.force_retrain = force_retrain
         self.retrain_days = retrain_days
-        self.ensemble_size = ensemble_size  # Number of models for ensemble
+        self.ensemble_size = ensemble_size  # Number of models for ensemble (3-seed default)
         # self.model_dir = Path("core/alpha_db/model") # Managed by AlphaLab
         
         #self.model_settings = {
@@ -184,7 +188,7 @@ class MLPSignals:
             # 700 days total (0 to 699)
             train_start_idx = max(0, train_end_idx - 699) 
             
-            valid_len = 50
+            valid_len = 100
             train_period_end_idx = train_end_idx - valid_len
             
             # Use raw datetime objects to avoid string ambiguity and ensure precision
@@ -319,9 +323,10 @@ class MLPSignals:
             
         return result_df
 
+    # Seeds for ensemble training (diverse primes for independence)
+    ENSEMBLE_SEEDS = [42, 123, 2024]
+
     def _train_and_predict_window(self, dataset_df: pl.DataFrame, task_info: Dict, lab: AlphaLab) -> Optional[pl.DataFrame]:
-        set_seed(42)  # Reset seed for this window (Deterministic)
-        
         train_period = task_info["train_period"]
         valid_period = task_info["valid_period"]
         test_period = task_info["test_period"]
@@ -329,9 +334,11 @@ class MLPSignals:
         pe_str = task_info["pe_str"]
         save_model = task_info.get("save_model", False)
         
-        print(f"[MLPSignals] Window: Train [700 days pre {ps_str}] -> Predict [{ps_str} to {pe_str}]")
+        n_models = self.ensemble_size
+        seeds = self.ENSEMBLE_SEEDS[:n_models]
+        print(f"[MLPSignals] Window: Train [700 days pre {ps_str}] -> Predict [{ps_str} to {pe_str}] (ensemble={n_models})")
         
-        # Construct Dataset for this window
+        # Construct Dataset for this window (shared across ensemble members)
         dataset = AlphaDataset(
             df=dataset_df,
             train_period=train_period,
@@ -347,41 +354,52 @@ class MLPSignals:
         dataset.add_processor("learn", self._clean_label)
         dataset.process_data()
         
-        model = None
         result_df = None
+        all_preds = []
+        
         try:
-            # Train Model
-            model = self._train_model(dataset)
+            for i, seed in enumerate(seeds):
+                set_seed(seed)
+                if n_models > 1:
+                    print(f"[MLPSignals]   Ensemble member {i+1}/{n_models} (seed={seed})")
+                
+                model = self._train_model(dataset, seed=seed)
+                
+                if model:
+                    if save_model and i == 0:
+                        self._save_model(lab, model, ps_str, pe_str)
+                    
+                    preds = model.predict(dataset, Segment.TEST)
+                    all_preds.append(preds)
+                    
+                    del model
+                    import gc
+                    gc.collect()
+                    if torch.cuda.is_available():
+                        torch.cuda.empty_cache()
             
-            if model and save_model:
-                self._save_model(lab, model, ps_str, pe_str)
-            
-            if model:
-                # Predict
-                preds = model.predict(dataset, Segment.TEST)
+            if all_preds:
+                # Average predictions across ensemble members
+                avg_preds = np.mean(all_preds, axis=0)
                 meta = dataset.fetch_infer(Segment.TEST).select(["datetime", "vt_symbol"])
                 
-                if len(preds) == len(meta):
-                    meta = meta.with_columns(pl.Series(preds).alias("total_score"))
+                if len(avg_preds) == len(meta):
+                    meta = meta.with_columns(pl.Series(avg_preds).alias("total_score"))
                     result_df = meta
                 else:
-                    print(f"[MLPSignals] Mismatch in prediction length: {len(preds)} vs {len(meta)}")
+                    print(f"[MLPSignals] Mismatch in prediction length: {len(avg_preds)} vs {len(meta)}")
+                    
         except Exception as e:
             print(f"[MLPSignals] Prediction/Training failed for window {ps_str}: {e}")
             import traceback
             traceback.print_exc()
         finally:
             # === Memory Cleanup ===
-            # Explicitly delete heavy objects to prevent memory leak across windows
-            if model is not None:
-                del model
             if 'dataset' in locals() and dataset is not None:
                 del dataset
             
-            # Force garbage collection and empty CUDA cache
             import gc
             gc.collect()
-            import torch
             if torch.cuda.is_available():
                 torch.cuda.empty_cache()
                 
@@ -391,7 +409,7 @@ class MLPSignals:
         return df.drop_nulls(subset=["label"])
 
 
-    def _train_model(self, dataset: AlphaDataset) -> Optional[MlpModel]:
+    def _train_model(self, dataset: AlphaDataset, seed: int = 42) -> Optional[MlpModel]:
         import torch
         device = "cuda" if torch.cuda.is_available() else "cpu"
         print(f"[MLPSignals] Device: {device}")
@@ -415,7 +433,7 @@ class MLPSignals:
             weight_decay=self.model_settings.get("weight_decay", 0.0),
             optimizer=self.model_settings.get("optimizer", "adam"),
             device=device,
-            seed=42,
+            seed=seed,
             model_type=self.model_settings.get("model_type", "mlp"),
             d_token=self.model_settings.get("d_token", 32),
             n_heads=self.model_settings.get("n_heads", 4),

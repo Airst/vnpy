@@ -211,6 +211,9 @@ V9 → V10: <变更摘要>
 13. **Attention 框架下弱因子重测有条件成功**：需提供独立信息维度，信息冗余的因子仍然失败
 14. **Gate Network 在 Factor Attention 框架下失败**：Attention 已实现动态加权，Gate 冗余且过拟合
 15. **动量崩溃检测在 A 股截面选股中无效**：动量维度因子工程已触及天花板。详见 `docs/iterations/v11_momentum_crash_detection.md`
+16. **GP 因子需要去重**：结构同质化的 GP 因子集体加入会稀释 attention 权重，应按子树相似性聚类后保留代表性因子。V15.3 将 22 个 validated 因子缩减到 13 个后 Sharpe 从 1.36 提升到 1.74。详见 `docs/iterations/v15_step2_dedup_ensemble.md`
+17. **验证集长度影响 early stopping 可靠性**：50 天验证集易被短期市场偏差误导，100 天（覆盖约 4 个月行情）可提供更稳定的 stop signal
+18. **Multi-seed ensemble 显著降低 OOS variance**：3-seed (42/123/2024) 训练 + 预测均值聚合，能有效消除单次训练的随机性（权重初始化、batch 采样、dropout mask），是低成本高收益的稳健化手段
 
 ---
 
