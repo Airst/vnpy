@@ -6,6 +6,7 @@ MLP 滚动训练与信号生成模块
 V9 Step 3a: MLP → FactorAttentionNetwork (d_token=64, 4heads, 1层)
 V10: 训练窗口 500天 → 700天（更多 regime 多样性）
 V15.2: 验证集 50天 → 100天, 3-seed ensemble 降低variance
+V15.3-revert: 回退为单次训练（ensemble 多次重训仍不稳定，OOS variance 改善有限）
 
 == 当前状态 ==
 模型: factor_attention (d_token=64, n_heads=4, n_attn_layers=1, d_ffn=128)
@@ -13,7 +14,7 @@ V15.2: 验证集 50天 → 100天, 3-seed ensemble 降低variance
 重训周期: 90 天
 批量大小: 2048, 学习率: 0.001, weight_decay: 0.002
 早停: 40 轮无改善
-Ensemble: 3-seed (42, 123, 2024), 预测均值聚合
+单次训练 (seed=42)，n_jobs=1 保证可复现性
 
 == 设计决策 ==
 - Factor Attention 选择: 模型结构改变 > 损失函数改造（连续3次损失函数实验失败）
@@ -22,7 +23,7 @@ Ensemble: 3-seed (42, 123, 2024), 预测均值聚合
 - 700天窗口: 提供充足 regime 多样性，是隐式正则化
 - 90天重训: 平衡模型时效性和训练成本
 - 100天验证集: 覆盖~4个月行情，避免early stopping被短期市场偏差误导
-- 3-seed ensemble: 消除单次训练的随机性，提高OOS信号稳定性
+- 单次训练 + 固定 seed: 多次重训发现 ensemble 仍不稳定，回退为单次保证可复现
 - n_jobs=1: 单线程保证可复现性
 
 == 失败记录 ==
@@ -31,6 +32,8 @@ Ensemble: 3-seed (42, 123, 2024), 预测均值聚合
 - 多任务学习(1d/10d/20d预测头): Sharpe 1.20→0.86，辅助损失梯度冲突
 - 时间衰减采样(decay=0.995): Sharpe 0.68→0.24，丧失 regime 多样性
 - 2层Attention: 过拟合，不如1层
+- 3-seed ensemble: 单窗口降variance有效，但跨多次重训整体OOS仍不稳定，
+  且训练成本x3，收益不匹配，已回退为单次训练
 """
 from datetime import datetime, timedelta
 import polars as pl
@@ -76,11 +79,11 @@ def set_seed(seed: int = 42):
 
 class MLPSignals:
 
-    def __init__(self, signal_name: str = "mlp_signal", force_retrain: bool = False, retrain_days: int = 90, ensemble_size: int = 3):
+    def __init__(self, signal_name: str = "mlp_signal", force_retrain: bool = False, retrain_days: int = 90, ensemble_size: int = 1):
         self.signal_name = signal_name
         self.force_retrain = force_retrain
         self.retrain_days = retrain_days
-        self.ensemble_size = ensemble_size  # Number of models for ensemble (3-seed default)
+        self.ensemble_size = ensemble_size  # 单次训练（V15.3-revert: ensemble 跨重训仍不稳定）
         # self.model_dir = Path("core/alpha_db/model") # Managed by AlphaLab
         
         #self.model_settings = {

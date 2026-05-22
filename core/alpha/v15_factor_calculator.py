@@ -32,6 +32,11 @@ class V15FactorCalculator(FactorCalculator):
     - V15 Size-Neutral 标签 + Size相对因子: Sharpe 0.31 (CSI 1000+2000 混池),
       远不如单池 V14（Sharpe 1.42 / 1.19）。剥离 size premium 等于剥离主 alpha 信号。
     - V15.0 弱 regime 因子（5个）: Sharpe 1.33 但每年都不如单池最优年份，timing 信号太弱。
+    - V16 股东人数因子（5个 holder_*）: Sharpe 1.74→1.09, 年化 113.9%→47.9%, MaxDD -21%→-30%。
+      季频数据在日频截面框架下滞后明显（公告滞后 1~3 月），且 holder_change_qoq 与
+      avg_holding_size_change 数学上等价（FS/HN 同步缩放），重复传同质信号稀释 attention 权重；
+      avg_holding_size_log 实为 size 因子变种，与已有 size_ln_cap 冗余。
+      数据已下载保留为基础设施（data_manager/ts_downloader/holder_number_manager.py）。
     """
     def __init__(self, **kwargs):
         super().__init__(**kwargs)
