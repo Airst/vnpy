@@ -216,6 +216,7 @@ V9 → V10: <变更摘要>
 18. **Multi-seed ensemble 显著降低 OOS variance**：3-seed (42/123/2024) 训练 + 预测均值聚合，能有效消除单次训练的随机性（权重初始化、batch 采样、dropout mask），是低成本高收益的稳健化手段
 19. **季频数据在日频截面框架下信号过滤效率低**：股东人数等季频数据公告滞后 1~3 个月，被价量数据先行反映；强行引入会带来同质化重复信号（如 holder_change_qoq 与 avg_holding_size_change 数学等价、avg_holding_size_log 是 size 因子变种），稀释 attention 权重导致 Sharpe 1.74→1.09。详见 `docs/iterations/v16_holder_number_failed.md`
 20. **GP 因子信号空间在当前算子体系下已趋于饱和**：经过 6 轮挖掘（50 个候选，13 个 validated），新一轮发现的候选因子大量集中于 `cs_zscore(BMD)`/`ts_cov(log(PB),neg(X))` 等已有信号维度的变体，无法提供真正增量信息。GP 算子扩展（加入新终端如财务数据）或更换搜索空间是下一步方向
+21. **北向资金因子是股票池绑定信号，在小盘股池中失效甚至反向**：北向资金 alpha 在学术研究中的有效性建立在沪深300/大盘蓝筹池上，但在 CSI 1000+2000 小盘池中：变动信号 IC≈0.01（噪音），`hk_hold_mask` 反而是强负 IC (-0.074, ICIR -1.52)——外资在小盘池中持有的多为 ST/壳/题材异类股票。引入大盘风格的因子前必须验证其在目标股票池的方向性。数据已下载保留为基础设施。详见 `core/alpha/v15_factor_calculator.py` V17 失败记录
 
 ---
 

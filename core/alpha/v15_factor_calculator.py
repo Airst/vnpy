@@ -37,6 +37,12 @@ class V15FactorCalculator(FactorCalculator):
       avg_holding_size_change 数学上等价（FS/HN 同步缩放），重复传同质信号稀释 attention 权重；
       avg_holding_size_log 实为 size 因子变种，与已有 size_ln_cap 冗余。
       数据已下载保留为基础设施（data_manager/ts_downloader/holder_number_manager.py）。
+    - V17 北向资金因子（5个 hk_*）: Sharpe 1.36→1.26, 年化 74.8%→60.75%, MaxDD -25%→-26.7%。
+      在 CSI 1000+2000 小盘池中，北向资金信号几乎全失效：4个变动因子 IC 仅 0.01-0.02（噪音）；
+      hk_hold_mask 反而是强负 IC (-0.074, ICIR -1.52)——外资在小盘池中持有的多为 ST/壳/题材
+      异类股票，与小盘股池正常逻辑相反。北向 alpha 仅在大盘股(CSI 300)有效，硬塞进小盘池
+      稀释 attention 权重导致 Sharpe 下降。数据已下载保留为基础设施
+      （data_manager/ts_downloader/hk_hold_manager.py），未来若做大盘股池可复用。
     """
     def __init__(self, **kwargs):
         super().__init__(**kwargs)
