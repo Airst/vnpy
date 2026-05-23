@@ -84,6 +84,7 @@ class MlpModel(AlphaModel):
         ffn_dropout: float = 0.15,
         head_dropout: float = 0.10,
         attn_activation: str = "softmax",
+        input_dropout: float = 0.0,
     ) -> None:
         """
         Initialize MLP model
@@ -150,6 +151,7 @@ class MlpModel(AlphaModel):
                 ffn_dropout=ffn_dropout,
                 head_dropout=head_dropout,
                 attn_activation=attn_activation,
+                input_dropout=input_dropout,
             )
         else:
             self.model: nn.Module = MlpNetwork(
@@ -704,10 +706,12 @@ class FactorAttentionNetwork(nn.Module):
         ffn_dropout: float = 0.15,
         head_dropout: float = 0.10,
         attn_activation: str = "softmax",
+        input_dropout: float = 0.0,
     ) -> None:
         super().__init__()
         self.input_size = input_size
         self.d_token = d_token
+        self.input_dropout = input_dropout
 
         # === Factor Tokenizer ===
         # Each factor: scalar -> d_token vector via element-wise multiply + bias
@@ -777,6 +781,13 @@ class FactorAttentionNetwork(nn.Module):
         output: (batch_size, 1)
         """
         batch_size = x.shape[0]
+
+        # === Input Feature Dropout (factor-level masking) ===
+        if self.training and self.input_dropout > 0:
+            mask = torch.bernoulli(
+                torch.full((1, self.input_size), 1.0 - self.input_dropout, device=x.device)
+            )  # (1, N) — same mask for all samples in batch
+            x = x * mask
 
         # === Factor Tokenizer ===
         # x: (B, N) -> (B, N, 1) * (N, d) -> (B, N, d)

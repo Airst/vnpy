@@ -32,6 +32,9 @@ V15.3-revert: 回退为单次训练（ensemble 多次重训仍不稳定，OOS va
 - 多任务学习(1d/10d/20d预测头): Sharpe 1.20→0.86，辅助损失梯度冲突
 - 时间衰减采样(decay=0.995): Sharpe 0.68→0.24，丧失 regime 多样性
 - 2层Attention: 过拟合，不如1层
+- 2层Attention+强dropout(0.30): Sharpe 1.36→1.13，MaxDD持续64天，依然不如1层
+- d_ffn 128→256: Sharpe 1.36→1.01，MaxDD持续519天，FFN加大导致过拟合
+- Input feature dropout(0.15): Sharpe 1.36→0.96，MaxDD -43.6%/526天，因子遮蔽过激损害学习
 - 3-seed ensemble: 单窗口降variance有效，但跨多次重训整体OOS仍不稳定，
   且训练成本x3，收益不匹配，已回退为单次训练
 """
@@ -106,6 +109,7 @@ class MLPSignals:
             "ffn_dropout": 0.15,
             "head_dropout": 0.10,
             "attn_activation": "softmax",  # "entmax15" available but ~40x slower
+            "input_dropout": 0.0,  # B5 failed: 0.15 caused Sharpe 1.36→0.96, MaxDD -43.6%
             # Training hyperparameters (unchanged from Step 1)
             "n_epochs": 1000,
             "batch_size": 2048,
@@ -447,6 +451,7 @@ class MLPSignals:
             ffn_dropout=self.model_settings.get("ffn_dropout", 0.15),
             head_dropout=self.model_settings.get("head_dropout", 0.10),
             attn_activation=self.model_settings.get("attn_activation", "softmax"),
+            input_dropout=self.model_settings.get("input_dropout", 0.0),
         )
         
         try:
