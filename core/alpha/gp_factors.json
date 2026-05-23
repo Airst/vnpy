@@ -1,6 +1,6 @@
 {
   "version": 2,
-  "next_id": 46,
+  "next_id": 51,
   "factors": [
     {
       "id": "gp_001",
@@ -2610,6 +2610,324 @@
       },
       "discovered_at": "2026-05-16",
       "note": "与gp_043结构同质化"
+    },
+    {
+      "id": "gp_046",
+      "expr": "ts_cov(log(PB), neg(cs_zscore(TRF)), 5)",
+      "tree": {
+        "op": "ts_cov",
+        "value": null,
+        "window": 5,
+        "children": [
+          {
+            "op": "log",
+            "value": null,
+            "window": null,
+            "children": [
+              {
+                "op": "terminal",
+                "value": "PB",
+                "window": null,
+                "children": []
+              }
+            ]
+          },
+          {
+            "op": "neg",
+            "value": null,
+            "window": null,
+            "children": [
+              {
+                "op": "cs_zscore",
+                "value": null,
+                "window": null,
+                "children": [
+                  {
+                    "op": "terminal",
+                    "value": "TRF",
+                    "window": null,
+                    "children": []
+                  }
+                ]
+              }
+            ]
+          }
+        ]
+      },
+      "status": "rejected",
+      "mining_metrics": {
+        "ic": 0.049742236733436584,
+        "icir": 0.7357235761239308,
+        "turnover": 0.8770375326589716
+      },
+      "discovered_at": "2026-05-23",
+      "note": "dedup-与gp_042同质(ts_cov(log(PB),neg(X),5)结构,TRF约等V/float_share)"
+    },
+    {
+      "id": "gp_047",
+      "expr": "ts_cov(log(PB), neg(SMD), 5)",
+      "tree": {
+        "op": "ts_cov",
+        "value": null,
+        "window": 5,
+        "children": [
+          {
+            "op": "log",
+            "value": null,
+            "window": null,
+            "children": [
+              {
+                "op": "terminal",
+                "value": "PB",
+                "window": null,
+                "children": []
+              }
+            ]
+          },
+          {
+            "op": "neg",
+            "value": null,
+            "window": null,
+            "children": [
+              {
+                "op": "terminal",
+                "value": "SMD",
+                "window": null,
+                "children": []
+              }
+            ]
+          }
+        ]
+      },
+      "status": "testing",
+      "mining_metrics": {
+        "ic": 0.0596732534468174,
+        "icir": 0.7721645657680581,
+        "turnover": 0.8439183623344559
+      },
+      "discovered_at": "2026-05-23",
+      "note": "auto-validated: rolling IC >= 0.03"
+    },
+    {
+      "id": "gp_048",
+      "expr": "ts_cov(cs_zscore(H), ts_delta(neg(cs_zscore(BMD)), 3), 5)",
+      "tree": {
+        "op": "ts_cov",
+        "value": null,
+        "window": 5,
+        "children": [
+          {
+            "op": "cs_zscore",
+            "value": null,
+            "window": null,
+            "children": [
+              {
+                "op": "terminal",
+                "value": "H",
+                "window": null,
+                "children": []
+              }
+            ]
+          },
+          {
+            "op": "ts_delta",
+            "value": null,
+            "window": 3,
+            "children": [
+              {
+                "op": "neg",
+                "value": null,
+                "window": null,
+                "children": [
+                  {
+                    "op": "cs_zscore",
+                    "value": null,
+                    "window": null,
+                    "children": [
+                      {
+                        "op": "terminal",
+                        "value": "BMD",
+                        "window": null,
+                        "children": []
+                      }
+                    ]
+                  }
+                ]
+              }
+            ]
+          }
+        ]
+      },
+      "status": "rejected",
+      "mining_metrics": {
+        "ic": 0.05213131755590439,
+        "icir": 0.8809518858435644,
+        "turnover": 0.8405393619625039
+      },
+      "discovered_at": "2026-05-23",
+      "note": "dedup-与gp_049共享cs_zscore(BMD)子树,加入后Sharpe 1.36→1.33,MaxDD持续207天,无增量"
+    },
+    {
+      "id": "gp_049",
+      "expr": "ts_cov(cs_rank(add(TRF, SE)), neg(cs_zscore(BMD)), 5)",
+      "tree": {
+        "op": "ts_cov",
+        "value": null,
+        "window": 5,
+        "children": [
+          {
+            "op": "cs_rank",
+            "value": null,
+            "window": null,
+            "children": [
+              {
+                "op": "add",
+                "value": null,
+                "window": null,
+                "children": [
+                  {
+                    "op": "terminal",
+                    "value": "TRF",
+                    "window": null,
+                    "children": []
+                  },
+                  {
+                    "op": "terminal",
+                    "value": "SE",
+                    "window": null,
+                    "children": []
+                  }
+                ]
+              }
+            ]
+          },
+          {
+            "op": "neg",
+            "value": null,
+            "window": null,
+            "children": [
+              {
+                "op": "cs_zscore",
+                "value": null,
+                "window": null,
+                "children": [
+                  {
+                    "op": "terminal",
+                    "value": "BMD",
+                    "window": null,
+                    "children": []
+                  }
+                ]
+              }
+            ]
+          }
+        ]
+      },
+      "status": "rejected",
+      "mining_metrics": {
+        "ic": 0.05275391414761543,
+        "icir": 0.9269022883457368,
+        "turnover": 0.8791810719606494
+      },
+      "discovered_at": "2026-05-23",
+      "note": "dedup-与gp_048共享cs_zscore(BMD)子树,整体GP因子体系BMD维度已饱和"
+    },
+    {
+      "id": "gp_050",
+      "expr": "ts_corr(add(BMD, TRF), cs_zscore(cs_zscore(add(add(BL, TRF), add(TRF, SE)))), 5)",
+      "tree": {
+        "op": "ts_corr",
+        "value": null,
+        "window": 5,
+        "children": [
+          {
+            "op": "add",
+            "value": null,
+            "window": null,
+            "children": [
+              {
+                "op": "terminal",
+                "value": "BMD",
+                "window": null,
+                "children": []
+              },
+              {
+                "op": "terminal",
+                "value": "TRF",
+                "window": null,
+                "children": []
+              }
+            ]
+          },
+          {
+            "op": "cs_zscore",
+            "value": null,
+            "window": null,
+            "children": [
+              {
+                "op": "cs_zscore",
+                "value": null,
+                "window": null,
+                "children": [
+                  {
+                    "op": "add",
+                    "value": null,
+                    "window": null,
+                    "children": [
+                      {
+                        "op": "add",
+                        "value": null,
+                        "window": null,
+                        "children": [
+                          {
+                            "op": "terminal",
+                            "value": "BL",
+                            "window": null,
+                            "children": []
+                          },
+                          {
+                            "op": "terminal",
+                            "value": "TRF",
+                            "window": null,
+                            "children": []
+                          }
+                        ]
+                      },
+                      {
+                        "op": "add",
+                        "value": null,
+                        "window": null,
+                        "children": [
+                          {
+                            "op": "terminal",
+                            "value": "TRF",
+                            "window": null,
+                            "children": []
+                          },
+                          {
+                            "op": "terminal",
+                            "value": "SE",
+                            "window": null,
+                            "children": []
+                          }
+                        ]
+                      }
+                    ]
+                  }
+                ]
+              }
+            ]
+          }
+        ]
+      },
+      "status": "rejected",
+      "mining_metrics": {
+        "ic": -0.0515783317387104,
+        "icir": -0.9611023016253001,
+        "turnover": 0.8606195910958996
+      },
+      "discovered_at": "2026-05-23",
+      "note": "dedup-结构过复杂+与gp_038共享BMD截面信号冗余"
     }
   ]
 }
