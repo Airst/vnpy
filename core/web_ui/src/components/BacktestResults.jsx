@@ -593,6 +593,7 @@ const BacktestResults = ({ result }) => {
                     vtSymbol={record.symbol}
                     defaultTab="llm"
                     extraTabs={extraTabs}
+                    trades={trades.filter(t => t.symbol === record.symbol)}
                 />
             </Modal>
         );

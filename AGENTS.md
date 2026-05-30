@@ -17,10 +17,10 @@
 
 - 操作系统：WSL Ubuntu
 - Python 路径：`/home/airst/Workspace/.venv/bin/python`
-- 训练命令：`python training.py -v{版本号} -t`（版本动态发现自 `core/alpha/v*_factor_calculator.py`）
+- 训练命令：`python training.py -v{版本号} -t --index {指数代码}`（**必须传 --index**，否则全市场股票会 GPU OOM。常用：`000852.SH,399303.SZ` 或单独 `399303.SZ`）
 - GP 挖掘命令：`python gp_mining.py -v{版本号}`（独立脚本，支持 `--pop`/`--gen`/`--max-factors` 等超参数）
 - GP 注册表管理：`python gp_mining.py -v{版本号} --status/--accept/--reject/--test/--note`
-- 训练日志：`trainingV{版本号}.txt`（项目根目录）
+- 训练日志：`log/run_v{版本号}.log`
 - 回测结果：`core/alpha_db/backtest/` 下 JSON 文件
 
 ### 1.3 信息索引
@@ -216,7 +216,10 @@ V9 → V10: <变更摘要>
 18. **Multi-seed ensemble 显著降低 OOS variance**：3-seed (42/123/2024) 训练 + 预测均值聚合，能有效消除单次训练的随机性（权重初始化、batch 采样、dropout mask），是低成本高收益的稳健化手段
 19. **季频数据在日频截面框架下信号过滤效率低**：股东人数等季频数据公告滞后 1~3 个月，被价量数据先行反映；强行引入会带来同质化重复信号（如 holder_change_qoq 与 avg_holding_size_change 数学等价、avg_holding_size_log 是 size 因子变种），稀释 attention 权重导致 Sharpe 1.74→1.09。详见 `docs/iterations/v16_holder_number_failed.md`
 20. **GP 因子信号空间在当前算子体系下已趋于饱和**：经过 6 轮挖掘（50 个候选，13 个 validated），新一轮发现的候选因子大量集中于 `cs_zscore(BMD)`/`ts_cov(log(PB),neg(X))` 等已有信号维度的变体，无法提供真正增量信息。GP 算子扩展（加入新终端如财务数据）或更换搜索空间是下一步方向
-21. **北向资金因子是股票池绑定信号，在小盘股池中失效甚至反向**：北向资金 alpha 在学术研究中的有效性建立在沪深300/大盘蓝筹池上，但在 CSI 1000+2000 小盘池中：变动信号 IC≈0.01（噪音），`hk_hold_mask` 反而是强负 IC (-0.074, ICIR -1.52)——外资在小盘池中持有的多为 ST/壳/题材异类股票。引入大盘风格的因子前必须验证其在目标股票池的方向性。数据已下载保留为基础设施。详见 `core/alpha/v15_factor_calculator.py` V17 失败记录
+21. **执行层复杂仓位调节是 Sharpe 杀手**：在 5 持仓 + 日频 + T+1 + 整手 100 + 排名归一化信号的框架下，"等权入场 + score 阈值清仓"已是接近最优的简单规则；V18 系列四类机制（SignalScale 入场分档 / loss_cut 浮亏减仓 / signal_fade 信号衰减分档 / pyramid 金字塔加仓）全部 Sharpe 下降。详见 `docs/iterations/v18_dynamic_position.md`
+22. **A 股牛市轮动反对集中持仓**：基于信号强度的入场分档（Top1=1.5x）在 A 股板块快速轮动的牛市中损害收益捕获（V18.1: 24Q3 牛市少赚 43%）。学术上的 IC × signal_strength 加权（Markowitz 改良）在 A 股日频截面框架下不成立
+23. **减半仓在 A 股日频框架下产生双重摩擦**："Cut losses short" 经典法则在 T+1 + 整手 100 约束下：减半后反弹错失收益 OR 减半后继续跌触发硬止损（两次卖在不同价位），交易笔数飙升 13%~28%，手续费 + 滑点累计成本超过 alpha 改善
+24. **pyramid 加仓与排名退出存在结构性互斥**：基于持仓盈亏的加仓机制必须先解决与"基于信号排名退出"的优先级冲突；不改 sell_threshold 则 pyramid 0 次触发，改了则副作用大于加仓收益（V18.3b 实证）。该方向暂停
 
 ---
 

@@ -271,6 +271,38 @@ class DataLoader:
         except Exception as e:
             print(f"加载融资融券数据失败: {e}")
 
+        # 9. 加载北向资金持仓数据 (HK Hold - 外资持仓信号)
+        print("加载北向资金持仓数据 (HK Hold)...")
+        try:
+            from data_manager.ts_downloader.hk_hold_manager import HkHoldManager
+            hk_manager = HkHoldManager()
+            hk_df_pd = hk_manager.load_data(symbols, s_date_str, e_date_str)
+
+            if not hk_df_pd.empty:
+                hk_df = pl.from_pandas(hk_df_pd)
+                if "datetime" in hk_df.columns:
+                    hk_df = hk_df.with_columns(pl.col("datetime").cast(pl.Datetime("us")))
+
+                cols_to_drop = ["ts_code", "trade_date", "exchange"]
+                hk_df = hk_df.drop([c for c in cols_to_drop if c in hk_df.columns])
+
+                price_df = price_df.join(hk_df, on=["vt_symbol", "datetime"], how="left")
+
+                hk_cols = ["vol", "ratio"]
+                # Rename to avoid collision with OHLCV vol
+                price_df = price_df.rename({"vol": "hk_hold_vol", "ratio": "hk_hold_ratio"})
+                hk_cols = ["hk_hold_vol", "hk_hold_ratio"]
+
+                price_df = price_df.sort(["vt_symbol", "datetime"])
+                price_df = price_df.with_columns([
+                    pl.col(col).forward_fill().over("vt_symbol")
+                    for col in hk_cols if col in price_df.columns
+                ])
+
+                print(f"北向资金持仓数据加载完成，维度: {price_df.shape}")
+        except Exception as e:
+            print(f"加载北向资金持仓数据失败: {e}")
+
         return price_df
 
     def _load_financial_data(self, symbols: List[str], start_date: str, end_date: str) -> pl.DataFrame:

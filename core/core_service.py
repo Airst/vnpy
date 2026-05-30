@@ -11,7 +11,9 @@ from pathlib import Path
 
 from vnpy_portfoliostrategy import StrategyTemplate
 from vnpy_portfoliostrategy.backtesting import BacktestingEngine
-from vnpy.trader.constant import Interval
+from vnpy.trader.constant import Interval, Direction, Offset, Status
+from vnpy.trader.object import OrderData, TradeData, BarData
+from vnpy.trader.utility import extract_vt_symbol
 from vnpy.alpha.lab import AlphaLab
 from core.selector import FundamentalSelector
 
@@ -27,6 +29,119 @@ INDEX_NAME_MAP = {
     "399001.SZ": "深证成指",
     "000300.SH": "沪深300",
 }
+
+
+class MOCBacktestingEngine(BacktestingEngine):
+    """支持 Market-On-Close 订单的回测引擎子类"""
+
+    def __init__(self) -> None:
+        super().__init__()
+        self.moc_orders: list[OrderData] = []
+
+    def clear_data(self) -> None:
+        super().clear_data()
+        self.moc_orders = []
+
+    def new_bars(self, dt) -> None:
+        """重写：在 on_bars 后撮合 MOC 订单"""
+        self.datetime = dt
+
+        bars: dict[str, BarData] = {}
+        for vt_symbol in self.vt_symbols:
+            bar = self.history_data.get((dt, vt_symbol), None)
+
+            if bar:
+                self.bars[vt_symbol] = bar
+                bars[vt_symbol] = bar
+            elif vt_symbol in self.bars:
+                old_bar = self.bars[vt_symbol]
+                bar = BarData(
+                    symbol=old_bar.symbol,
+                    exchange=old_bar.exchange,
+                    datetime=dt,
+                    open_price=old_bar.close_price,
+                    high_price=old_bar.close_price,
+                    low_price=old_bar.close_price,
+                    close_price=old_bar.close_price,
+                    gateway_name=old_bar.gateway_name
+                )
+                self.bars[vt_symbol] = bar
+
+        self.cross_limit_order()
+        self.strategy.on_bars(bars)
+        self._cross_moc_orders(bars)
+
+        if self.strategy.inited:
+            self.update_daily_close(self.bars, dt)
+
+    def _cross_moc_orders(self, bars: dict[str, BarData]) -> None:
+        """以当前 bar 收盘价撮合 MOC 订单"""
+        for order in self.moc_orders:
+            bar = bars.get(order.vt_symbol)
+            if not bar or bar.volume == 0:
+                order.status = Status.CANCELLED
+                self.strategy.update_order(order)
+                continue
+
+            order.traded = order.volume
+            order.status = Status.ALLTRADED
+            self.strategy.update_order(order)
+
+            if order.vt_orderid in self.active_limit_orders:
+                self.active_limit_orders.pop(order.vt_orderid)
+
+            self.trade_count += 1
+            trade_price = bar.close_price
+
+            trade = TradeData(
+                symbol=order.symbol,
+                exchange=order.exchange,
+                orderid=order.orderid,
+                tradeid=str(self.trade_count),
+                direction=order.direction,
+                offset=order.offset,
+                price=trade_price,
+                volume=order.volume,
+                datetime=self.datetime,
+                gateway_name=self.gateway_name,
+            )
+
+            self.strategy.update_trade(trade)
+            self.trades[trade.vt_tradeid] = trade
+
+        self.moc_orders.clear()
+
+    def send_moc_order(
+        self,
+        strategy,
+        vt_symbol: str,
+        direction: Direction,
+        offset: Offset,
+        volume: float,
+    ) -> list[str]:
+        """发送 MOC 订单（当前 bar 收盘价成交）"""
+        symbol, exchange = extract_vt_symbol(vt_symbol)
+
+        self.limit_order_count += 1
+
+        order = OrderData(
+            symbol=symbol,
+            exchange=exchange,
+            orderid=str(self.limit_order_count),
+            direction=direction,
+            offset=offset,
+            price=0,
+            volume=volume,
+            status=Status.SUBMITTING,
+            datetime=self.datetime,
+            gateway_name=self.gateway_name,
+        )
+
+        self.moc_orders.append(order)
+        self.limit_orders[order.vt_orderid] = order
+
+        return [order.vt_orderid]
+
 
 class CoreService:
     def __init__(self):
@@ -150,7 +265,7 @@ class CoreService:
         else:
             symbols = vt_symbols
         
-        engine = BacktestingEngine()
+        engine = MOCBacktestingEngine()
         engine.set_parameters(
             vt_symbols=symbols,
             interval=Interval(interval),
@@ -336,14 +451,15 @@ class CoreService:
 
         # Clean up old backtest files, keep only the latest 4 per signal_name
         try:
-            all_files = sorted(
-                [
-                    f for f in os.listdir(BACKTEST_DB_PATH)
-                    if f.endswith(".json") and f.startswith(signal_name + "_")
-                ],
-                reverse=True,  # newest first (timestamp in filename)
+            backtest_files = [
+                f for f in os.listdir(BACKTEST_DB_PATH)
+                if f.endswith(".json") and f.startswith(signal_name + "_")
+            ]
+            backtest_files.sort(
+                key=lambda f: os.path.getmtime(os.path.join(BACKTEST_DB_PATH, f)),
+                reverse=True,
             )
-            for old_file in all_files[4:]:
+            for old_file in backtest_files[4:]:
                 os.remove(os.path.join(BACKTEST_DB_PATH, old_file))
                 print(f"Deleted old backtest: {old_file}")
         except Exception as e:
