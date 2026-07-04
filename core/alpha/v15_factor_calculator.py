@@ -635,8 +635,9 @@ class V15FactorCalculator(FactorCalculator):
         # These factors had consistent IC historically but reversed in 2026-Q2.
         # With 700-day training window, the model can't adapt fast enough to
         # the sign flip, so removing them eliminates confusing signals.
-        # Note: Round2 tried removing 10 factors → Sharpe 1.14 (over-removal hurt).
-        # Round1 with 4 factors is the sweet spot.
+        # Round1(4个): Sharpe 1.82/1.79, Q2=+7.27%/-1.87% ← 最优配置
+        # Round2(10个): Sharpe 1.14, 过度移除损害 (回退)
+        # Round3(2个): Sharpe 0.97, 移除不足且随机性导致更差 (回退)
         for _f in ["pool_size_x_regime", "pool_size_x_regime_change",
                     "illiquidity_20d", "mom_x_regime_align"]:
             features.pop(_f, None)
