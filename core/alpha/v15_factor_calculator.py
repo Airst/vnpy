@@ -26,11 +26,13 @@ class V15FactorCalculator(FactorCalculator):
         Sharpe 1.28(正常范围). 失败原因: 弱ICIR因子稀释attention权重,
         在风格切换期模型无法快速学会downweight新弱因子. 已reject, GP因子回到15个.
         准则20印证: GP信号空间饱和, 弱因子增量不如不加.
-    V15.5b: 移除4个2026-Q2 IC反转因子(pool_size_x_regime, pool_size_x_regime_change,
-        illiquidity_20d, mom_x_regime_align). 这4个因子历史IC一致但在2026-Q2发生符号翻转,
-        700天训练窗口下模型无法快速适应反转信号. 通过pop从features中移除, 保留计算
-        以避免依赖问题. 结果: Sharpe 1.82, 年化128.2%, Q1 2026=8.58%, Q2 2026=+7.27%
-        (历史最佳, 超越baseline +5.15%/+3.82%). MaxDD -30.43%偏大但Q2改善显著.
+    V15.5b: 移除IC反转因子（2026-Q2符号翻转）. 700天训练窗口下模型无法快速适应.
+        Round1(4个: pool_size_x_regime, pool_size_x_regime_change, illiquidity_20d,
+        mom_x_regime_align): Sharpe 1.82/1.79, Q1=8.58%/9.76%, Q2=+7.27%/-1.87%(波动大)
+        Round2(10个: +price_impact_asym, turnover_ratio_5_20, ret_overnight,
+        inter_camel_bear, camel_hump_score, vol_ratio_5_20): Sharpe 1.14, Q2=-3.75%.
+        过度移除损害模型信息输入, 回退到Round1(4个). 准则13印证: Attention可处理
+        弱反转因子, 移除需限量在最强反转者.
 
     == 设计决策 ==
     在双股票池（CSI 1000 + CSI 2000）混合训练下，让模型识别当前风格偏向：
@@ -633,6 +635,8 @@ class V15FactorCalculator(FactorCalculator):
         # These factors had consistent IC historically but reversed in 2026-Q2.
         # With 700-day training window, the model can't adapt fast enough to
         # the sign flip, so removing them eliminates confusing signals.
+        # Note: Round2 tried removing 10 factors → Sharpe 1.14 (over-removal hurt).
+        # Round1 with 4 factors is the sweet spot.
         for _f in ["pool_size_x_regime", "pool_size_x_regime_change",
                     "illiquidity_20d", "mom_x_regime_align"]:
             features.pop(_f, None)
