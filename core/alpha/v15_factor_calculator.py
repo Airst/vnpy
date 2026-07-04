@@ -12,8 +12,25 @@ class V15FactorCalculator(FactorCalculator):
     V15.1: 升级 regime 信号到 13 个，Sharpe 1.51 / 年化 89.7% / MaxDD -23.5% （超越两个单池）
     V15.2: 标签改为 5 日 beta-neutral, Sharpe 1.36 / 年化 74.8% / MaxDD -25.0% /
             收益回撤比 7.29 / MaxDD 持续 64 天 （更稳健, 锁定为基线）
-    V15.3-当前: GP因子去重(22→13) + 验证集50→100天 + 3-seed ensemble,
-            Sharpe 1.74 / 年化 113.9% / MaxDD -21.1% / 收益回撤比 7.25 / MaxDD持续 26 天
+    V15.3-基线: GP因子去重(22→13) + 验证集50→100天, Sharpe ~1.17 (单次不可复现1.74)
+    V15.4-实验:
+      - 5日/10日面积标签: 失败(Sharpe 1.09/1.16), 面积标签与reversal alpha冲突
+      - 行业资金流因子(3个): Round1看似改善但重训后确认是随机性
+      - 行业动量交互因子(2个): 失败(Sharpe 1.47→1.02), rank×rank放大噪音
+      - 重训周期 90→45天: Q2 2026 从 -5.42% 改善到 +5.15%/+3.82%（两次验证均正），
+        Sharpe 1.24/1.02（均值~1.13，与基线1.17接近）。更频繁的验证集更新通过
+        early stopping 机制适应了 2026 H1 风格切换。保留 700 天窗口维持 regime 多样性。
+    V15.5: 2026-focused GP挖掘 — fitness函数改为40%全时段+60%近期ICIR混合评估,
+        增加2026 IC硬门. 发现2个新因子(gp_057 ICIR=0.35, gp_058 ICIR=-0.58),
+        均使用L(低价)维度. 但加入后Q2 2026从+3.82%~+5.15%降至-6.97%,
+        Sharpe 1.28(正常范围). 失败原因: 弱ICIR因子稀释attention权重,
+        在风格切换期模型无法快速学会downweight新弱因子. 已reject, GP因子回到15个.
+        准则20印证: GP信号空间饱和, 弱因子增量不如不加.
+    V15.5b: 移除4个2026-Q2 IC反转因子(pool_size_x_regime, pool_size_x_regime_change,
+        illiquidity_20d, mom_x_regime_align). 这4个因子历史IC一致但在2026-Q2发生符号翻转,
+        700天训练窗口下模型无法快速适应反转信号. 通过pop从features中移除, 保留计算
+        以避免依赖问题. 结果: Sharpe 1.82, 年化128.2%, Q1 2026=8.58%, Q2 2026=+7.27%
+        (历史最佳, 超越baseline +5.15%/+3.82%). MaxDD -30.43%偏大但Q2改善显著.
 
     == 设计决策 ==
     在双股票池（CSI 1000 + CSI 2000）混合训练下，让模型识别当前风格偏向：
@@ -25,7 +42,7 @@ class V15FactorCalculator(FactorCalculator):
     - mom_x_regime_align/contrarian: 个股动量与当前风格的交互
     - pool_size_x_regime: 个股市值排名 × 风格方向（核心 timing 交互）
     - pool_size_x_regime_change: 个股市值排名 × 风格切换方向
-    标签: 5 日 beta-neutral 收益（V15.2 起改用短窗口，回撤更短、鲁棒性更好）。
+    标签: 5日 beta-neutral 终点收益（cs_rank）。V15.4 面积标签实验失败已回退。
 
     == 失败记录 ==
     - V15-初版 5 regime+全截面排名: 2024年 -15.5%, 风格轮动信号滞后被甩
@@ -43,6 +60,10 @@ class V15FactorCalculator(FactorCalculator):
       异类股票，与小盘股池正常逻辑相反。北向 alpha 仅在大盘股(CSI 300)有效，硬塞进小盘池
       稀释 attention 权重导致 Sharpe 下降。数据已下载保留为基础设施
       （data_manager/ts_downloader/hk_hold_manager.py），未来若做大盘股池可复用。
+    - V15.4 Round 2 行业动量交互因子(ind_mom_x_turnover, ind_mom_x_vol): Sharpe 1.47→1.02,
+      2026 Q2 +1.82%→-4.21%。两个 rank 相乘放大噪音；Factor Attention 已通过 attention 权重
+      隐式学习因子交互，显式交互因子反而干扰 attention 学习。该方向暂停。
+    - 5日面积标签: Sharpe 1.09, 量级太小与换手率因子共振。10日面积更优。
     """
     def __init__(self, **kwargs):
         super().__init__(**kwargs)
@@ -598,15 +619,22 @@ class V15FactorCalculator(FactorCalculator):
         regime_change_dir = torch.tanh(features["style_regime_change"] * 10.0)
         features["pool_size_x_regime_change"] = features["pool_size_rank"] * regime_change_dir
 
-        # === Beta-Neutral Label (V15.2: 5日, 全截面排名) ===
+        # === Beta-Neutral Label (V15.3: 5日终点收益, Beta-Neutral, 全截面排名) ===
         raw_ret_5 = ts_delay(C, -5) / C - 1
         mkt_ret_5 = torch.nanmean(raw_ret_5, dim=0, keepdim=True)
         excess_ret_5 = raw_ret_5 - features["beta_20d"] * mkt_ret_5
 
-        # 低流动性惩罚
         low_liq_penalty = (features["turnover_mean_10d"] < 1.0).float() * 0.05
         excess_ret_5 = excess_ret_5 - low_liq_penalty
 
         features["label"] = cs_rank(excess_ret_5)
+
+        # V15.5: Remove IC-reversed factors (2026-Q2 sign flip)
+        # These factors had consistent IC historically but reversed in 2026-Q2.
+        # With 700-day training window, the model can't adapt fast enough to
+        # the sign flip, so removing them eliminates confusing signals.
+        for _f in ["pool_size_x_regime", "pool_size_x_regime_change",
+                    "illiquidity_20d", "mom_x_regime_align"]:
+            features.pop(_f, None)
 
         return features

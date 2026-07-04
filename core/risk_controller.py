@@ -16,7 +16,8 @@
 - 职责边界: 只管组合级风险（回撤/波动），不管个股止损（那是策略层的事）
 
 == 失败记录 ==
-- 无（风控模块自 V8 以来参数稳定，未做过激进改动）
+- 市场趋势过滤(60日MA负→减仓): 强制卖出在反弹中错失收益，Q2从-7.31%恶化到-7.52%，Sharpe从1.17降到1.02。风控层无法解决模型因子IC反转的系统性问题
+- 无其他失败（风控模块自 V8 以来参数稳定）
 """
 from collections import deque
 from typing import Dict, List, Tuple
@@ -118,8 +119,6 @@ class RiskController:
         dd_reduction = self._drawdown_reduction(drawdown)
 
         # --- zero-holdings deadlock breaker ---
-        # When max_holdings=0 (all cash), equity is frozen and drawdown can never
-        # recover. After cooldown, reset peak to current equity to restart recovery.
         if self.current_max_holdings == 0:
             self._bars_at_zero += 1
             if self._bars_at_zero >= self.recovery_cooldown_days:

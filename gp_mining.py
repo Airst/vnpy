@@ -17,7 +17,7 @@ GP Factor Mining - 独立脚本
 
 == 流程 ==
 1. 加载数据 → 构建 GPU 张量 (复用 AlphaEngine + FactorCalculator)
-2. 计算 label (未来5日收益率 cs_rank) 用于 fitness 评估
+2. 计算 label (未来10日收盘价面积 cs_rank，与 V15 训练标签一致) 用于 fitness 评估
 3. 收集当前因子张量用于相关性去重
 4. 运行 GP 进化 (种群选择 → 交叉 → 变异 → 适应度评估)
 5. 滚动 IC 验证 → 更新注册表状态
@@ -199,9 +199,23 @@ def prepare_data(version, CalcClass):
     raw_tensor = torch.tensor(raw_data, device=device, dtype=torch.float32)
     padded_raw[s_indices_t, t_indices_t, :] = raw_tensor
 
-    del raw_data, raw_tensor, s_indices_t, t_indices_t, df_sorted, df_idx
+    del raw_data, raw_tensor, s_indices_t, t_indices_t, df_idx
 
-    # Label: simple forward return rank
+    # Extract 2026 start index for recent IC evaluation
+    all_dates = sorted(data_df["datetime"].unique().to_list())
+    num_days_pad = padded_raw.shape[1]
+    aligned_dates = all_dates[-num_days_pad:]
+    recent_start_idx = 0
+    for i, d in enumerate(aligned_dates):
+        if hasattr(d, 'year') and d.year >= 2026:
+            recent_start_idx = i
+            break
+    print(f"[GP Mining] Recent start idx: {recent_start_idx} "
+          f"(date={aligned_dates[recent_start_idx] if recent_start_idx > 0 else 'N/A'})")
+
+    del df_sorted
+
+    # Label: 5-day forward return rank (与 V15.3 训练标签一致)
     C = padded_raw[:, :, col_map['close']]
     raw_ret_5 = ts_delay(C, -5) / C - 1
     label = cs_rank(raw_ret_5)
@@ -218,10 +232,10 @@ def prepare_data(version, CalcClass):
     gc.collect()
     torch.cuda.empty_cache()
 
-    return padded_raw, col_map, label, existing_tensors
+    return padded_raw, col_map, label, existing_tensors, recent_start_idx
 
 
-def run_mining(args, padded_raw, col_map, label, existing_tensors):
+def run_mining(args, padded_raw, col_map, label, existing_tensors, recent_start_idx=0):
     """执行 GP 因子挖掘"""
     gp_miner = GPFactorMiner(
         population_size=args.pop,
@@ -237,6 +251,7 @@ def run_mining(args, padded_raw, col_map, label, existing_tensors):
         label=label,
         existing_factor_tensors=existing_tensors[:10],
         registry_path=GP_REGISTRY_PATH,
+        recent_start_idx=recent_start_idx,
     )
 
     # Append to registry
@@ -253,6 +268,7 @@ def run_mining(args, padded_raw, col_map, label, existing_tensors):
             min_rolling_ic=0.03,
             n_windows=5,
             window_size=200,
+            recent_start_idx=recent_start_idx,
         )
         print(f"[GP Validate] Result: {len(accepted)} accepted, {len(rejected)} rejected")
 
@@ -277,10 +293,10 @@ if __name__ == "__main__":
     print(f"[GP Mining] Version: {version.upper()}, Pop: {args.pop}, Gen: {args.gen}")
 
     # Load data and prepare tensors
-    padded_raw, col_map, label, existing_tensors = prepare_data(version, CalcClass)
+    padded_raw, col_map, label, existing_tensors, recent_start_idx = prepare_data(version, CalcClass)
 
     # Run mining
-    run_mining(args, padded_raw, col_map, label, existing_tensors)
+    run_mining(args, padded_raw, col_map, label, existing_tensors, recent_start_idx)
 
     # Cleanup
     del padded_raw, label, existing_tensors

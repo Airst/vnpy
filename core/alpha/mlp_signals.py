@@ -7,11 +7,12 @@ V9 Step 3a: MLP → FactorAttentionNetwork (d_token=64, 4heads, 1层)
 V10: 训练窗口 500天 → 700天（更多 regime 多样性）
 V15.2: 验证集 50天 → 100天, 3-seed ensemble 降低variance
 V15.3-revert: 回退为单次训练（ensemble 多次重训仍不稳定，OOS variance 改善有限）
+V15.4-exp: 重训周期 90天 → 45天（加快风格切换适应，保留700天窗口）
 
 == 当前状态 ==
 模型: factor_attention (d_token=64, n_heads=4, n_attn_layers=1, d_ffn=128)
 训练窗口: 700 天 (600训练 + 100验证)
-重训周期: 90 天
+重训周期: 45 天
 批量大小: 2048, 学习率: 0.001, weight_decay: 0.002
 早停: 40 轮无改善
 单次训练 (seed=42)，n_jobs=1 保证可复现性
@@ -20,8 +21,8 @@ V15.3-revert: 回退为单次训练（ensemble 多次重训仍不稳定，OOS va
 - Factor Attention 选择: 模型结构改变 > 损失函数改造（连续3次损失函数实验失败）
 - d_token=64: 核心超参数，32不足，64最优，128无额外收益
 - n_attn_layers=1: 2层过拟合（500~700天训练数据量有限）
-- 700天窗口: 提供充足 regime 多样性，是隐式正则化
-- 90天重训: 平衡模型时效性和训练成本
+- 700天窗口: 提供充足 regime 多样性，是隐式正则化（400天窗口实验确认：丧失多样性导致Q4暴跌）
+- 45天重训: 更频繁的更新，验证集更贴近当前市场
 - 100天验证集: 覆盖~4个月行情，避免early stopping被短期市场偏差误导
 - 单次训练 + 固定 seed: 多次重训发现 ensemble 仍不稳定，回退为单次保证可复现
 - n_jobs=1: 单线程保证可复现性
@@ -37,6 +38,8 @@ V15.3-revert: 回退为单次训练（ensemble 多次重训仍不稳定，OOS va
 - Input feature dropout(0.15): Sharpe 1.36→0.96，MaxDD -43.6%/526天，因子遮蔽过激损害学习
 - 3-seed ensemble: 单窗口降variance有效，但跨多次重训整体OOS仍不稳定，
   且训练成本x3，收益不匹配，已回退为单次训练
+- 400天训练窗口(300训练+100验证): Q2从-5.42%改善到-2.75%，但丧失regime多样性
+  导致Q4 2025从+22%暴跌到-6%，Sharpe从1.17降到0.98。短窗口不可取
 """
 from datetime import datetime, timedelta
 import polars as pl
@@ -82,11 +85,11 @@ def set_seed(seed: int = 42):
 
 class MLPSignals:
 
-    def __init__(self, signal_name: str = "mlp_signal", force_retrain: bool = False, retrain_days: int = 90, ensemble_size: int = 1):
+    def __init__(self, signal_name: str = "mlp_signal", force_retrain: bool = False, retrain_days: int = 45, ensemble_size: int = 1):
         self.signal_name = signal_name
         self.force_retrain = force_retrain
         self.retrain_days = retrain_days
-        self.ensemble_size = ensemble_size  # 单次训练（V15.3-revert: ensemble 跨重训仍不稳定）
+        self.ensemble_size = ensemble_size
         # self.model_dir = Path("core/alpha_db/model") # Managed by AlphaLab
         
         #self.model_settings = {

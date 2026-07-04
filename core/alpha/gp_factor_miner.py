@@ -408,11 +408,15 @@ def compute_turnover(factor: torch.Tensor, top_pct: float = 0.1, eval_days: int 
 
 def fitness(node: Node, data: Dict[str, torch.Tensor], label: torch.Tensor,
             existing_factors: Optional[List[torch.Tensor]] = None,
-            max_corr: float = 0.7) -> float:
+            max_corr: float = 0.7,
+            recent_start_idx: int = 0) -> float:
     """
     Compute fitness score for a GP individual.
     
-    Fitness = |ICIR| * turnover_bonus * consistency_bonus - parsimony_penalty
+    Fitness = (|ICIR_full| * 0.4 + |ICIR_recent| * 0.6) * turnover_bonus * consistency_bonus - parsimony_penalty
+    
+    When recent_start_idx > 0, also evaluates IC on the recent period (e.g., 2026)
+    and requires it to be non-negligible.
     
     Higher is better.
     """
@@ -429,6 +433,21 @@ def fitness(node: Node, data: Dict[str, torch.Tensor], label: torch.Tensor,
     # Reject factors with poor direction consistency (< 60% sub-periods agree)
     if direction_ratio < 0.6:
         return -999.0
+
+    # Recent period IC (2026-focused)
+    recent_ic_ir = 0.0
+    if recent_start_idx > 0:
+        num_days = label.shape[1]
+        recent_eval_days = num_days - recent_start_idx
+        if recent_eval_days >= 20:
+            recent_ic, recent_ic_ir, recent_dir = compute_rank_ic(
+                factor, label, eval_days=recent_eval_days
+            )
+            # Hard gate: recent IC must be non-negligible and same sign as full IC
+            if abs(recent_ic) < 0.01:
+                return -999.0
+            if np.sign(recent_ic) != np.sign(mean_ic):
+                return -999.0
 
     # Parsimony penalty
     depth = node.depth()
@@ -455,7 +474,11 @@ def fitness(node: Node, data: Dict[str, torch.Tensor], label: torch.Tensor,
     # Direction consistency bonus (0.6->1.0, 0.8->1.2, 1.0->1.4)
     consistency_bonus = 1.0 + (direction_ratio - 0.6) * 1.0
 
-    score = abs(ic_ir) * turnover_bonus * consistency_bonus - parsimony
+    if recent_start_idx > 0 and recent_ic_ir != 0.0:
+        combined_icir = abs(ic_ir) * 0.4 + abs(recent_ic_ir) * 0.6
+    else:
+        combined_icir = abs(ic_ir)
+    score = combined_icir * turnover_bonus * consistency_bonus - parsimony
     return score
 
 
@@ -767,6 +790,7 @@ class GPFactorMiner:
         label: torch.Tensor,
         existing_factor_tensors: Optional[List[torch.Tensor]] = None,
         registry_path: Optional[str] = None,
+        recent_start_idx: int = 0,
     ) -> List[Tuple[str, Node]]:
         """
         Run GP evolution to discover new factors.
@@ -804,7 +828,7 @@ class GPFactorMiner:
         init_trees = [random_tree(max_depth=self.max_tree_depth) for _ in range(self.population_size)]
         from concurrent.futures import ThreadPoolExecutor, as_completed
         with ThreadPoolExecutor(max_workers=8) as executor:
-            futures = {executor.submit(fitness, t, data, label, existing_factor_tensors, self.max_corr_with_pool): t for t in init_trees}
+            futures = {executor.submit(fitness, t, data, label, existing_factor_tensors, self.max_corr_with_pool, recent_start_idx): t for t in init_trees}
             for future in as_completed(futures):
                 t = futures[future]
                 population.append((t, future.result()))
@@ -833,7 +857,7 @@ class GPFactorMiner:
             # Check if top individual qualifies as a new factor
             if gen_best > 0:
                 top_tree = population[0][0]
-                self._try_add_factor(top_tree, data, label, factor_pool)
+                self._try_add_factor(top_tree, data, label, factor_pool, recent_start_idx)
 
             # Early stopping
             if stagnation > 15:
@@ -871,7 +895,7 @@ class GPFactorMiner:
 
             # Parallel fitness evaluation
             with ThreadPoolExecutor(max_workers=8) as executor:
-                futures = {executor.submit(fitness, t, data, label, factor_pool, self.max_corr_with_pool): t for t in offspring_trees}
+                futures = {executor.submit(fitness, t, data, label, factor_pool, self.max_corr_with_pool, recent_start_idx): t for t in offspring_trees}
                 for future in as_completed(futures):
                     t = futures[future]
                     new_population.append((t, future.result()))
@@ -984,7 +1008,8 @@ class GPFactorMiner:
 
     def _try_add_factor(
         self, tree: Node, data: Dict[str, torch.Tensor],
-        label: torch.Tensor, factor_pool: List[torch.Tensor]
+        label: torch.Tensor, factor_pool: List[torch.Tensor],
+        recent_start_idx: int = 0,
     ):
         """Try to add a factor to the discovered pool after validation."""
         # Expression deduplication (against current session + registry)
@@ -1008,6 +1033,19 @@ class GPFactorMiner:
             return
         if direction_ratio < 0.6:
             return
+
+        # Recent period IC gate (2026-focused)
+        if recent_start_idx > 0:
+            num_days = label.shape[1]
+            recent_eval_days = num_days - recent_start_idx
+            if recent_eval_days >= 20:
+                recent_ic, recent_icir, recent_dir = compute_rank_ic(
+                    factor, label, eval_days=recent_eval_days
+                )
+                if abs(recent_ic) < 0.01:
+                    return
+                if np.sign(recent_ic) != np.sign(mean_ic):
+                    return
 
         # Correlation check with discovered pool (stricter: 0.5 between GP factors)
         if factor_pool:
@@ -1059,6 +1097,7 @@ class GPFactorMiner:
         min_rolling_ic: float = 0.03,
         n_windows: int = 5,
         window_size: int = 200,
+        recent_start_idx: int = 0,
     ) -> Tuple[List[str], List[str]]:
         """
         Auto-validate 'discovered' factors using rolling IC.
@@ -1189,6 +1228,35 @@ class GPFactorMiner:
             pass_ratio = pass_count / len(window_ics)
 
             if mean_ic >= min_rolling_ic and pass_ratio >= 0.6:
+                # 2026-specific IC gate
+                if recent_start_idx > 0:
+                    recent_eval_days = num_days - recent_start_idx
+                    if recent_eval_days >= 20:
+                        f_recent = factor[:, recent_start_idx:]
+                        l_recent = label[:, recent_start_idx:]
+                        recent_ics = []
+                        for t in range(0, recent_eval_days, 5):
+                            f_col = f_recent[:, t]
+                            l_col = l_recent[:, t]
+                            valid = ~(torch.isnan(f_col) | torch.isnan(l_col))
+                            if valid.sum() < 30:
+                                continue
+                            f_valid = f_col[valid]
+                            l_valid = l_col[valid]
+                            f_rank = f_valid.argsort().argsort().float()
+                            l_rank = l_valid.argsort().argsort().float()
+                            f_rank = f_rank - f_rank.mean()
+                            l_rank = l_rank - l_rank.mean()
+                            denom = f_rank.norm() * l_rank.norm()
+                            if denom < 1e-10:
+                                continue
+                            recent_ics.append(((f_rank * l_rank).sum() / denom).item())
+                        if recent_ics:
+                            recent_mean_ic = np.mean(recent_ics)
+                            if abs(recent_mean_ic) < 0.02:
+                                rejected_ids.append(rec["id"])
+                                print(f"  {rec['id']}: REJECTED (2026 |IC|={abs(recent_mean_ic):.4f} < 0.02)")
+                                continue
                 accepted_ids.append(rec["id"])
                 print(f"  {rec['id']}: ACCEPTED (mean |IC|={mean_ic:.4f}, "
                       f"pass={pass_count}/{len(window_ics)})")

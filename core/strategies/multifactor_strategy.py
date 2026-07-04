@@ -230,7 +230,7 @@ class MultiFactorStrategy(StrategyTemplate):
             if vt_symbol in self.pos_high_price:
                 if bar.high_price > self.pos_high_price[vt_symbol]:
                     self.pos_high_price[vt_symbol] = bar.high_price
-        
+
         # 2. Get Scores
         scores = self.signal_data.get(date_str, {})
         self.last_scores = scores 

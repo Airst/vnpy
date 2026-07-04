@@ -1,6 +1,6 @@
 {
   "version": 2,
-  "next_id": 51,
+  "next_id": 59,
   "factors": [
     {
       "id": "gp_001",
@@ -2232,14 +2232,14 @@
           }
         ]
       },
-      "status": "testing",
+      "status": "rejected",
       "mining_metrics": {
         "ic": -0.04942842200398445,
         "icir": -0.8356975822384273,
         "turnover": 0.8592577409896492
       },
       "discovered_at": "2026-05-16",
-      "note": "auto-validated: rolling IC >= 0.03"
+      "note": "dedup-与gp_038反相|corr|=0.97,同结构ts_corr(X,cs_zscore(BMD),5)"
     },
     {
       "id": "gp_041",
@@ -2699,14 +2699,14 @@
           }
         ]
       },
-      "status": "testing",
+      "status": "rejected",
       "mining_metrics": {
         "ic": 0.0596732534468174,
         "icir": 0.7721645657680581,
         "turnover": 0.8439183623344559
       },
       "discovered_at": "2026-05-23",
-      "note": "auto-validated: rolling IC >= 0.03"
+      "note": "dedup-与gp_042相关+0.81,同结构ts_cov(log(PB),neg(X),5)"
     },
     {
       "id": "gp_048",
@@ -2928,6 +2928,377 @@
       },
       "discovered_at": "2026-05-23",
       "note": "dedup-结构过复杂+与gp_038共享BMD截面信号冗余"
+    },
+    {
+      "id": "gp_051",
+      "expr": "ts_corr(SMD, PS, 5)",
+      "tree": {
+        "op": "ts_corr",
+        "value": null,
+        "window": 5,
+        "children": [
+          {
+            "op": "terminal",
+            "value": "SMD",
+            "window": null,
+            "children": []
+          },
+          {
+            "op": "terminal",
+            "value": "PS",
+            "window": null,
+            "children": []
+          }
+        ]
+      },
+      "status": "rejected",
+      "mining_metrics": {
+        "ic": -0.038719456642866135,
+        "icir": -0.6332770368904851,
+        "turnover": 0.8770514812004685
+      },
+      "discovered_at": "2026-07-01",
+      "note": "dedup-与gp_052相关+0.78,同为ts_corr(X,PS,5),ICIR更弱(-0.63 vs -0.70)"
+    },
+    {
+      "id": "gp_052",
+      "expr": "ts_corr(BL, PS, 5)",
+      "tree": {
+        "op": "ts_corr",
+        "value": null,
+        "window": 5,
+        "children": [
+          {
+            "op": "terminal",
+            "value": "BL",
+            "window": null,
+            "children": []
+          },
+          {
+            "op": "terminal",
+            "value": "PS",
+            "window": null,
+            "children": []
+          }
+        ]
+      },
+      "status": "validated",
+      "mining_metrics": {
+        "ic": -0.04284308850765228,
+        "icir": -0.6991724798703988,
+        "turnover": 0.8717615008349038
+      },
+      "discovered_at": "2026-07-01",
+      "note": "面积标签挖掘,PS估值维度首次入选,与gp_012反相关-0.64"
+    },
+    {
+      "id": "gp_053",
+      "expr": "ts_cov(log(log(cs_rank(abs(H)))), BSM, 5)",
+      "tree": {
+        "op": "ts_cov",
+        "value": null,
+        "window": 5,
+        "children": [
+          {
+            "op": "log",
+            "value": null,
+            "window": null,
+            "children": [
+              {
+                "op": "log",
+                "value": null,
+                "window": null,
+                "children": [
+                  {
+                    "op": "cs_rank",
+                    "value": null,
+                    "window": null,
+                    "children": [
+                      {
+                        "op": "abs",
+                        "value": null,
+                        "window": null,
+                        "children": [
+                          {
+                            "op": "terminal",
+                            "value": "H",
+                            "window": null,
+                            "children": []
+                          }
+                        ]
+                      }
+                    ]
+                  }
+                ]
+              }
+            ]
+          },
+          {
+            "op": "terminal",
+            "value": "BSM",
+            "window": null,
+            "children": []
+          }
+        ]
+      },
+      "status": "rejected",
+      "mining_metrics": {
+        "ic": 0.06359484046697617,
+        "icir": 0.8432861016559201,
+        "turnover": 0.8313689187165141
+      },
+      "discovered_at": "2026-07-01",
+      "note": "dedup-与gp_012相关+0.60/gp_042相关+0.58,BSM板块信号冗余"
+    },
+    {
+      "id": "gp_054",
+      "expr": "ts_cov(sub(PB, ts_std(BL, 3)), cs_rank(BSM), 10)",
+      "tree": {
+        "op": "ts_cov",
+        "value": null,
+        "window": 10,
+        "children": [
+          {
+            "op": "sub",
+            "value": null,
+            "window": null,
+            "children": [
+              {
+                "op": "terminal",
+                "value": "PB",
+                "window": null,
+                "children": []
+              },
+              {
+                "op": "ts_std",
+                "value": null,
+                "window": 3,
+                "children": [
+                  {
+                    "op": "terminal",
+                    "value": "BL",
+                    "window": null,
+                    "children": []
+                  }
+                ]
+              }
+            ]
+          },
+          {
+            "op": "cs_rank",
+            "value": null,
+            "window": null,
+            "children": [
+              {
+                "op": "terminal",
+                "value": "BSM",
+                "window": null,
+                "children": []
+              }
+            ]
+          }
+        ]
+      },
+      "status": "rejected",
+      "mining_metrics": {
+        "ic": 0.059384413063526154,
+        "icir": 0.8896750817879182,
+        "turnover": 0.7233971452101395
+      },
+      "discovered_at": "2026-07-01",
+      "note": "dedup-与gp_055相关+0.72,同结构ts_cov(...,cs_rank(...BL...),10),ICIR更弱(0.89 vs 0.95)"
+    },
+    {
+      "id": "gp_055",
+      "expr": "ts_cov(sub(ts_std(BE, 5), SMD), cs_rank(ts_std(BL, 3)), 10)",
+      "tree": {
+        "op": "ts_cov",
+        "value": null,
+        "window": 10,
+        "children": [
+          {
+            "op": "sub",
+            "value": null,
+            "window": null,
+            "children": [
+              {
+                "op": "ts_std",
+                "value": null,
+                "window": 5,
+                "children": [
+                  {
+                    "op": "terminal",
+                    "value": "BE",
+                    "window": null,
+                    "children": []
+                  }
+                ]
+              },
+              {
+                "op": "terminal",
+                "value": "SMD",
+                "window": null,
+                "children": []
+              }
+            ]
+          },
+          {
+            "op": "cs_rank",
+            "value": null,
+            "window": null,
+            "children": [
+              {
+                "op": "ts_std",
+                "value": null,
+                "window": 3,
+                "children": [
+                  {
+                    "op": "terminal",
+                    "value": "BL",
+                    "window": null,
+                    "children": []
+                  }
+                ]
+              }
+            ]
+          }
+        ]
+      },
+      "status": "validated",
+      "mining_metrics": {
+        "ic": 0.05300828441977501,
+        "icir": 0.9451989148842723,
+        "turnover": 0.7102753769563928
+      },
+      "discovered_at": "2026-07-01",
+      "note": "面积标签挖掘,BE波动+SMD+BL板块组合,10日窗口与标签一致"
+    },
+    {
+      "id": "gp_056",
+      "expr": "ts_corr(L, neg(CMV), 5)",
+      "tree": {
+        "op": "ts_corr",
+        "value": null,
+        "window": 5,
+        "children": [
+          {
+            "op": "terminal",
+            "value": "L",
+            "window": null,
+            "children": []
+          },
+          {
+            "op": "neg",
+            "value": null,
+            "window": null,
+            "children": [
+              {
+                "op": "terminal",
+                "value": "CMV",
+                "window": null,
+                "children": []
+              }
+            ]
+          }
+        ]
+      },
+      "status": "rejected",
+      "mining_metrics": {
+        "ic": -0.024395976215600967,
+        "icir": -0.3045558943268353,
+        "turnover": 0.8994308764863124
+      },
+      "discovered_at": "2026-07-04",
+      "note": "auto-rejected: rolling IC < 0.03"
+    },
+    {
+      "id": "gp_057",
+      "expr": "ts_corr(L, CM5, 5)",
+      "tree": {
+        "op": "ts_corr",
+        "value": null,
+        "window": 5,
+        "children": [
+          {
+            "op": "terminal",
+            "value": "L",
+            "window": null,
+            "children": []
+          },
+          {
+            "op": "terminal",
+            "value": "CM5",
+            "window": null,
+            "children": []
+          }
+        ]
+      },
+      "status": "rejected",
+      "mining_metrics": {
+        "ic": 0.0353626050055027,
+        "icir": 0.34848413331671885,
+        "turnover": 0.895054412368832
+      },
+      "discovered_at": "2026-07-04",
+      "note": "2026-focused挖掘失败,ICIR=0.35过弱,加入后Q2从+3.82%~+5.15%降至-6.97%,attention稀释;gp_058:同上,ICIR=-0.58,弱因子稀释attention"
+    },
+    {
+      "id": "gp_058",
+      "expr": "ts_corr(L, neg(sub(PB, cs_zscore(SL))), 5)",
+      "tree": {
+        "op": "ts_corr",
+        "value": null,
+        "window": 5,
+        "children": [
+          {
+            "op": "terminal",
+            "value": "L",
+            "window": null,
+            "children": []
+          },
+          {
+            "op": "neg",
+            "value": null,
+            "window": null,
+            "children": [
+              {
+                "op": "sub",
+                "value": null,
+                "window": null,
+                "children": [
+                  {
+                    "op": "terminal",
+                    "value": "PB",
+                    "window": null,
+                    "children": []
+                  },
+                  {
+                    "op": "cs_zscore",
+                    "value": null,
+                    "window": null,
+                    "children": [
+                      {
+                        "op": "terminal",
+                        "value": "SL",
+                        "window": null,
+                        "children": []
+                      }
+                    ]
+                  }
+                ]
+              }
+            ]
+          }
+        ]
+      },
+      "status": "rejected",
+      "mining_metrics": {
+        "ic": -0.04363172873854637,
+        "icir": -0.5838930542356491,
+        "turnover": 0.8181711261950301
+      },
+      "discovered_at": "2026-07-04",
+      "note": "2026-focused挖掘失败,ICIR=0.35过弱,加入后Q2从+3.82%~+5.15%降至-6.97%,attention稀释;gp_058:同上,ICIR=-0.58,弱因子稀释attention"
     }
   ]
 }
