@@ -37,7 +37,7 @@ class MultiFactorStrategy(StrategyTemplate):
     author = "System"
     
     parameters = [
-        "signal_name", 
+        "signal_name",
         "max_holdings",
         "capital",
         "rate",
@@ -326,10 +326,10 @@ class MultiFactorStrategy(StrategyTemplate):
         # 6. Rank candidates (use dynamic_max instead of self.max_holdings)
         available_symbols = list(bars.keys())
         sorted_symbols = sorted(available_symbols, key=lambda s: scores.get(s, -999), reverse=True)
-        
+
         target_symbols = []
         for s in sorted_symbols:
-            if scores.get(s, 0) > self.buy_threshold and s not in self.cooldown_map: 
+            if scores.get(s, 0) > self.buy_threshold and s not in self.cooldown_map:
                 target_symbols.append(s)
             if len(target_symbols) >= dynamic_max:
                 break

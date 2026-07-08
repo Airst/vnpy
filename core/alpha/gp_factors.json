@@ -1,6 +1,6 @@
 {
   "version": 2,
-  "next_id": 59,
+  "next_id": 75,
   "factors": [
     {
       "id": "gp_001",
@@ -3299,6 +3299,884 @@
       },
       "discovered_at": "2026-07-04",
       "note": "2026-focused挖掘失败,ICIR=0.35过弱,加入后Q2从+3.82%~+5.15%降至-6.97%,attention稀释;gp_058:同上,ICIR=-0.58,弱因子稀释attention"
+    },
+    {
+      "id": "gp_059",
+      "expr": "ts_cov(cs_rank(ts_delta(CMV, 3)), neg(V), 5)",
+      "tree": {
+        "op": "ts_cov",
+        "value": null,
+        "window": 5,
+        "children": [
+          {
+            "op": "cs_rank",
+            "value": null,
+            "window": null,
+            "children": [
+              {
+                "op": "ts_delta",
+                "value": null,
+                "window": 3,
+                "children": [
+                  {
+                    "op": "terminal",
+                    "value": "CMV",
+                    "window": null,
+                    "children": []
+                  }
+                ]
+              }
+            ]
+          },
+          {
+            "op": "neg",
+            "value": null,
+            "window": null,
+            "children": [
+              {
+                "op": "terminal",
+                "value": "V",
+                "window": null,
+                "children": []
+              }
+            ]
+          }
+        ]
+      },
+      "status": "rejected",
+      "mining_metrics": {
+        "ic": 0.05019756779074669,
+        "icir": 0.7925432727560469,
+        "turnover": 0.8107443616585636
+      },
+      "discovered_at": "2026-07-05",
+      "note": "LLM挖掘共线性过高,与validated因子|corr|>0.5,结构同质于ts_cov(cs_rank(ts_delta(X)),neg(Y),5),按准则#16拒绝"
+    },
+    {
+      "id": "gp_060",
+      "expr": "ts_cov(cs_rank(ts_delta(PS, 3)), neg(TR), 5)",
+      "tree": {
+        "op": "ts_cov",
+        "value": null,
+        "window": 5,
+        "children": [
+          {
+            "op": "cs_rank",
+            "value": null,
+            "window": null,
+            "children": [
+              {
+                "op": "ts_delta",
+                "value": null,
+                "window": 3,
+                "children": [
+                  {
+                    "op": "terminal",
+                    "value": "PS",
+                    "window": null,
+                    "children": []
+                  }
+                ]
+              }
+            ]
+          },
+          {
+            "op": "neg",
+            "value": null,
+            "window": null,
+            "children": [
+              {
+                "op": "terminal",
+                "value": "TR",
+                "window": null,
+                "children": []
+              }
+            ]
+          }
+        ]
+      },
+      "status": "rejected",
+      "mining_metrics": {
+        "ic": 0.04990280047059059,
+        "icir": 0.8393774689300866,
+        "turnover": 0.8386002033631959
+      },
+      "discovered_at": "2026-07-05",
+      "note": "LLM挖掘共线性过高,与validated因子|corr|>0.5,结构同质于ts_cov(cs_rank(ts_delta(X)),neg(Y),5),按准则#16拒绝"
+    },
+    {
+      "id": "gp_061",
+      "expr": "ts_corr(mul(H, L), cs_zscore(BL), 5)",
+      "tree": {
+        "op": "ts_corr",
+        "value": null,
+        "window": 5,
+        "children": [
+          {
+            "op": "mul",
+            "value": null,
+            "window": null,
+            "children": [
+              {
+                "op": "terminal",
+                "value": "H",
+                "window": null,
+                "children": []
+              },
+              {
+                "op": "terminal",
+                "value": "L",
+                "window": null,
+                "children": []
+              }
+            ]
+          },
+          {
+            "op": "cs_zscore",
+            "value": null,
+            "window": null,
+            "children": [
+              {
+                "op": "terminal",
+                "value": "BL",
+                "window": null,
+                "children": []
+              }
+            ]
+          }
+        ]
+      },
+      "status": "rejected",
+      "mining_metrics": {
+        "ic": -0.04699953272938728,
+        "icir": -0.7272013878667634,
+        "turnover": 0.8586489445689904
+      },
+      "discovered_at": "2026-07-05",
+      "note": "LLM挖掘共线性过高,与validated因子|corr|>0.5,结构同质于ts_cov(cs_rank(ts_delta(X)),neg(Y),5),按准则#16拒绝"
+    },
+    {
+      "id": "gp_062",
+      "expr": "mul(ts_delta(cs_rank(PS), 5), ts_mean(BL, 10))",
+      "tree": {
+        "op": "mul",
+        "value": null,
+        "window": null,
+        "children": [
+          {
+            "op": "ts_delta",
+            "value": null,
+            "window": 5,
+            "children": [
+              {
+                "op": "cs_rank",
+                "value": null,
+                "window": null,
+                "children": [
+                  {
+                    "op": "terminal",
+                    "value": "PS",
+                    "window": null,
+                    "children": []
+                  }
+                ]
+              }
+            ]
+          },
+          {
+            "op": "ts_mean",
+            "value": null,
+            "window": 10,
+            "children": [
+              {
+                "op": "terminal",
+                "value": "BL",
+                "window": null,
+                "children": []
+              }
+            ]
+          }
+        ]
+      },
+      "status": "rejected",
+      "mining_metrics": {
+        "ic": -0.03943086043000221,
+        "icir": -0.40320167564141507,
+        "turnover": 0.682736207731403
+      },
+      "discovered_at": "2026-07-05",
+      "note": "LLM挖掘因子,共线性去重后保留3个,训练验证Sharpe 1.78→1.30失败,信号空间饱和(准则20),attention稀释"
+    },
+    {
+      "id": "gp_063",
+      "expr": "ts_cov(cs_rank(MV), neg(ts_delta(TR, 3)), 5)",
+      "tree": {
+        "op": "ts_cov",
+        "value": null,
+        "window": 5,
+        "children": [
+          {
+            "op": "cs_rank",
+            "value": null,
+            "window": null,
+            "children": [
+              {
+                "op": "terminal",
+                "value": "MV",
+                "window": null,
+                "children": []
+              }
+            ]
+          },
+          {
+            "op": "neg",
+            "value": null,
+            "window": null,
+            "children": [
+              {
+                "op": "ts_delta",
+                "value": null,
+                "window": 3,
+                "children": [
+                  {
+                    "op": "terminal",
+                    "value": "TR",
+                    "window": null,
+                    "children": []
+                  }
+                ]
+              }
+            ]
+          }
+        ]
+      },
+      "status": "rejected",
+      "mining_metrics": {
+        "ic": 0.0465359129011631,
+        "icir": 0.7922563454050184,
+        "turnover": 0.8256884633170384
+      },
+      "discovered_at": "2026-07-05",
+      "note": "LLM挖掘共线性过高,与validated因子|corr|>0.5,结构同质于ts_cov(cs_rank(ts_delta(X)),neg(Y),5),按准则#16拒绝"
+    },
+    {
+      "id": "gp_064",
+      "expr": "ts_cov(cs_rank(ts_delta(TRF, 3)), neg(V), 5)",
+      "tree": {
+        "op": "ts_cov",
+        "value": null,
+        "window": 5,
+        "children": [
+          {
+            "op": "cs_rank",
+            "value": null,
+            "window": null,
+            "children": [
+              {
+                "op": "ts_delta",
+                "value": null,
+                "window": 3,
+                "children": [
+                  {
+                    "op": "terminal",
+                    "value": "TRF",
+                    "window": null,
+                    "children": []
+                  }
+                ]
+              }
+            ]
+          },
+          {
+            "op": "neg",
+            "value": null,
+            "window": null,
+            "children": [
+              {
+                "op": "terminal",
+                "value": "V",
+                "window": null,
+                "children": []
+              }
+            ]
+          }
+        ]
+      },
+      "status": "rejected",
+      "mining_metrics": {
+        "ic": 0.04881531000137329,
+        "icir": 0.6402848362981981,
+        "turnover": 0.9199854829526961
+      },
+      "discovered_at": "2026-07-05",
+      "note": "LLM挖掘共线性过高,与validated因子|corr|>0.5,结构同质于ts_cov(cs_rank(ts_delta(X)),neg(Y),5),按准则#16拒绝"
+    },
+    {
+      "id": "gp_065",
+      "expr": "ts_cov(sub(BSM, SSM), cs_rank(ts_delta(C, 3)), 10)",
+      "tree": {
+        "op": "ts_cov",
+        "value": null,
+        "window": 10,
+        "children": [
+          {
+            "op": "sub",
+            "value": null,
+            "window": null,
+            "children": [
+              {
+                "op": "terminal",
+                "value": "BSM",
+                "window": null,
+                "children": []
+              },
+              {
+                "op": "terminal",
+                "value": "SSM",
+                "window": null,
+                "children": []
+              }
+            ]
+          },
+          {
+            "op": "cs_rank",
+            "value": null,
+            "window": null,
+            "children": [
+              {
+                "op": "ts_delta",
+                "value": null,
+                "window": 3,
+                "children": [
+                  {
+                    "op": "terminal",
+                    "value": "C",
+                    "window": null,
+                    "children": []
+                  }
+                ]
+              }
+            ]
+          }
+        ]
+      },
+      "status": "rejected",
+      "mining_metrics": {
+        "ic": 0.027314281091094017,
+        "icir": 0.3224513496304734,
+        "turnover": 0.5611022776478826
+      },
+      "discovered_at": "2026-07-05",
+      "note": "auto-rejected: rolling IC < 0.03"
+    },
+    {
+      "id": "gp_066",
+      "expr": "mul(cs_rank(log(MV)), ts_std(ts_delta(PS, 5), 10))",
+      "tree": {
+        "op": "mul",
+        "value": null,
+        "window": null,
+        "children": [
+          {
+            "op": "cs_rank",
+            "value": null,
+            "window": null,
+            "children": [
+              {
+                "op": "log",
+                "value": null,
+                "window": null,
+                "children": [
+                  {
+                    "op": "terminal",
+                    "value": "MV",
+                    "window": null,
+                    "children": []
+                  }
+                ]
+              }
+            ]
+          },
+          {
+            "op": "ts_std",
+            "value": null,
+            "window": 10,
+            "children": [
+              {
+                "op": "ts_delta",
+                "value": null,
+                "window": 5,
+                "children": [
+                  {
+                    "op": "terminal",
+                    "value": "PS",
+                    "window": null,
+                    "children": []
+                  }
+                ]
+              }
+            ]
+          }
+        ]
+      },
+      "status": "rejected",
+      "mining_metrics": {
+        "ic": -0.04374508559703827,
+        "icir": -0.39760435542631273,
+        "turnover": 0.20927177282383924
+      },
+      "discovered_at": "2026-07-05",
+      "note": "auto-rejected: rolling IC < 0.03"
+    },
+    {
+      "id": "gp_067",
+      "expr": "mul(ts_rank(ts_delta(CMX, 5), 10), cs_rank(TR))",
+      "tree": {
+        "op": "mul",
+        "value": null,
+        "window": null,
+        "children": [
+          {
+            "op": "ts_rank",
+            "value": null,
+            "window": 10,
+            "children": [
+              {
+                "op": "ts_delta",
+                "value": null,
+                "window": 5,
+                "children": [
+                  {
+                    "op": "terminal",
+                    "value": "CMX",
+                    "window": null,
+                    "children": []
+                  }
+                ]
+              }
+            ]
+          },
+          {
+            "op": "cs_rank",
+            "value": null,
+            "window": null,
+            "children": [
+              {
+                "op": "terminal",
+                "value": "TR",
+                "window": null,
+                "children": []
+              }
+            ]
+          }
+        ]
+      },
+      "status": "rejected",
+      "mining_metrics": {
+        "ic": -0.043333329260349274,
+        "icir": -0.3466792112001104,
+        "turnover": 0.8427054771200851
+      },
+      "discovered_at": "2026-07-05",
+      "note": "LLM挖掘共线性过高,与validated因子|corr|>0.5,结构同质于ts_cov(cs_rank(ts_delta(X)),neg(Y),5),按准则#16拒绝"
+    },
+    {
+      "id": "gp_068",
+      "expr": "mul(cs_rank(ts_delta(CM5, 3)), neg(ts_mean(TR, 5)))",
+      "tree": {
+        "op": "mul",
+        "value": null,
+        "window": null,
+        "children": [
+          {
+            "op": "cs_rank",
+            "value": null,
+            "window": null,
+            "children": [
+              {
+                "op": "ts_delta",
+                "value": null,
+                "window": 3,
+                "children": [
+                  {
+                    "op": "terminal",
+                    "value": "CM5",
+                    "window": null,
+                    "children": []
+                  }
+                ]
+              }
+            ]
+          },
+          {
+            "op": "neg",
+            "value": null,
+            "window": null,
+            "children": [
+              {
+                "op": "ts_mean",
+                "value": null,
+                "window": 5,
+                "children": [
+                  {
+                    "op": "terminal",
+                    "value": "TR",
+                    "window": null,
+                    "children": []
+                  }
+                ]
+              }
+            ]
+          }
+        ]
+      },
+      "status": "rejected",
+      "mining_metrics": {
+        "ic": 0.05413595214486122,
+        "icir": 0.3845875020147903,
+        "turnover": 0.8587330354283566
+      },
+      "discovered_at": "2026-07-05",
+      "note": "LLM挖掘因子,共线性去重后保留3个,训练验证Sharpe 1.78→1.30失败,信号空间饱和(准则20),attention稀释"
+    },
+    {
+      "id": "gp_069",
+      "expr": "mul(ts_min(ts_corr(neg(V), PS, 3), 3), BL)",
+      "tree": {
+        "op": "mul",
+        "value": null,
+        "window": null,
+        "children": [
+          {
+            "op": "ts_min",
+            "value": null,
+            "window": 3,
+            "children": [
+              {
+                "op": "ts_corr",
+                "value": null,
+                "window": 3,
+                "children": [
+                  {
+                    "op": "neg",
+                    "value": null,
+                    "window": null,
+                    "children": [
+                      {
+                        "op": "terminal",
+                        "value": "V",
+                        "window": null,
+                        "children": []
+                      }
+                    ]
+                  },
+                  {
+                    "op": "terminal",
+                    "value": "PS",
+                    "window": null,
+                    "children": []
+                  }
+                ]
+              }
+            ]
+          },
+          {
+            "op": "terminal",
+            "value": "BL",
+            "window": null,
+            "children": []
+          }
+        ]
+      },
+      "status": "rejected",
+      "mining_metrics": {
+        "ic": 0.06748455762863159,
+        "icir": 0.7146693641432205,
+        "turnover": 0.8522486722920647
+      },
+      "discovered_at": "2026-07-05",
+      "note": "auto-rejected: rolling IC < 0.03"
+    },
+    {
+      "id": "gp_070",
+      "expr": "ts_cov(cs_rank(ts_delta(BSM, 3)), neg(C), 5)",
+      "tree": {
+        "op": "ts_cov",
+        "value": null,
+        "window": 5,
+        "children": [
+          {
+            "op": "cs_rank",
+            "value": null,
+            "window": null,
+            "children": [
+              {
+                "op": "ts_delta",
+                "value": null,
+                "window": 3,
+                "children": [
+                  {
+                    "op": "terminal",
+                    "value": "BSM",
+                    "window": null,
+                    "children": []
+                  }
+                ]
+              }
+            ]
+          },
+          {
+            "op": "neg",
+            "value": null,
+            "window": null,
+            "children": [
+              {
+                "op": "terminal",
+                "value": "C",
+                "window": null,
+                "children": []
+              }
+            ]
+          }
+        ]
+      },
+      "status": "rejected",
+      "mining_metrics": {
+        "ic": 0.029317332431674004,
+        "icir": 0.5621902023870848,
+        "turnover": 0.7849616800190049
+      },
+      "discovered_at": "2026-07-05",
+      "note": "auto-rejected: rolling IC < 0.03"
+    },
+    {
+      "id": "gp_071",
+      "expr": "ts_cov(cs_rank(ts_delta(BE, 5)), cs_rank(ts_delta(SE, 5)), 10)",
+      "tree": {
+        "op": "ts_cov",
+        "value": null,
+        "window": 10,
+        "children": [
+          {
+            "op": "cs_rank",
+            "value": null,
+            "window": null,
+            "children": [
+              {
+                "op": "ts_delta",
+                "value": null,
+                "window": 5,
+                "children": [
+                  {
+                    "op": "terminal",
+                    "value": "BE",
+                    "window": null,
+                    "children": []
+                  }
+                ]
+              }
+            ]
+          },
+          {
+            "op": "cs_rank",
+            "value": null,
+            "window": null,
+            "children": [
+              {
+                "op": "ts_delta",
+                "value": null,
+                "window": 5,
+                "children": [
+                  {
+                    "op": "terminal",
+                    "value": "SE",
+                    "window": null,
+                    "children": []
+                  }
+                ]
+              }
+            ]
+          }
+        ]
+      },
+      "status": "rejected",
+      "mining_metrics": {
+        "ic": -0.04707358404994011,
+        "icir": -0.5901139501791433,
+        "turnover": 0.5041352746925333
+      },
+      "discovered_at": "2026-07-05",
+      "note": "auto-rejected: rolling IC < 0.03"
+    },
+    {
+      "id": "gp_072",
+      "expr": "mul(ts_std(NMF, 10), cs_rank(ts_delta(CM20, 5)))",
+      "tree": {
+        "op": "mul",
+        "value": null,
+        "window": null,
+        "children": [
+          {
+            "op": "ts_std",
+            "value": null,
+            "window": 10,
+            "children": [
+              {
+                "op": "terminal",
+                "value": "NMF",
+                "window": null,
+                "children": []
+              }
+            ]
+          },
+          {
+            "op": "cs_rank",
+            "value": null,
+            "window": null,
+            "children": [
+              {
+                "op": "ts_delta",
+                "value": null,
+                "window": 5,
+                "children": [
+                  {
+                    "op": "terminal",
+                    "value": "CM20",
+                    "window": null,
+                    "children": []
+                  }
+                ]
+              }
+            ]
+          }
+        ]
+      },
+      "status": "rejected",
+      "mining_metrics": {
+        "ic": -0.055675506591796875,
+        "icir": -0.4959534888486047,
+        "turnover": 0.4938458579904511
+      },
+      "discovered_at": "2026-07-05",
+      "note": "auto-rejected: rolling IC < 0.03"
+    },
+    {
+      "id": "gp_073",
+      "expr": "mul(ts_rank(ts_delta(CM20, 10), 20), cs_rank(ts_std(SL, 5)))",
+      "tree": {
+        "op": "mul",
+        "value": null,
+        "window": null,
+        "children": [
+          {
+            "op": "ts_rank",
+            "value": null,
+            "window": 20,
+            "children": [
+              {
+                "op": "ts_delta",
+                "value": null,
+                "window": 10,
+                "children": [
+                  {
+                    "op": "terminal",
+                    "value": "CM20",
+                    "window": null,
+                    "children": []
+                  }
+                ]
+              }
+            ]
+          },
+          {
+            "op": "cs_rank",
+            "value": null,
+            "window": null,
+            "children": [
+              {
+                "op": "ts_std",
+                "value": null,
+                "window": 5,
+                "children": [
+                  {
+                    "op": "terminal",
+                    "value": "SL",
+                    "window": null,
+                    "children": []
+                  }
+                ]
+              }
+            ]
+          }
+        ]
+      },
+      "status": "rejected",
+      "mining_metrics": {
+        "ic": -0.045821163803339005,
+        "icir": -0.395213490027365,
+        "turnover": 0.6269375189374307
+      },
+      "discovered_at": "2026-07-05",
+      "note": "auto-rejected: rolling IC < 0.03"
+    },
+    {
+      "id": "gp_074",
+      "expr": "mul(ts_rank(ts_delta(CM5, 3), 10), cs_rank(ts_std(BE, 5)))",
+      "tree": {
+        "op": "mul",
+        "value": null,
+        "window": null,
+        "children": [
+          {
+            "op": "ts_rank",
+            "value": null,
+            "window": 10,
+            "children": [
+              {
+                "op": "ts_delta",
+                "value": null,
+                "window": 3,
+                "children": [
+                  {
+                    "op": "terminal",
+                    "value": "CM5",
+                    "window": null,
+                    "children": []
+                  }
+                ]
+              }
+            ]
+          },
+          {
+            "op": "cs_rank",
+            "value": null,
+            "window": null,
+            "children": [
+              {
+                "op": "ts_std",
+                "value": null,
+                "window": 5,
+                "children": [
+                  {
+                    "op": "terminal",
+                    "value": "BE",
+                    "window": null,
+                    "children": []
+                  }
+                ]
+              }
+            ]
+          }
+        ]
+      },
+      "status": "rejected",
+      "mining_metrics": {
+        "ic": -0.045854613184928894,
+        "icir": -0.4223477045985421,
+        "turnover": 0.8936600558898524
+      },
+      "discovered_at": "2026-07-05",
+      "note": "LLM挖掘因子,共线性去重后保留3个,训练验证Sharpe 1.78→1.30失败,信号空间饱和(准则20),attention稀释"
     }
   ]
 }

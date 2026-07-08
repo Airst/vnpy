@@ -15,6 +15,7 @@ from pydantic import BaseModel
 
 from core.core_service import CoreService
 from core.trade_service import TradeService
+from core.news_service import get_news, get_sectors, get_history, list_dates
 from core.logger_writer import LoggerWriter
 from vnpy.trader.logger import logger as ts_logger
 from vnpy.alpha.logger import logger
@@ -29,6 +30,61 @@ trade_service = None
 # --- Background LLM Task State ---
 _llm_task_status: Dict[str, Dict] = {}  # vt_symbol -> {status, message, date}
 _llm_task_lock = threading.Lock()
+
+# --- News Collection Task State ---
+_news_task_status: Dict = {"running": False, "last_date": None, "last_count": 0, "last_run": None, "message": "", "error": None}
+_news_task_lock = threading.Lock()
+
+
+def _run_news_collection(collect_date: Optional[str] = None):
+    """后台线程：采集板块资讯。"""
+    from core.llm.news_collector import run_collection
+    with _news_task_lock:
+        _news_task_status["running"] = True
+        _news_task_status["message"] = "采集中..."
+        _news_task_status["error"] = None
+    try:
+        result = run_collection(collect_date=collect_date)
+        with _news_task_lock:
+            _news_task_status["running"] = False
+            _news_task_status["last_date"] = result.get("collect_date")
+            _news_task_status["last_run"] = datetime.now().strftime("%Y-%m-%d %H:%M:%S")
+            _news_task_status["message"] = result.get("message") or f"采集完成: {result.get('status')}"
+            if result.get("status") == "ok":
+                _news_task_status["last_count"] = result.get("count", 0)
+            else:
+                _news_task_status["error"] = result.get("message")
+        logger.info(f"[NewsScheduler] collection result: {result.get('status')} count={result.get('count')}")
+    except Exception as e:
+        import traceback
+        traceback.print_exc()
+        with _news_task_lock:
+            _news_task_status["running"] = False
+            _news_task_status["last_run"] = datetime.now().strftime("%Y-%m-%d %H:%M:%S")
+            _news_task_status["message"] = f"采集失败: {e}"
+            _news_task_status["error"] = str(e)
+        logger.error(f"[NewsScheduler] collection failed: {e}")
+
+
+def _trigger_news_collection(collect_date: Optional[str] = None):
+    """触发资讯采集（去重：已在跑则跳过）。"""
+    with _news_task_lock:
+        if _news_task_status.get("running"):
+            return False
+    thread = threading.Thread(target=_run_news_collection, args=(collect_date,), daemon=True)
+    thread.start()
+    return True
+
+
+# News scheduler: 盘前 09:00、盘后 15:30 各采集一次
+async def news_scheduler():
+    print("[NewsScheduler] Started. Schedules: 09:00, 15:30")
+    schedule.every().day.at("09:00").do(lambda: _trigger_news_collection())
+    schedule.every().day.at("15:30").do(lambda: _trigger_news_collection())
+    while True:
+        schedule.run_pending()
+        await asyncio.sleep(5)
+
 
 # Scheduler
 def run_daily_task():
@@ -57,13 +113,14 @@ async def scheduler():
 
 @asynccontextmanager
 async def lifespan(app: FastAPI):
-    # Start scheduler
-    #task = asyncio.create_task(scheduler())
+    # Start news collection scheduler
+    news_task = asyncio.create_task(news_scheduler())
     yield
     # Cleanup
-    #task.cancel()
-    trade_service.close()
-    print("Shut down TradeService...")
+    news_task.cancel()
+    if trade_service is not None:
+        trade_service.close()
+        print("Shut down TradeService...")
 
 app = FastAPI(lifespan=lifespan)
 
@@ -842,6 +899,59 @@ def get_trades():
 @app.post("/api/trade/orders/cancel_all")
 def cancel_all_orders():
     return trade_service.cancel_all_orders()
+
+
+# --- News API ---
+@app.get("/api/news")
+def api_get_news(
+    date: Optional[str] = None,
+    sector: Optional[str] = None,
+    sentiment: Optional[str] = None,
+    impact_type: Optional[str] = None,
+    direction: Optional[str] = None,
+    limit: int = 100,
+):
+    """获取板块资讯列表。date 为空取最新采集日。支持 sector/sentiment/impact_type/direction 过滤。"""
+    return get_news(date=date, sector=sector, sentiment=sentiment, impact_type=impact_type, direction=direction, limit=limit)
+
+
+@app.get("/api/news/sectors")
+def api_get_news_sectors(date: Optional[str] = None):
+    """板块聚合（distinct + 计数 + 概念涨跌幅）。"""
+    return get_sectors(date=date)
+
+
+@app.get("/api/news/history")
+def api_get_news_history(days: int = 14):
+    """最近 N 天采集概况。"""
+    return get_history(days=days)
+
+
+@app.get("/api/news/dates")
+def api_get_news_dates():
+    """已采集日期列表。"""
+    return {"dates": list_dates()}
+
+
+@app.get("/api/news/status")
+def api_get_news_status():
+    """采集任务状态。"""
+    with _news_task_lock:
+        return dict(_news_task_status)
+
+
+@app.post("/api/news/collect")
+def api_collect_news(date: Optional[str] = None):
+    """手动触发资讯采集（后台执行，立即返回）。"""
+    if date is None:
+        date = datetime.now().strftime("%Y-%m-%d")
+    with _news_task_lock:
+        if _news_task_status.get("running"):
+            raise HTTPException(status_code=409, detail="采集任务正在执行中")
+    triggered = _trigger_news_collection(date)
+    if not triggered:
+        raise HTTPException(status_code=409, detail="采集任务正在执行中")
+    return {"message": "采集任务已提交", "date": date}
 
 
 # Static Files Logic (Moved from controller)
