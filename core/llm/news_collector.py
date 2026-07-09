@@ -332,7 +332,7 @@ class NewsCollector:
                 item.concept_pct_change = hit.get("pct_change")
                 item.concept_hot = hit.get("hot")
                 item.lead_stock = hit.get("lead_stock")
-                item.lead_stock_code = hit.get("lead_stock_code")
+                item.lead_stock_code = _to_vt_symbol(hit.get("lead_stock_code"))
 
             # 2) 代表性个股：LLM 命名 + 行业模糊匹配
             mapped: Dict[str, Dict[str, str]] = {}  # vt_symbol -> {vt_symbol, name}
@@ -454,9 +454,10 @@ class NewsCollector:
                     for ts_code, name, industry in cur.fetchall():
                         if not name:
                             continue
-                        by_name[name] = (ts_code, name)
+                        vt = _to_vt_symbol(ts_code)
+                        by_name[name] = (vt, name)
                         if industry:
-                            by_industry.setdefault(industry, []).append((ts_code, name))
+                            by_industry.setdefault(industry, []).append((vt, name))
             finally:
                 conn.close()
         except Exception as e:
@@ -467,6 +468,24 @@ class NewsCollector:
 # =============================================================================
 # 工具
 # =============================================================================
+def _to_vt_symbol(ts_code: str) -> Optional[str]:
+    """tushare ts_code (000001.SZ / 600519.SH / 872925.BJ) → vnpy vt_symbol (000001.SZSE / 600519.SSE / 872925.BSE)。
+
+    vnpy 的 bar/signal/llm_tasks 数据均按全称交易所后缀落盘（SZSE/SSE/BSE），
+    而 tushare dc_concept / stock_basic 给的是短后缀（SZ/SH/BJ）。需要统一到 vnpy 格式，
+    否则下游 load_bar_data / llm_ratings 查不到文件。
+    """
+    if not ts_code or not isinstance(ts_code, str):
+        return ts_code
+    if ts_code.endswith(".SZ"):
+        return ts_code[:-3] + ".SZSE"
+    if ts_code.endswith(".SH"):
+        return ts_code[:-3] + ".SSE"
+    if ts_code.endswith(".BJ"):
+        return ts_code[:-3] + ".BSE"
+    return ts_code
+
+
 def _to_float(v) -> Optional[float]:
     try:
         if v is None:
@@ -512,15 +531,12 @@ def save_news(items: List[NewsItem], collect_date: str, output_dir: Optional[str
         new_rows.append(_item_to_dict(it))
 
     merged = existing + new_rows
-    # 排序：timeliness high 优先 + info_date 新者优先 + conviction 高优先
+    # 排序：timeliness high 优先 → info_date 新→旧（倒序）→ conviction 高→低
+    # 三次稳定排序（字符串日期无法在 tuple 内取负），后一次保留前一次的相对顺序。
     order = {"high": 0, "medium": 1, "low": 2}
-    merged.sort(
-        key=lambda x: (
-            order.get(x.get("timeliness"), 1),
-            _sort_date(x),
-            -_sort_conviction(x),
-        ),
-    )
+    merged.sort(key=lambda x: _sort_conviction(x), reverse=True)
+    merged.sort(key=lambda x: _sort_date(x), reverse=True)
+    merged.sort(key=lambda x: order.get(x.get("timeliness"), 1))
 
     payload = {
         "collect_date": collect_date,

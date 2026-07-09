@@ -91,9 +91,11 @@ def get_news(
     if direction:
         items = [it for it in items if it.get("direction") == direction]
 
-    # 排序：timeliness high 优先，info_date 新优先
+    # 排序：timeliness high 优先 → info_date 新→旧（倒序）→ conviction 高→低
+    # 用三次稳定排序实现（字符串日期无法在 tuple 内取负），后一次保留前一次的相对顺序。
     order = {"high": 0, "medium": 1, "low": 2}
-    items = sorted(items, key=lambda x: (order.get(x.get("timeliness"), 1), x.get("info_date", "")), reverse=False)
+    items = sorted(items, key=lambda x: (x.get("conviction") or 0), reverse=True)
+    items = sorted(items, key=lambda x: (x.get("info_date", "") or ""), reverse=True)
     items = sorted(items, key=lambda x: order.get(x.get("timeliness"), 1))
 
     total = len(items)
