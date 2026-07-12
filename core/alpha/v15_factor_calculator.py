@@ -1,4 +1,4 @@
-from core.alpha.factor_calculator import FactorCalculator, device, torch, np, pl, cs_rank, ts_corr, cs_zscore, ts_delay, ts_mean, ts_min, ts_max, ts_quantile, ts_std, ts_sum, ts_rsquare, ts_slope, ta_atr, ta_rsi, cs_group_mean, ts_kdj, ts_cov, cs_neutralize
+from core.alpha.factor_calculator import FactorCalculator, device, torch, np, pl, cs_rank, ts_corr, cs_zscore, ts_delay, ts_mean, ts_min, ts_max, ts_quantile, ts_std, ts_sum, ts_rsquare, ts_slope, ta_atr, ta_rsi, cs_group_mean, ts_kdj, ts_cov, cs_neutralize, ts_ema
 
 class V15FactorCalculator(FactorCalculator):
     """
@@ -36,6 +36,41 @@ class V15FactorCalculator(FactorCalculator):
         弱反转因子, 移除需限量在最强反转者.
         Round3(2个: 仅pool_size_x_regime, pool_size_x_regime_change): Sharpe 0.97.
         移除不足, 随机性主导, 回退到Round1(4个).
+    V15.6: LLM驱动因子挖掘(GLM-5.2, 百炼OpenAI协议). 迭代式挖掘3轮, 13个新因子
+        经滚动IC门禁后9个进入testing, 共线性去重后保留3个(gp_062/gp_068/gp_074)
+        加入训练. Sharpe 1.78→1.30, 年化↓, MaxDD -21%→-25%, 收益回撤比6.21→3.88.
+        失败原因: 即使经过IC门禁+共线性去重, LLM生成的因子仍落在已有信号维度
+        的变体上, 加入后稀释attention权重. 准则20再次印证: GP信号空间已饱和,
+        新因子增量不如不加. 已reject全部, 回退到V15.5b基线.
+    V15.7: 短期动量因子补充(失败回退).
+        补充4个1-2日短期动量因子(mom_1d/mom_2d/consecutive_up/mom_1d_vol).
+        动机: A股1-2日存在动量延续(自相关+0.055/+0.030), 但5日标签学到反转(-0.029),
+        模型对强势股过早判反转. 补充短期动量信息让attention自己学习何时跟随趋势.
+        结果: Sharpe 0.85(有T+1确认) / 1.17(无T+1), 均低于V15.5b基线(1.50~1.72).
+        失败原因: 1日收益噪音过大(涨跌停/突发消息), 与5日反转信号方向冲突时
+        attention无法有效仲裁. 短期动量不是"趋势理解"——只是更短窗口的收益信号.
+        教训: 模型需要的不是更多动量窗口, 而是对趋势阶段(phase)的识别能力.
+    V15.8: 下跌趋势周期阶段因子(失败回退).
+        补充3个趋势阶段上下文因子(drawdown_age/bottom_recency/decline_easing).
+        动机: 模型有"深度"信号(drawdown_20d, rev_5d)但没有"阶段"信号, 无法区分
+        下跌初期(反转必败) vs 加速期(反转必败) vs 筑底期(反转有效).
+        结果: Sharpe 1.09, 远低于V15.5b基线(1.50~1.72). MaxDD -28.68%.
+        失败原因: attention学习的是因子间两两交互, 无法构建"IF阶段=X THEN
+        downweight rev_5d"的条件门控逻辑. 上下文因子自身IC极低(bottom_recency
+        均值-0.019), attention无法有效利用其条件信息, 纯粹是噪音.
+        教训: 信号空间饱和后, 即使全新维度(时间结构)的因子也无法提供增量.
+        因子工程在当前框架下已触及天花板, 突破方向在数据层或模型层, 非因子层.
+    V15.9: 共线因子批量清理 (失败回退).
+        factor_screening.py 分析134因子相关性矩阵+IC, 移除41个冗余因子:
+        - 35个共线因子(|corr|≥0.95): style_regime系列、volatility系列、turnover系列等
+        - 6个低IC因子(|IC|<0.01): trend_rsquare_20, vol_price_div等
+        使用greedy_pairwise_removal算法逐对决策, 保留|IC|更高者.
+        结果: Sharpe 1.19, 远低于V15.5b基线(1.50~1.72). MaxDD -34.54%.
+        年化57.30%, Q2 2026 +8.60%(优于基线), 但整体Sharpe大幅下降.
+        失败原因: 即使|corr|≥0.95, attention仍能从高度相关因子中提取边际信息.
+        移除41个因子过于激进, 与V15.5b Round2(移除10个→Sharpe 1.14)教训一致.
+        教训: 因子相关性≠信息冗余. FT-Transformer的attention机制能利用
+        高相关因子间的细微差异, 批量移除高相关因子会损害模型信息输入.
 
     == 设计决策 ==
     在双股票池（CSI 1000 + CSI 2000）混合训练下，让模型识别当前风格偏向：
@@ -172,7 +207,6 @@ class V15FactorCalculator(FactorCalculator):
         features["resid_vol_20d"] = ts_std(resid, 20)
 
         # Trend Quality
-        features["trend_rsquare_20"] = ts_rsquare(C, 20)
         slope_20 = ts_slope(C, 20)
         features["trend_slope_20"] = slope_20 / (C + 1e-8)
         features["trend_sharpe_20"] = features["trend_slope_20"] / (features["volatility_20d"] + 1e-8)
@@ -238,7 +272,7 @@ class V15FactorCalculator(FactorCalculator):
         sma_tp = ts_mean(tp, 14)
         mad_tp = ts_mean(torch.abs(tp - sma_tp), 14)
         features["tech_cci_14"] = (tp - sma_tp) / (0.015 * mad_tp + 1e-8)
-        
+
         # 4. Volume
         features["volume_ratio"] = V / ts_mean(V, 20)
         features["vol_cv_20"] = ts_std(V, 20) / ts_mean(V, 20)
@@ -452,11 +486,6 @@ class V15FactorCalculator(FactorCalculator):
         down_impact = ts_mean(daily_amihud * down_mask, 20) / (ts_mean(down_mask, 20) + 1e-8)
         up_impact = ts_mean(daily_amihud * up_mask, 20) / (ts_mean(up_mask, 20) + 1e-8)
         features["price_impact_asym"] = down_impact / (up_impact + 1e-8)
-
-        # vol_price_div: 量价背离信号 (IC=0.049 recent, stable)
-        price_trend = (C / ts_mean(C, 20) - 1)
-        vol_trend = 1.0 - vol_shrink_ratio
-        features["vol_price_div"] = (-price_trend).clamp(min=0) * vol_trend.clamp(min=0)
 
         # === V10 Batch 2: Amihud/Liquidity Variants for IC Screening ===
 
