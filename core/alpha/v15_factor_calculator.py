@@ -71,6 +71,29 @@ class V15FactorCalculator(FactorCalculator):
         移除41个因子过于激进, 与V15.5b Round2(移除10个→Sharpe 1.14)教训一致.
         教训: 因子相关性≠信息冗余. FT-Transformer的attention机制能利用
         高相关因子间的细微差异, 批量移除高相关因子会损害模型信息输入.
+    V15.10: 精准移除2个噪声因子 (auto-research 验证成功).
+        通过 auto-research 配对种子门禁 (3 seeds × w=8, paired margin=0.05)
+        单独测试每个候选移除, 只保留通过 3/3 seeds improved 的:
+        - trend_rsquare_20 (IC=0.0015, delta=+0.53, 3/3 seeds)
+        - vol_price_div (IC=0.0032, delta=+0.61, 3/3 seeds)
+        全量训练 Sharpe 1.02→1.08, 年化 42.68%→45.56%, RDD 2.42→2.20.
+        教训: V15.9 一次移除41个失败, V15.10 单个验证成功——批量移除受
+        attention 稀释, 但极低IC因子(<0.005) 精准移除可提升信号浓度.
+    V15.11: LLM 驱动 GP 挖掘 + 26 Q2 定向验证 (成功).
+        流程: gp_mining_llm.py (GLM-5.2) 5轮×20候选, 19个新因子进入 discovered
+        → validate 门禁 (rolling IC≥0.03, 5 windows × 200 天): 10个升级 testing
+        → auto-research 26 Q2 attention 三批测试 (Batch A/B/C):
+           Batch C (all 10) delta +0.308, 3/3 seeds → keep
+        → 组合实验 C5 (10 GP + max_windows=6) delta +0.442, 3/3 seeds → best
+        → 全量训练 (35 windows, 双池 CSI 1000+2000, attention):
+           Sharpe 1.08→1.31, 年化 45.56%→66.44%, RDD 2.20→3.78,
+           MaxDD -30.72%→-24.47%, 总收益 207%→303%, Q2 2026 从 tier1 -18% 变正收益.
+        通过因子: gp_077, gp_078, gp_081, gp_082, gp_083, gp_084,
+                  gp_086, gp_087, gp_088, gp_092
+        对比 V15.6 失败 (3个 LLM 因子 Sharpe 1.78→1.30): 差异在于
+        (1) 挖掘轮次多 (5 vs 3), 候选质量更高 (|IC|=0.03~0.06);
+        (2) 全部通过滚动 IC 门禁; (3) auto-research 26 Q2 定向验证前置.
+        教训: LLM GP 因子成败取决于验证门禁严格度, 不是"信号空间饱和"绝对天花板.
 
     == 设计决策 ==
     在双股票池（CSI 1000 + CSI 2000）混合训练下，让模型识别当前风格偏向：
