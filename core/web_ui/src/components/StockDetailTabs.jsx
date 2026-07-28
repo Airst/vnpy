@@ -7,7 +7,7 @@ const { RangePicker } = DatePicker;
 
 const SIGNAL_COLORS = ['#8884d8', '#ff7300', '#82ca9d', '#ffc658', '#d0ed57', '#a4de6c', '#8dd1e1', '#83a6ed'];
 
-const StockDetailTabs = ({ vtSymbol, signals: signalsProp, extraTabs, defaultTab, trades }) => {
+const StockDetailTabs = ({ vtSymbol, signals: signalsProp, extraTabs, defaultTab, trades, runId, autoLoad }) => {
     const [signals, setSignals] = useState(signalsProp || []);
     const [selectedSignal, setSelectedSignal] = useState(null);
     const [dateRange, setDateRange] = useState([dayjs().subtract(1, 'year'), dayjs()]);
@@ -37,7 +37,10 @@ const StockDetailTabs = ({ vtSymbol, signals: signalsProp, extraTabs, defaultTab
         }
     }, [signals, selectedSignal]);
 
+    // vtSymbol 变化时重置 (跳过首次挂载, 否则会把默认信号选择在同一次提交中冲掉)
+    const mountedRef = useRef(false);
     useEffect(() => {
+        if (!mountedRef.current) { mountedRef.current = true; return; }
         setSelectedSignal(null);
         setKlineData([]);
         setSignalData([]);
@@ -64,7 +67,11 @@ const StockDetailTabs = ({ vtSymbol, signals: signalsProp, extraTabs, defaultTab
                 signalPromise = fetch('/api/signal_data', {
                     method: 'POST',
                     headers: { 'Content-Type': 'application/json' },
-                    body: JSON.stringify({ signal_name: signalName, start_date: startDate, end_date: endDate, vt_symbols: [symbol] })
+                    body: JSON.stringify({
+                        signal_name: signalName, start_date: startDate, end_date: endDate,
+                        vt_symbols: [symbol],
+                        ...(runId ? { run_id: runId } : {}),  // run 域信号: 从 runs/{run_id}/signal.parquet 读取
+                    })
                 }).then(r => r.json());
             }
 
@@ -89,7 +96,15 @@ const StockDetailTabs = ({ vtSymbol, signals: signalsProp, extraTabs, defaultTab
         } finally {
             setLoading(false);
         }
-    }, []);
+    }, [runId]);
+
+    // autoLoad: 切换股票/信号后自动加载, 无需手动点查询 (供嵌入式面板使用)
+    useEffect(() => {
+        if (autoLoad && vtSymbol && selectedSignal) {
+            loadData(vtSymbol, selectedSignal, dateRange);
+        }
+        // eslint-disable-next-line react-hooks/exhaustive-deps
+    }, [autoLoad, vtSymbol, selectedSignal]);
 
     useEffect(() => {
         if (!chartContainerRef.current || klineData.length === 0) {

@@ -1,11 +1,13 @@
 from typing import List, Optional
 from datetime import datetime
 import polars as pl
+import pandas as pd
 from vnpy.alpha.lab import AlphaLab
 from data_manager.ts_downloader.daily_basic_manager import DailyBasicManager
 from data_manager.ts_downloader.stock_info_manager import StockInfoManager
 from data_manager.ts_downloader.fina_indicator_manager import FinaIndicatorManager
 from data_manager.ts_downloader.moneyflow_manager import MoneyFlowManager
+from data_manager.ts_downloader.top_list_manager import TopListManager
 from core.alpha.concept_embedding import ConceptEmbedding
 
 class DataLoader:
@@ -302,6 +304,53 @@ class DataLoader:
                 print(f"北向资金持仓数据加载完成，维度: {price_df.shape}")
         except Exception as e:
             print(f"加载北向资金持仓数据失败: {e}")
+
+        # 9. 加载龙虎榜数据 (Top List / Dragon-Tiger Board)
+        print("加载龙虎榜数据 (Top List)...")
+        try:
+            tl_manager = TopListManager()
+            tl_df_pd = tl_manager.load_data(symbols, s_date_str, e_date_str)
+
+            if not tl_df_pd.empty:
+                # Convert trade_date to datetime for join
+                tl_df_pd['datetime'] = pd.to_datetime(tl_df_pd['trade_date'], format='%Y%m%d')
+                tl_df = pl.from_pandas(tl_df_pd)
+                tl_df = tl_df.with_columns(pl.col("datetime").cast(pl.Datetime("us")))
+
+                # Drop unnecessary columns
+                tl_df = tl_df.drop([c for c in ["ts_code", "trade_date"] if c in tl_df.columns])
+
+                price_df = price_df.join(tl_df, on=["vt_symbol", "datetime"], how="left")
+
+                # Dragon-tiger board columns
+                lhb_cols = ["lhb_net_amount", "lhb_buy", "lhb_sell",
+                            "lhb_amount_rate", "lhb_float_values",
+                            "lhb_inst_net_buy", "lhb_count"]
+
+                # Fill nulls with 0 (no appearance = neutral)
+                for c in lhb_cols:
+                    if c not in price_df.columns:
+                        price_df = price_df.with_columns(pl.lit(0.0).alias(c))
+                price_df = price_df.with_columns([
+                    pl.col(c).fill_null(0.0).fill_nan(0.0) for c in lhb_cols if c in price_df.columns
+                ])
+
+                print(f"龙虎榜数据加载完成，维度: {price_df.shape}")
+            else:
+                # Ensure columns exist even without data
+                for c in ["lhb_net_amount", "lhb_buy", "lhb_sell",
+                          "lhb_amount_rate", "lhb_float_values",
+                          "lhb_inst_net_buy", "lhb_count"]:
+                    price_df = price_df.with_columns(pl.lit(0.0).alias(c))
+                print("龙虎榜数据为空，使用零值填充")
+        except Exception as e:
+            print(f"加载龙虎榜数据失败: {e}")
+            import traceback; traceback.print_exc()
+            for c in ["lhb_net_amount", "lhb_buy", "lhb_sell",
+                      "lhb_amount_rate", "lhb_float_values",
+                      "lhb_inst_net_buy", "lhb_count"]:
+                if c not in price_df.columns:
+                    price_df = price_df.with_columns(pl.lit(0.0).alias(c))
 
         return price_df
 

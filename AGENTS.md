@@ -51,6 +51,10 @@ AI 在工作时应按需读取以下位置获取信息，而非依赖本文件�
 | 各版本的因子演进和失败记录 | 对应版本 `v*_factor_calculator.py` 文件头部 docstring |
 | GP 因子注册表（生命周期状态） | `core/alpha/gp_factors.json` |
 | GP 挖掘模块设计与算子体系 | `core/alpha/gp_factor_miner.py` 文件头部 docstring |
+| Auto-research 自主循环契约（program.md 等价物） | `docs/loop/auto_research.md` |
+| Auto-research 实验账本（机器可读，keep/discard 流水） | `core/alpha/experiments.json` |
+| Auto-research 编排器与分层验证实现 | `core/alpha/research_runner.py`、`core/alpha/research_loop.py` |
+| Auto-research 交接文档（工作方法+未完成事项+约束） | `docs/loop/auto_research_handoff.md` |
 
 ### 1.4 代码目录
 
@@ -104,7 +108,7 @@ docs/knowledge/                   # 量化知识库（准则/规范/方法论）
 | 一、项目基础信息 | 保留本文件 §一 | 入口信息，不变 |
 | 二、迭代工作流程 | `docs/loop/process.md` | 6 步闭环 SOP，归入 loop 空间 |
 | 三、代码自描述规范 | `docs/knowledge/code_docstring_spec.md` | 长期规范，归入知识库 |
-| 四、量化研究准则 | `docs/knowledge/research_principles.md` | 26 条硬约束，持续追加 |
+| 四、量化研究准则 | `docs/knowledge/research_principles.md` | 27 条硬约束，持续追加 |
 | 五、工作方法 | `docs/knowledge/work_methods.md` | 长期方法论 |
 
 > 历史文档（`docs/iterations/*.md`、代码 docstring）中出现的"AGENTS.md 第四章准则""AGENTS.md §4.x"等引用，对应内容现位于 `docs/knowledge/research_principles.md`，章节编号保持一致（4.1 / 4.2）。

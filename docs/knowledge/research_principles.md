@@ -28,7 +28,7 @@
 14. **Gate Network 在 Factor Attention 框架下失败**：Attention 已实现动态加权，Gate 冗余且过拟合
 15. **动量崩溃检测在 A 股截面选股中无效**：动量维度因子工程已触及天花板。详见 `docs/iterations/v11_momentum_crash_detection.md`
 16. **GP 因子需要去重**：结构同质化的 GP 因子集体加入会稀释 attention 权重，应按子树相似性聚类后保留代表性因子。V15.3 将 22 个 validated 因子缩减到 13 个后 Sharpe 从 1.36 提升到 1.74。详见 `docs/iterations/v15_step2_dedup_ensemble.md`
-17. **验证集长度影响 early stopping 可靠性**：50 天验证集易被短期市场偏差误导，100 天（覆盖约 4 个月行情）可提供更稳定的 stop signal
+17. **验证集长度影响 early stopping 可靠性**：50 天验证集易被短期市场偏差误导，100 天（覆盖约 4 个月行情）可提供更稳定的 stop signal。2026-07-17 配对 Tier-3 终审再次证实：exp_050 在 Tier-1（lgb/8窗/in-sample）keep 了 valid_len=50，但 3 seeds × 35 窗 × attention 全量配对测试推翻（median delta -0.023，1/3 为正，seed42 delta -3.2，OOS median -0.49 vs -0.08）——Tier-1 的改善是 lgb+短窗+in-sample 假象。**衍生硬约束：Tier-1 keep 必须经 Tier-3 确认才能改生产默认**（详见 exp_052）
 18. **Multi-seed ensemble 降低但不消除 OOS variance**：3-seed (42/123/2024) 训练 + 预测均值聚合能消除单次训练的随机性（权重初始化、batch 采样、dropout mask），但不同 seed 收敛到不同局部最优解，存在系统性的分数偏移。当 rank 间 score gap 很小（top-5 内 gap 仅 0.005，远小于 seed 间偏差），ensemble 平均后 rank 3-8 的相对顺序仍会重排，无法稳定选股边界。ensemble 把 Sharpe spread 从 ~0.6 缩到 ~0.3 量级，但仍不足以解决 top-N rank 竞争的翻转问题
 19. **季频数据在日频截面框架下信号过滤效率低**：股东人数等季频数据公告滞后 1~3 个月，被价量数据先行反映；强行引入会带来同质化重复信号（如 holder_change_qoq 与 avg_holding_size_change 数学等价、avg_holding_size_log 是 size 因子变种），稀释 attention 权重导致 Sharpe 1.74→1.09。详见 `docs/iterations/v16_holder_number_failed.md`
 20. **GP 因子信号空间在当前算子体系下已趋于饱和**：经过 6 轮挖掘（50 个候选，13 个 validated），新一轮发现的候选因子大量集中于 `cs_zscore(BMD)`/`ts_cov(log(PB),neg(X))` 等已有信号维度的变体，无法提供真正增量信息。GP 算子扩展（加入新终端如财务数据）或更换搜索空间是下一步方向
@@ -39,6 +39,7 @@
 25. **短期动量因子（1-2日）在反转标签框架下失败**：A 股 1-2 日自相关为正（+0.055/+0.030），但 5 日标签学到的是反转（-0.029）。直接加入 mom_1d/mom_2d 等短周期动量因子后，1 日收益噪音过大（涨跌停/突发消息），且与 5 日反转信号方向冲突时 attention 无法有效仲裁。短期动量不是"趋势理解"——只是更短窗口的收益信号。模型需要的是趋势阶段（phase）识别能力，而非更多动量窗口。详见 V15.7 失败记录
 26. **趋势阶段上下文因子在 attention 框架下失败**：补充 drawdown_age（峰值距今多久）、bottom_recency（低点距今多久）、decline_easing（阴线比例变化）3 个全新维度的趋势阶段因子，试图让 attention 在不同下跌阶段对 rev_5d 差异化加权。Sharpe 1.09（基线 1.50~1.72）。失败原因：attention 学习的是因子间两两交互，无法构建"IF 阶段=X THEN downweight rev_5d"的条件门控逻辑；上下文因子自身 IC 极低（-0.019），无法被 attention 有效利用。信号空间饱和后，即使全新维度的因子也无法提供增量。因子工程在当前框架下已触及天花板，突破方向在数据层或模型层。详见 V15.8 失败记录
 27. **因子相关性≠信息冗余，批量移除高相关因子损害 attention 模型**：factor_screening.py 识别 41 个"冗余"因子（35 个 |corr|≥0.95 + 6 个 |IC|<0.01），一次性移除后 Sharpe 从 1.50~1.72 降至 1.19。即使两个因子截面 Spearman 相关性=1.000，它们在不同时间窗口、不同股票子集上仍存在细微差异，FT-Transformer 的 attention 机制能利用这些边际信息。与 V15.5b Round2（移除 10 个→Sharpe 1.14）教训一致：attention 模型的因子移除需极其保守，每次不超过 2-3 个并严格验证。详见 V15.9 失败记录
+28. **持仓广度与信号稳定性是替代解药，N 的最优值随信号噪声水平变化**：pre-SWA 信号（噪声大）上，同一信号仅改 max_holdings 的纯净 A/B（4 信号 × N∈{5,10,15,20}）：N=5 跨 seed RDD 散布 2.41、Sharpe 最低 0.55；N=10 散布收敛到 0.62、最低 2.51、均值 2.80——广度用分散换稳健，N=10 最优（2026-07-17 初版结论）。**2026-07-18 修正**：SWA 在源头稳定信号后（检查点噪声被权重平均消除，exp_053），广度保护价值缩水，集中持仓的收益捕获重新占优——SWA 生产信号纯净 A/B：N=5 RDD 3.27/Sharpe 1.16 vs N=10 RDD 2.39/Sharpe 1.08，2024 牛市 +31.9% vs +17.2%，2026 +8.6% vs -7.2%；跨 3 个 SWA seed 复核 N=5 胜 2/3（median delta +0.78）。**生产（SWA 信号）用 N=5**；若未来信号稳定性退化（如去掉 SWA），应重新评估广度。代价：N=5 MaxDD 更深（-31.9% vs -24.6%）但持续更短（39 vs 55 天），且风控阶梯在 N=5 能 -35% 全退。详见 log/breadth_sweep_20260717_085855.json 与 2026-07-18 verification_log
 
 ---
 

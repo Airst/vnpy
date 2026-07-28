@@ -25,6 +25,16 @@ V10 Step 3: MlpModel 包装类支持 model_type 切换 ("mlp" / "factor_attentio
 - Gate Network 叠加在 Attention 之上: Sharpe 1.76→0.84, 功能冗余+过拟合
 - 2层 Attention: 过拟合，1层最优
 - d_token=32: 表达能力不足，64最优
+
+== 检查点平均化（2026-07-17，方差压缩）==
+背景: 34/35 窗口训满 1000 epoch（early_stop 耐心 800 epoch 形同虚设），验证损失
+~epoch 500 后进入噪声高原（IC 0.03~0.05 的信噪比决定无尖锐极小值），best checkpoint
+是噪声选择的点，同 seed 重跑信号 rank 相关仅 0.989。checkpoint_mode 四模式:
+- "best": 单一 best-valid 检查点（默认，基线行为）
+- "topk_pred": top-K valid 检查点分别预测，调用方逐日 rank 平均（mlp_signals._model_predict）
+- "swa": top-K 检查点权重平均（greedy model soup）
+- "ema": 权重 EMA（decay=0.999/step），按 EMA 自身 valid loss 选最佳检查点
+验证: scripts/checkpoint_modes_validate.py（attention × 8 窗 × 3 seeds 配对门禁）
 """
 import copy
 import math
@@ -85,6 +95,9 @@ class MlpModel(AlphaModel):
         head_dropout: float = 0.10,
         attn_activation: str = "softmax",
         input_dropout: float = 0.0,
+        checkpoint_mode: str = "best",
+        topk: int = 3,
+        ema_decay: float = 0.999,
     ) -> None:
         """
         Initialize MLP model
@@ -128,6 +141,19 @@ class MlpModel(AlphaModel):
         self.fitted: bool = False
         self.feature_names: list[str] = []
         self.best_step: int | None = None
+        # Checkpoint averaging modes (2026-07-17, variance reduction for noisy-plateau training):
+        #   "best"      — default, single best-valid checkpoint (baseline behavior)
+        #   "topk_pred" — keep top-K valid checkpoints; caller predicts with each and rank-averages
+        #   "swa"       — average top-K checkpoint weights (greedy model soup, Wortsman 2022)
+        #   "ema"       — exponential moving average of weights; best EMA checkpoint by valid loss
+        self.checkpoint_mode: str = checkpoint_mode
+        self.topk: int = topk
+        self.ema_decay: float = ema_decay
+        self._topk_checkpoints: list = []
+        self._ema_state = None
+        self._best_ema_score: float = np.inf
+        self._best_ema_step: int = 0
+        self._best_ema_params = None
 
         # Set random seed for reproducibility
         if seed is not None:
@@ -260,6 +286,19 @@ class MlpModel(AlphaModel):
             batch_loss = self._train_step(train_valid_data, train_samples)
             train_loss += batch_loss
 
+            # EMA weight update (per training step; decay=0.999 → half-life ~693 steps)
+            if self.checkpoint_mode == "ema":
+                if self._ema_state is None:
+                    self._ema_state = copy.deepcopy(self.model.state_dict())
+                else:
+                    with torch.no_grad():
+                        msd = self.model.state_dict()
+                        for k, v in self._ema_state.items():
+                            if v.dtype.is_floating_point:
+                                v.mul_(self.ema_decay).add_(msd[k], alpha=1.0 - self.ema_decay)
+                            else:
+                                self._ema_state[k] = msd[k].clone()
+
             # Periodically evaluate the model
             if step % self.eval_steps == 0 or step == self.n_epochs:
                 early_stop_count, best_valid_score, best_params = self._evaluate_step(
@@ -275,8 +314,15 @@ class MlpModel(AlphaModel):
         # Mark model as trained
         self.fitted = True
 
-        # Load best model parameters
-        if best_params:
+        # Load final parameters according to checkpoint_mode
+        if self.checkpoint_mode == "swa" and self._topk_checkpoints:
+            avg_params = self._average_checkpoints([c[2] for c in self._topk_checkpoints])
+            self.model.load_state_dict(avg_params)
+            logger.info(f"SWA: averaged {len(self._topk_checkpoints)} top checkpoints (best valid {self._topk_checkpoints[0][0]:.6f})")
+        elif self.checkpoint_mode == "ema" and self._best_ema_params is not None:
+            self.model.load_state_dict(self._best_ema_params)
+            logger.info(f"EMA: loaded best EMA checkpoint (valid {self._best_ema_score:.6f} @ step {self._best_ema_step})")
+        elif best_params:
             self.model.load_state_dict(best_params)
 
     def _train_step(
@@ -379,6 +425,26 @@ class MlpModel(AlphaModel):
             early_stop_count = 0
             best_params = copy.deepcopy(self.model.state_dict())
 
+        # Track top-K checkpoints for swa / topk_pred modes
+        if self.checkpoint_mode in ("swa", "topk_pred"):
+            self._topk_checkpoints.append((loss_val, step, copy.deepcopy(self.model.state_dict())))
+            self._topk_checkpoints.sort(key=lambda x: x[0])
+            del self._topk_checkpoints[self.topk:]
+
+        # Evaluate EMA weights for ema mode (checkpoint selection on EMA's own valid loss)
+        if self.checkpoint_mode == "ema" and self._ema_state is not None:
+            current_params = copy.deepcopy(self.model.state_dict())
+            self.model.load_state_dict(self._ema_state)
+            with torch.no_grad():
+                self.model.eval()
+                ema_pred = self._predict_batch(data, return_cpu=False)
+                ema_loss = self._loss_fn(ema_pred, train_valid_data["y"][Segment.VALID]).item()
+            if ema_loss < self._best_ema_score:
+                self._best_ema_score = ema_loss
+                self._best_ema_step = step
+                self._best_ema_params = copy.deepcopy(self._ema_state)
+            self.model.load_state_dict(current_params)
+
         # Update learning rate
         if self.scheduler is not None:
             self.scheduler.step(metrics=valid_loss, epoch=step)
@@ -439,6 +505,31 @@ class MlpModel(AlphaModel):
             return cast(np.ndarray, np.concatenate([pr.cpu().numpy() for pr in predictions]))
         else:
             return torch.cat(predictions, dim=0)
+
+    @staticmethod
+    def _average_checkpoints(state_dicts: list[dict]) -> dict:
+        """Element-wise average of float tensors across checkpoints (SWA / greedy model soup)."""
+        avg = {}
+        for k in state_dicts[0]:
+            v0 = state_dicts[0][k]
+            if v0.dtype.is_floating_point:
+                avg[k] = sum(sd[k] for sd in state_dicts) / len(state_dicts)
+            else:
+                avg[k] = v0.clone()
+        return avg
+
+    def predict_checkpoints(self, dataset: AlphaDataset, segment: Segment) -> list[np.ndarray]:
+        """Predict with each of the top-K valid checkpoints (checkpoint_mode='topk_pred').
+        Caller is responsible for aggregating (e.g. per-day rank-average)."""
+        if not self._topk_checkpoints:
+            return [self.predict(dataset, segment)]
+        current = copy.deepcopy(self.model.state_dict())
+        preds = []
+        for _, _, params in self._topk_checkpoints:
+            self.model.load_state_dict(params)
+            preds.append(self.predict(dataset, segment))
+        self.model.load_state_dict(current)
+        return preds
 
     def predict(self, dataset: AlphaDataset, segment: Segment) -> np.ndarray:
         """

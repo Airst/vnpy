@@ -128,8 +128,18 @@ class V15FactorCalculator(FactorCalculator):
       隐式学习因子交互，显式交互因子反而干扰 attention 学习。该方向暂停。
     - 5日面积标签: Sharpe 1.09, 量级太小与换手率因子共振。10日面积更优。
     """
-    def __init__(self, **kwargs):
+    def __init__(self, label_horizon: int = 5, label_mode: str = "5d", **kwargs):
         super().__init__(**kwargs)
+        # 标签前向收益天数（V15.2 定为 5；V14 曾为 10，Sharpe 1.42）
+        # 2026-07-18 用户诊断"超跌反弹风格不适应动量 regime"后参数化，用于配对验证
+        self.label_horizon = label_horizon
+        # 标签模式 (2026-07-24 反弹趋势确认实验, 用于配对验证):
+        # - "5d": 生产基线, 单地平线 label_horizon 日 beta-neutral 终点收益 cs_rank
+        # - "rebound_avg": 未来 5/10/20 日 beta-neutral 超额收益各自 cs_rank 后
+        #   加权融合 (0.40/0.35/0.25), 奖励跨地平线持续走强的反弹
+        # - "rebound_confirm": 三个地平线 rank 取最小值 (最差地平线决定标签),
+        #   严格要求反弹被 10/20 日趋势"确认", 惩罚 5 日冲高回落
+        self.label_mode = label_mode
 
     # col_map结构可参考 core/alpha/data_columns_info.txt
     def build_features(self, padded_raw, col_map) -> dict[str, torch.Tensor]:
@@ -677,14 +687,111 @@ class V15FactorCalculator(FactorCalculator):
         features["pool_size_x_regime_change"] = features["pool_size_rank"] * regime_change_dir
 
         # === Beta-Neutral Label (V15.3: 5日终点收益, Beta-Neutral, 全截面排名) ===
-        raw_ret_5 = ts_delay(C, -5) / C - 1
-        mkt_ret_5 = torch.nanmean(raw_ret_5, dim=0, keepdim=True)
-        excess_ret_5 = raw_ret_5 - features["beta_20d"] * mkt_ret_5
-
         low_liq_penalty = (features["turnover_mean_10d"] < 1.0).float() * 0.05
-        excess_ret_5 = excess_ret_5 - low_liq_penalty
 
-        features["label"] = cs_rank(excess_ret_5)
+        if self.label_mode == "5d":
+            raw_ret_5 = ts_delay(C, -self.label_horizon) / C - 1
+            mkt_ret_5 = torch.nanmean(raw_ret_5, dim=0, keepdim=True)
+            excess_ret_5 = raw_ret_5 - features["beta_20d"] * mkt_ret_5
+            excess_ret_5 = excess_ret_5 - low_liq_penalty
+            features["label"] = cs_rank(excess_ret_5)
+        else:
+            # 反弹趋势确认标签 (2026-07-24 实验, 07-26 R2 扩充): 多地平线/路径
+            # beta-neutral 超额收益融合。末尾无完整未来数据的行标签为 NaN,
+            # 训练时由 _clean_label 丢弃, 不影响推理。
+            def _horizon_rank(h: int) -> torch.Tensor:
+                raw_h = ts_delay(C, -h) / C - 1
+                mkt_h = torch.nanmean(raw_h, dim=0, keepdim=True)
+                return cs_rank(raw_h - features["beta_20d"] * mkt_h - low_liq_penalty)
+
+            if self.label_mode == "rebound_avg":
+                # R1 Tier-3 REJECT (26-07-26): 目标区间 -11.5pp, RDD 3.22→2.01
+                score = (0.40 * _horizon_rank(5) + 0.35 * _horizon_rank(10)
+                         + 0.25 * _horizon_rank(20))
+            elif self.label_mode == "rebound_confirm":
+                score = torch.minimum(torch.minimum(_horizon_rank(5),
+                                                    _horizon_rank(10)),
+                                      _horizon_rank(20))
+            elif self.label_mode == "rebound_2h":
+                # R2: 砍掉噪音/前视重叠最大的 20d, 只融合 5/10 日
+                score = 0.60 * _horizon_rank(5) + 0.40 * _horizon_rank(10)
+            elif self.label_mode == "rebound_path":
+                # R2: 路径均值标签 — 未来 10 日每日累计收益的均值,
+                # 奖励持续走强、惩罚冲高回落 (终点相同时早涨优于晚涨)。
+                # 用 stack+mean (非 nanmean) 使任一未来日缺失即 NaN。
+                path = torch.stack([ts_delay(C, -k) / C - 1
+                                    for k in range(1, 11)], dim=0).mean(dim=0)
+                mkt_path = torch.nanmean(path, dim=0, keepdim=True)
+                score = (path - features["beta_20d"] * mkt_path
+                         - low_liq_penalty)
+            elif self.label_mode in ("vol_scaled", "fwd_sharpe",
+                                     "vol_sqrt", "vol_blend"):
+                # R3 (2026-07-28): 波动率缩放标签族 — 不改"看多远"(仍 5 日,
+                # 无额外 NaN 损失), 改"奖励什么风险形态":
+                # - vol_scaled: 除以过去 20 日波动率 (满缩放 p=1)。Tier-3:
+                #   子区间首次转正(+21.9pp)但 Sharpe 1.36→0.71 腰斩, 不采纳
+                # - fwd_sharpe: 除以未来 5 日实现波动率。R3 Tier-1 HOLD 淘汰
+                # R4 半剂量变体 (保留反转 alpha 与逆风保护的中间点):
+                # - vol_sqrt:  除以 √vol (p=0.5 幂插值)
+                # - vol_blend: 0.5*rank(原始超额) + 0.5*rank(满缩放)
+                raw_ret_5 = ts_delay(C, -self.label_horizon) / C - 1
+                mkt_ret_5 = torch.nanmean(raw_ret_5, dim=0, keepdim=True)
+                ex5 = (raw_ret_5 - features["beta_20d"] * mkt_ret_5
+                       - low_liq_penalty)
+                if self.label_mode == "vol_scaled":
+                    score = ex5 / (features["volatility_20d"] + 1e-4)
+                elif self.label_mode == "vol_sqrt":
+                    score = ex5 / (features["volatility_20d"] + 1e-4) ** 0.5
+                elif self.label_mode == "vol_blend":
+                    scaled = ex5 / (features["volatility_20d"] + 1e-4)
+                    score = 0.5 * cs_rank(ex5) + 0.5 * cs_rank(scaled)
+                else:
+                    fwd = torch.stack([ts_delay(ret_1, -k)
+                                       for k in range(1, 6)], dim=0)
+                    vol = fwd.std(dim=0)  # 含 NaN 传播, 尾部 5 日自然 NaN
+                    score = ex5 / (vol + 1e-4)
+            elif self.label_mode in ("size_neutral", "vol_neutral",
+                                     "style_neutral"):
+                # R5 (2026-07-28): 标签风格中性化 — R3/R4 证据显示 vol_scaled
+                # 转正靠的是削掉标签里的风格暴露, 但除法钝器摧毁反转 alpha。
+                # 本族改用组内排名: 标签不奖励"押对风格", 只保留风格内相对
+                # 强弱, 风格暴露交给风控层 (与截面选股模型定位一致)。
+                # - size_neutral: 大/小市值组内各自 cs_rank
+                # - vol_neutral:  高/低波动组内各自 cs_rank (vol_scaled 的
+                #   外科手术版: 去掉 vol 风格赌注但不除掉 alpha)
+                # - style_neutral: size × vol 2×2 四组内各自 cs_rank
+                raw_ret_5 = ts_delay(C, -self.label_horizon) / C - 1
+                mkt_ret_5 = torch.nanmean(raw_ret_5, dim=0, keepdim=True)
+                ex5 = (raw_ret_5 - features["beta_20d"] * mkt_ret_5
+                       - low_liq_penalty)
+
+                def _group_rank(masks: list) -> torch.Tensor:
+                    """组内 cs_rank 后拼回全截面; 不属于任何组的行为 NaN。"""
+                    out = torch.full_like(ex5, float('nan'))
+                    for m in masks:
+                        r = cs_rank(torch.where(m, ex5, nan_t))
+                        out = torch.where(m & ~torch.isnan(r), r, out)
+                    return out
+
+                vol20 = features["volatility_20d"]
+                # 用 cs_rank 分组而非 nanmedian: CUDA 确定性模式下
+                # nanmedian 无确定性实现, cs_rank(argsort) 安全且等价
+                vol_rank = cs_rank(vol20)
+                hi_vol = vol_rank >= 0.5
+                lo_vol = vol_rank < 0.5  # NaN 比较为 False, 自然排除
+                big = is_large_cap.bool()
+                small = is_small_cap.bool()
+
+                if self.label_mode == "size_neutral":
+                    score = _group_rank([big, small])
+                elif self.label_mode == "vol_neutral":
+                    score = _group_rank([hi_vol, lo_vol])
+                else:
+                    score = _group_rank([big & hi_vol, big & lo_vol,
+                                         small & hi_vol, small & lo_vol])
+            else:
+                raise ValueError(f"Unknown label_mode: {self.label_mode}")
+            features["label"] = cs_rank(score)
 
         # V15.5b: Remove IC-reversed factors (2026-Q2 sign flip)
         # These factors had consistent IC historically but reversed in 2026-Q2.
@@ -696,5 +803,12 @@ class V15FactorCalculator(FactorCalculator):
         for _f in ["pool_size_x_regime", "pool_size_x_regime_change",
                     "illiquidity_20d", "mom_x_regime_align"]:
             features.pop(_f, None)
+
+        # === Dragon-Tiger Board Factors ===
+        # FAILED (exp_047): RDD 3.02→1.57. Sparse event data (99%+ zeros) →
+        # cs_rank produces constants → attention dilution. LHB data is better
+        # suited as post-prediction score adjustment, not input factor.
+        # Keeping code commented for reference:
+        # if "lhb_net_amount" in col_map: ...
 
         return features

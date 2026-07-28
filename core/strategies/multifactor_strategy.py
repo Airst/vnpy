@@ -5,15 +5,23 @@
 框架: vnpy_portfoliostrategy (StrategyTemplate)
 信号源: AlphaLab parquet 信号文件（由 mlp_signals.py 生成）
 风控集成: RiskController（组合级回撤熔断 + 波动率缩仓）
-执行特性: 日频调仓，个股止损，追踪止损，冷却期
+执行特性: 日频调仓，个股止损，追踪止损，冷却期，最小/最大持有期
 
 == 设计决策 ==
 - 信号驱动而非规则驱动: 策略本身不做选股判断，完全依赖模型信号排名
 - 分层风控: 个股级(止损/追踪止损) + 组合级(RiskController)
 - 冷却期: 个股止损后设置冷却天数，避免反复开平
-- 持仓数由 RiskController 动态决定（base=5，根据回撤/波动减少）
+- 持仓数由 RiskController 动态决定（base=5（SWA 信号下 N=5 最优，#28 修正），根据回撤/波动减少）
+- 持有期控制（信号评测矩阵结论, 2026-07-28）: alpha 在持有第 1~7 天持续兑现
+  (前 5 天 0.107%/天, 第 6~7 天 0.098%/天), 第 8~10 天钝化到 0.042%/天。
+  min_hold_days: 持有不足 N 天屏蔽信号卖出(止损/风控不受限), 避免 alpha 兑现前被洗出;
+  max_hold_days: 持满 N 天后不在当日 Top-K 则强制换仓, 仍在 Top-K 则重置计时。
+  回测验证 (2022-01~2026-07 全区间 + 2025-01~2026-07 子区间双验证):
+  min=3/max=7 两区间 Sharpe 均最优 (1.155→1.462 / 1.005→1.688), 采纳为默认;
+  设 0 可关闭回到旧行为。详见 log/holding_period_sweep.json。
 """
 import os
+from collections import deque
 from datetime import datetime
 
 from vnpy_portfoliostrategy import StrategyTemplate
@@ -42,7 +50,9 @@ class MultiFactorStrategy(StrategyTemplate):
         "capital",
         "rate",
         "sell_threshold",
-        "buy_threshold"
+        "buy_threshold",
+        "min_hold_days",
+        "max_hold_days"
     ]
 
     variables = [
@@ -61,7 +71,7 @@ class MultiFactorStrategy(StrategyTemplate):
         super().__init__(portfolio_engine, strategy_name, vt_symbols, setting)
 
         self.signal_name = setting.get("signal_name", "ashare_multi_factor")
-        self.max_holdings = int(setting.get("max_holdings", 5))
+        self.max_holdings = int(setting.get("max_holdings", 5))  # SWA 信号下 N=5 最优（#28 修正）
         self.capital = float(setting.get("capital", 1_000_000))
         self.sell_threshold = float(setting.get("sell_threshold", 1.54))
         self.buy_threshold = float(setting.get("buy_threshold", 1))
@@ -69,6 +79,19 @@ class MultiFactorStrategy(StrategyTemplate):
         self.trailing_stop_pct = float(setting.get("trailing_stop_pct", 0.15))
         self.cooldown_days = int(setting.get("cooldown_days", 3))
         self.persistence_days = int(setting.get("persistence_days", 3))
+
+        # 持有期控制 (默认 min=3/max=7, 双区间回测验证后采纳, 见文件头 docstring; 0=关闭)
+        self.min_hold_days = int(setting.get("min_hold_days", 3))
+        self.max_hold_days = int(setting.get("max_hold_days", 7))
+        self.pos_hold_days: Dict[str, int] = {}  # {vt_symbol: 已持有交易日数}
+
+        # Keltner Channel stop
+        self.kc_stop_enabled = bool(setting.get("kc_stop_enabled", False))
+        self.kc_ema_window = int(setting.get("kc_ema_window", 20))
+        self.kc_atr_window = int(setting.get("kc_atr_window", 10))
+        self.kc_multiplier = float(setting.get("kc_multiplier", 2.0))
+        self.bar_history: Dict[str, deque] = {}
+        self._kc_history_len = max(self.kc_ema_window, self.kc_atr_window) + 5
         
         self.rate = float(setting.get("rate", 0.0003))
         self.cash = self.capital
@@ -90,7 +113,25 @@ class MultiFactorStrategy(StrategyTemplate):
         self.risk_controller = RiskController(
             base_max_holdings=self.max_holdings,
             enabled=self.risk_control_enabled,
+            reduction_per_level=int(setting.get("risk_reduction_per_level", 1)),
         )
+
+        # Alpha 效能门控（实验，默认关闭）: 信号近期 IC 为负时钳制持仓数
+        # 读取 scripts/compute_ic_gate.py 生成的 ic_gate.parquet（滞后 5 日，防未来函数）
+        self.ic_gate_enabled = bool(setting.get("ic_gate_enabled", False))
+        self.ic_gate_map = {}
+        if self.ic_gate_enabled:
+            import polars as _pl
+            gate_path = self.lab_path / "signal" / "ic_gate.parquet"
+            if gate_path.exists():
+                gate_df = _pl.read_parquet(gate_path)
+                self.ic_gate_map = {
+                    row["datetime"].strftime("%Y-%m-%d") if hasattr(row["datetime"], "strftime") else str(row["datetime"]):
+                    int(row["ic_gate_holdings"]) for row in gate_df.iter_rows(named=True)
+                }
+                print(f"[MultiFactorStrategy] IC gate loaded: {len(self.ic_gate_map)} days")
+            else:
+                print(f"[MultiFactorStrategy] IC gate enabled but {gate_path} missing — ignored")
 
     def on_init(self):
         print("MultiFactorStrategy Initialized")
@@ -114,6 +155,7 @@ class MultiFactorStrategy(StrategyTemplate):
             if old_pos == 0:
                  self.pos_entry_price[trade.vt_symbol] = trade.price
                  self.pos_high_price[trade.vt_symbol] = trade.price
+                 self.pos_hold_days[trade.vt_symbol] = 0  # 新开仓, 持有期从 0 起算
             else:
                  # Standard avg price calculation: (old_price * old_vol + new_price * new_vol) / total_vol
                  # Note: self.get_pos returns volume BEFORE this trade update in some engines, 
@@ -149,6 +191,8 @@ class MultiFactorStrategy(StrategyTemplate):
                     del self.pos_high_price[trade.vt_symbol]
                 if trade.vt_symbol in self.pending_sell:
                     del self.pending_sell[trade.vt_symbol]
+                if trade.vt_symbol in self.pos_hold_days:
+                    del self.pos_hold_days[trade.vt_symbol]
         else:
             return
             
@@ -209,6 +253,39 @@ class MultiFactorStrategy(StrategyTemplate):
     def on_stop(self):
         print("MultiFactorStrategy Stopped")
 
+    def _calc_keltner_lower(self, vt_symbol: str) -> float:
+        """Compute Keltner Channel lower band from rolling bar buffer. Returns 0.0 if data is insufficient."""
+        hist = self.bar_history.get(vt_symbol)
+        if hist is None:
+            return 0.0
+        need = max(self.kc_ema_window, self.kc_atr_window + 1)
+        if len(hist) < need:
+            return 0.0
+
+        closes = [h[0] for h in hist]
+        highs = [h[1] for h in hist]
+        lows = [h[2] for h in hist]
+
+        alpha = 2.0 / (self.kc_ema_window + 1.0)
+        ema = closes[0]
+        for c in closes[1:]:
+            ema = alpha * c + (1.0 - alpha) * ema
+
+        trs = []
+        for i in range(1, len(closes)):
+            tr = max(
+                highs[i] - lows[i],
+                abs(highs[i] - closes[i - 1]),
+                abs(lows[i] - closes[i - 1]),
+            )
+            trs.append(tr)
+        atr_vals = trs[-self.kc_atr_window:]
+        if not atr_vals:
+            return 0.0
+        atr = sum(atr_vals) / len(atr_vals)
+
+        return ema - self.kc_multiplier * atr
+
     def on_bars(self, bars: Dict[str, BarData]):
         """
         Called when a new bar (e.g. daily close) is available for all subscribed symbols.
@@ -230,6 +307,14 @@ class MultiFactorStrategy(StrategyTemplate):
             if vt_symbol in self.pos_high_price:
                 if bar.high_price > self.pos_high_price[vt_symbol]:
                     self.pos_high_price[vt_symbol] = bar.high_price
+
+            # Maintain per-symbol rolling OHLC buffer for Keltner Channel
+            if self.kc_stop_enabled:
+                hist = self.bar_history.get(vt_symbol)
+                if hist is None:
+                    hist = deque(maxlen=self._kc_history_len)
+                    self.bar_history[vt_symbol] = hist
+                hist.append((bar.close_price, bar.high_price, bar.low_price))
 
         # 2. Get Scores
         scores = self.signal_data.get(date_str, {})
@@ -262,6 +347,10 @@ class MultiFactorStrategy(StrategyTemplate):
             if self.get_pos(vt_symbol) > 0:
                 held_symbols.append(vt_symbol)
 
+        # 持有期计数 (每个持有中的交易日 +1)
+        for vt_symbol in held_symbols:
+            self.pos_hold_days[vt_symbol] = self.pos_hold_days.get(vt_symbol, 0) + 1
+
         portfolio_equity = self.cash
         for vt_symbol in held_symbols:
             pos = self.get_pos(vt_symbol)
@@ -273,6 +362,12 @@ class MultiFactorStrategy(StrategyTemplate):
             current_positions=held_symbols,
             signal_scores=scores,
         )
+
+        # Alpha 效能门控: 信号近期 IC 低迷时进一步压低持仓上限
+        if self.ic_gate_enabled and self.ic_gate_map:
+            gate_h = self.ic_gate_map.get(date_str)
+            if gate_h is not None and gate_h < dynamic_max:
+                dynamic_max = gate_h
 
         # 4. Execute force sells (highest priority)
         for vt_symbol in force_sell_symbols:
@@ -323,6 +418,13 @@ class MultiFactorStrategy(StrategyTemplate):
                 self.cooldown_map[vt_symbol] = self.cooldown_days
                 stop_loss_triggered.append(vt_symbol)
 
+            elif self.kc_stop_enabled:
+                kc_lower = self._calc_keltner_lower(vt_symbol)
+                if kc_lower > 0 and price < kc_lower:
+                    print(f"{date_str} {vt_symbol} KC STOP triggered. Price: {price}, KC_lower: {kc_lower:.2f}")
+                    self.cooldown_map[vt_symbol] = self.cooldown_days
+                    stop_loss_triggered.append(vt_symbol)
+
         # 6. Rank candidates (use dynamic_max instead of self.max_holdings)
         available_symbols = list(bars.keys())
         sorted_symbols = sorted(available_symbols, key=lambda s: scores.get(s, -999), reverse=True)
@@ -336,12 +438,15 @@ class MultiFactorStrategy(StrategyTemplate):
         
         # 7. Sell logic
         held_count = len(held_symbols)
-        sell_candidates = list(set([s for s in held_symbols if s not in target_symbols] + stop_loss_triggered))
-        
+        target_set = set(target_symbols)
+
         for vt_symbol in held_symbols:
             score = scores.get(vt_symbol, 0.0)
-            
-            if score < self.sell_threshold:
+            hold_days = self.pos_hold_days.get(vt_symbol, 0)
+            # 最小持有期内屏蔽信号卖出 (alpha 兑现集中在前 5~7 天)
+            protected = hold_days < self.min_hold_days
+
+            if score < self.sell_threshold and not protected:
                 self.pending_sell[vt_symbol] = self.persistence_days
             
             if score > (self.buy_threshold + 0.5):
@@ -350,7 +455,18 @@ class MultiFactorStrategy(StrategyTemplate):
             
             is_stop_loss = vt_symbol in stop_loss_triggered
             is_persistent_sell = vt_symbol in self.pending_sell
-            should_sell = (score < self.sell_threshold) or is_persistent_sell or is_stop_loss
+
+            # 最大持有期: 持满后不在当日 Top-K 则强制换仓, 仍在 Top-K 则重置计时
+            is_time_exit = False
+            if self.max_hold_days > 0 and hold_days >= self.max_hold_days:
+                if vt_symbol in target_set:
+                    self.pos_hold_days[vt_symbol] = 0
+                else:
+                    is_time_exit = True
+
+            should_sell = ((score < self.sell_threshold and not protected)
+                           or (is_persistent_sell and not protected)
+                           or is_stop_loss or is_time_exit)
             
             if should_sell:
                 if vt_symbol not in bars:
@@ -370,8 +486,8 @@ class MultiFactorStrategy(StrategyTemplate):
                 
                 self.sell(vt_symbol, limit_price, pos)
                 
-                reason = "STOP_LOSS" if is_stop_loss else ("PERSIST" if is_persistent_sell else "SIGNAL")
-                print(f"{date_str}, {vt_symbol} Sell ({reason}), limit_price:{limit_price:.2f} (Close:{price}) score: {score}")
+                reason = "STOP_LOSS" if is_stop_loss else ("TIME_EXIT" if is_time_exit else ("PERSIST" if is_persistent_sell else "SIGNAL"))
+                print(f"{date_str}, {vt_symbol} Sell ({reason}), limit_price:{limit_price:.2f} (Close:{price}) score: {score} hold_days: {hold_days}")
 
         # 8. Buy logic (use dynamic_max)
         buy_candidates = [s for s in target_symbols if s not in held_symbols]

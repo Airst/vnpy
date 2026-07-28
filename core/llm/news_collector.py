@@ -26,7 +26,7 @@ from datetime import datetime
 from pathlib import Path
 from typing import Any, Dict, List, Optional, Tuple
 
-from core.llm.openclaw_client import OpenClawClient, _extract_json
+from core.llm.openclaw_client import OpenClawClient, parse_json_response
 from vnpy.alpha.logger import logger
 
 
@@ -242,14 +242,14 @@ class NewsCollector:
     def _parse_items(self, raw: str) -> List[Dict[str, Any]]:
         if not raw:
             return []
-        extracted = _extract_json(raw)
         try:
-            data = json.loads(extracted)
-        except json.JSONDecodeError as e:
-            logger.error(f"[NewsCollector] JSON parse failed: {e}\nraw[:500]: {raw[:500]}")
+            data = parse_json_response(raw)
+        except ValueError as e:
+            logger.error(f"[NewsCollector] JSON parse failed (after repair): {e}")
             return []
         if isinstance(data, dict) and "items" in data:
-            return data["items"]
+            items = data["items"]
+            return items if isinstance(items, list) else []
         if isinstance(data, list):
             return data
         return []

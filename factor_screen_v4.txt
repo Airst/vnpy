@@ -1,0 +1,146 @@
+[FactorScreening] Loading data (index=399303.SZ)...
+[FactorCalculator] Using device: cuda
+[GP Miner] Loaded 15 factors from core/alpha/gp_factors.json (filter=['validated'])
+[FactorCalculator] Loaded 15 GP factors (filter=['validated'])
+[AlphaEngine] Range: 2019-12-28 to 2026-07-08
+[AlphaEngine] Loaded 2146 index constituents from 399303.SZ
+[AlphaEngine] Index filter '399303.SZ' (1 indices): 1052 symbols
+[AlphaEngine] Symbols: 1052
+加载数据，扩展天数: 250
+加载每日指标数据(Daily Basic)...
+每日指标数据加载完成，维度: (1779353, 25)
+加载财务指标数据(Fina Indicator)...
+/home/airst/Workspace/vnpy/core/../core/alpha/data_loader.py:80: UserWarning: Sortedness of columns cannot be checked when 'by' groups provided
+  price_df = price_df.join_asof(
+财务指标数据加载完成，维度: (1779353, 39)
+加载股票基础信息(Stock Info)...
+股票基础信息加载完成 (含Industry)
+构建行业因子(Industry Factors)...
+行业因子构建完成
+加载概念因子数据 (Concept Embedding)...
+[ConceptEmbedding] Loading concept data...
+[ConceptEmbedding] Calculating concept factors...
+[ConceptEmbedding] Member PD Shape (Raw): (1347447, 3)
+[ConceptEmbedding] Member PD Date Sample: ['20250603', '20250701', '20250801', '20250901', '20251009']
+[ConceptEmbedding] Member PD Shape (Cleaned): (1347447, 3)
+[ConceptEmbedding] Earliest member date: 2024-12-20 00:00:00
+[ConceptEmbedding] Joining and Aggregating concept data (Chunked)...
+[ConceptEmbedding] Backfilled 50574757 rows for history (21 quarters).
+[ConceptEmbedding] Joined 24815952 rows for recent data.
+[ConceptEmbedding] Aggregating recent chunk (quarterly)...
+[ConceptEmbedding] Recent: aggregated 8 quarters
+[ConceptEmbedding] Concatenating result chunks...
+[ConceptEmbedding] Generated features for 8540607 rows.
+概念因子数据加载完成
+加载资金流向数据 (MoneyFlow Alpha)...
+资金流向数据加载完成，维度: (1779353, 88)
+加载筹码分布数据 (Cyq Perf)...
+筹码分布数据加载完成，维度: (1779353, 95)
+加载融资融券数据 (Margin Detail)...
+融资融券数据加载完成，维度: (1779353, 103)
+加载北向资金持仓数据 (HK Hold)...
+北向资金持仓数据加载完成，维度: (1779353, 105)
+[FactorScreening] Computing features...
+[DEBUG] padded_raw.shape: torch.Size([1052, 1749, 102])
+[WARNING] Cyq Perf columns not available, skipping chip distribution factors
+[V15] Adding 15 GP factors
+[FactorScreening] 134 factors loaded. Computing 8911 correlations...
+[FactorScreening] Computing IC...
+[FactorScreening] Computing correlation matrix...
+  20/134...
+  40/134...
+  60/134...
+  80/134...
+  100/134...
+  120/134...
+
+================================================================================
+因子筛选报告 (corr_threshold=0.8, ic_threshold=0.01)
+================================================================================
+总因子数: 134
+
+共线移除 (|corr| > 0.8, 保留 |IC| 更高者):
+  移除: resonance_signal               (|IC|=0.0099) ← 保留: con_mom_5d                     (|IC|=0.0099, corr=+1.000)
+  移除: turnover_regime                (|IC|=0.0252) ← 保留: amihud_regime                  (|IC|=0.0252, corr=+1.000)
+  移除: vol_regime                     (|IC|=0.0253) ← 保留: style_regime_strength          (|IC|=0.0254, corr=+1.000)
+  移除: style_regime_5                 (|IC|=0.0254) ← 保留: style_regime_strength          (|IC|=0.0254, corr=+1.000)
+  移除: style_regime_strength          (|IC|=0.0254) ← 保留: style_regime                   (|IC|=0.0254, corr=+1.000)
+  移除: style_regime                   (|IC|=0.0254) ← 保留: meta_bull_prob                 (|IC|=0.0254, corr=+1.000)
+  移除: volatility_60d                 (|IC|=0.1612) ← 保留: inv_vol_60                     (|IC|=0.1612, corr=-1.000)
+  移除: amihud_regime                  (|IC|=0.0252) ← 保留: meta_bull_prob                 (|IC|=0.0254, corr=+1.000)
+  移除: volatility_20d                 (|IC|=0.1668) ← 保留: vol_penalty                    (|IC|=0.1669, corr=-1.000)
+  移除: std_20                         (|IC|=0.1668) ← 保留: vol_penalty                    (|IC|=0.1669, corr=-1.000)
+  移除: inv_vol_20                     (|IC|=0.1668) ← 保留: vol_penalty                    (|IC|=0.1669, corr=+1.000)
+  移除: con_mom_5d                     (|IC|=0.0099) ← 保留: inter_res_bull                 (|IC|=0.0101, corr=+1.000)
+  移除: tech_reversal                  (|IC|=0.0208) ← 保留: bear_reversal                  (|IC|=0.0213, corr=+1.000)
+  移除: log_amihud_20d                 (|IC|=0.0452) ← 保留: amihud_20d                     (|IC|=0.0452, corr=+1.000)
+  移除: turnover_mean_20d              (|IC|=0.2810) ← 保留: turnover_x_bull                (|IC|=0.2825, corr=+1.000)
+  移除: pool_size_rank                 (|IC|=0.0797) ← 保留: size_ln_cap                    (|IC|=0.0797, corr=+1.000)
+  移除: inter_camel_bear               (|IC|=0.0128) ← 保留: camel_hump_score               (|IC|=0.0129, corr=+1.000)
+  移除: vol_cv_20                      (|IC|=0.0578) ← 保留: vol_stability_20               (|IC|=0.0578, corr=-1.000)
+  移除: style_regime_change            (|IC|=0.0281) ← 保留: style_regime_60                (|IC|=0.0281, corr=+1.000)
+  移除: rel_turnover_20d               (|IC|=0.2810) ← 保留: turnover_x_bull                (|IC|=0.2825, corr=+1.000)
+  移除: meta_bull_prob                 (|IC|=0.0254) ← 保留: style_regime_60                (|IC|=0.0281, corr=+1.000)
+  移除: rebound_20d                    (|IC|=0.0820) ← 保留: dist_support_20                (|IC|=0.0820, corr=+1.000)
+  移除: mom_x_regime_contrarian        (|IC|=0.0125) ← 保留: mom_x_mkt                      (|IC|=0.0125, corr=+1.000)
+  移除: mom_x_mkt                      (|IC|=0.0125) ← 保留: mom_20d                        (|IC|=0.0125, corr=+1.000)
+  移除: bollinger_position             (|IC|=0.0079) ← 保留: price_zscore_20d               (|IC|=0.0079, corr=+1.000)
+  移除: rev_5d                         (|IC|=0.0271) ← 保留: mom_5d                         (|IC|=0.0271, corr=-1.000)
+  移除: daily_range                    (|IC|=0.0975) ← 保留: klen                           (|IC|=0.0979, corr=+1.000)
+  移除: dist_support_20                (|IC|=0.0820) ← 保留: min_20                         (|IC|=0.0821, corr=-0.999)
+  移除: turnover_cv_20d                (|IC|=0.0571) ← 保留: vol_stability_20               (|IC|=0.0578, corr=-0.996)
+  移除: dragon_score                   (|IC|=0.0039) ← 保留: mom_20d                        (|IC|=0.0125, corr=+0.974)
+  移除: turnover_mean_5d               (|IC|=0.2740) ← 保留: turnover_mean_10d              (|IC|=0.2863, corr=+0.972)
+  移除: bias_20                        (|IC|=0.0101) ← 保留: vwap_dev_20                    (|IC|=0.0252, corr=+0.969)
+  移除: turnover_x_bull                (|IC|=0.2825) ← 保留: turnover_mean_10d              (|IC|=0.2863, corr=+0.965)
+  移除: gp_042                         (|IC|=0.0553) ← 保留: gp_012                         (|IC|=0.0590, corr=+0.961)
+  移除: amihud_60d                     (|IC|=0.0332) ← 保留: amihud_20d                     (|IC|=0.0452, corr=+0.959)
+  移除: liquidity_shock                (|IC|=0.0377) ← 保留: amihud_trend                   (|IC|=0.0461, corr=+0.949)
+  移除: camel_hump_score               (|IC|=0.0129) ← 保留: vwap_dev_20                    (|IC|=0.0252, corr=-0.948)
+  移除: trend_slope_20                 (|IC|=0.0170) ← 保留: trend_sharpe_20                (|IC|=0.0359, corr=+0.947)
+  移除: drawdown_20d                   (|IC|=0.0695) ← 保留: dist_pressure_20               (|IC|=0.0860, corr=-0.943)
+  移除: tech_cci_14                    (|IC|=0.0005) ← 保留: price_zscore_20d               (|IC|=0.0079, corr=+0.939)
+  移除: boll_width_20                  (|IC|=0.1355) ← 保留: vol_range_20d                  (|IC|=0.1500, corr=+0.939)
+  移除: rel_con_mom_20d                (|IC|=0.0003) ← 保留: rel_con_mom_max_20d            (|IC|=0.0179, corr=+0.933)
+  移除: amihud_20d                     (|IC|=0.0452) ← 保留: amihud_5d                      (|IC|=0.0482, corr=+0.926)
+  移除: bias_60                        (|IC|=0.0184) ← 保留: qtld_60                        (|IC|=0.0565, corr=-0.919)
+  移除: min_20                         (|IC|=0.0821) ← 保留: min_30                         (|IC|=0.0902, corr=+0.916)
+  移除: min_ret_20d                    (|IC|=0.1310) ← 保留: downside_vol_20d               (|IC|=0.1483, corr=-0.915)
+  移除: resid_vol_20d                  (|IC|=0.1546) ← 保留: vol_penalty                    (|IC|=0.1669, corr=-0.914)
+  移除: turnover_std_20d               (|IC|=0.2509) ← 保留: turnover_mean_10d              (|IC|=0.2863, corr=+0.908)
+  移除: rr_ratio_20                    (|IC|=0.0018) ← 保留: price_zscore_20d               (|IC|=0.0079, corr=-0.905)
+  移除: rsi_14                         (|IC|=0.0185) ← 保留: bear_reversal                  (|IC|=0.0213, corr=-0.903)
+  移除: mom_5d                         (|IC|=0.0271) ← 保留: bias_10                        (|IC|=0.0279, corr=+0.894)
+  移除: vol_penalty                    (|IC|=0.1669) ← 保留: atr_ratio_14                   (|IC|=0.1732, corr=-0.892)
+  移除: price_zscore_20d               (|IC|=0.0079) ← 保留: vwap_dev_20                    (|IC|=0.0252, corr=+0.880)
+  移除: qtld_60                        (|IC|=0.0565) ← 保留: dist_support_60                (|IC|=0.1036, corr=-0.876)
+  移除: trend_slope_5                  (|IC|=0.0285) ← 保留: bias_5                         (|IC|=0.0316, corr=+0.871)
+  移除: ma_bias_120                    (|IC|=0.0376) ← 保留: mom_60d                        (|IC|=0.0385, corr=+0.869)
+  移除: volatility_120d                (|IC|=0.1546) ← 保留: inv_vol_60                     (|IC|=0.1612, corr=-0.869)
+  移除: min_30                         (|IC|=0.0902) ← 保留: dist_support_60                (|IC|=0.1036, corr=-0.854)
+  移除: bear_reversal                  (|IC|=0.0213) ← 保留: rr_ratio_60                    (|IC|=0.0392, corr=+0.851)
+  移除: mom_20d                        (|IC|=0.0125) ← 保留: vol_skew_20                    (|IC|=0.0393, corr=+0.845)
+  移除: turnover_ratio_5_20            (|IC|=0.0039) ← 保留: oversold_vol_confirm           (|IC|=0.0136, corr=-0.841)
+  移除: head_lift_signal               (|IC|=0.0249) ← 保留: style_regime_60                (|IC|=0.0281, corr=+0.839)
+  移除: vwap_dev_20                    (|IC|=0.0252) ← 保留: bias_10                        (|IC|=0.0279, corr=+0.839)
+  移除: kyle_lambda_20d                (|IC|=0.0233) ← 保留: amihud_5d                      (|IC|=0.0482, corr=+0.833)
+  移除: rr_ratio_60                    (|IC|=0.0392) ← 保留: dist_support_60                (|IC|=0.1036, corr=-0.828)
+  移除: std_10                         (|IC|=0.1552) ← 保留: atr_ratio_14                   (|IC|=0.1732, corr=+0.828)
+  移除: con_mom_20d                    (|IC|=0.0373) ← 保留: con_mom_20d_max                (|IC|=0.0497, corr=+0.822)
+  移除: vol_range_20d                  (|IC|=0.1500) ← 保留: atr_ratio_14                   (|IC|=0.1732, corr=+0.820)
+  移除: bias_10                        (|IC|=0.0279) ← 保留: bias_5                         (|IC|=0.0316, corr=+0.809)
+
+低 IC 因子 (|IC| < 0.01):
+  trend_rsquare_20: |IC|=0.0015
+  vol_price_div: |IC|=0.0032
+  price_impact_asym: |IC|=0.0049
+  vol_ratio_5_20: |IC|=0.0059
+  pe_rank_change_20d: |IC|=0.0076
+  fund_turnover_growth: |IC|=0.0099
+
+================================================================================
+汇总: 建议移除 75 个因子, 保留 59 个
+
+=== 复制以下代码到 v15_factor_calculator.py 末尾(return features之前) ===
+for _f in ['amihud_20d', 'amihud_60d', 'amihud_regime', 'bear_reversal', 'bias_10', 'bias_20', 'bias_60', 'boll_width_20', 'bollinger_position', 'camel_hump_score', 'con_mom_20d', 'con_mom_5d', 'daily_range', 'dist_support_20', 'dragon_score', 'drawdown_20d', 'fund_turnover_growth', 'gp_042', 'head_lift_signal', 'inter_camel_bear', 'inv_vol_20', 'kyle_lambda_20d', 'liquidity_shock', 'log_amihud_20d', 'ma_bias_120', 'meta_bull_prob', 'min_20', 'min_30', 'min_ret_20d', 'mom_20d', 'mom_5d', 'mom_x_mkt', 'mom_x_regime_contrarian', 'pe_rank_change_20d', 'pool_size_rank', 'price_impact_asym', 'price_zscore_20d', 'qtld_60', 'rebound_20d', 'rel_con_mom_20d', 'rel_turnover_20d', 'resid_vol_20d', 'resonance_signal', 'rev_5d', 'rr_ratio_20', 'rr_ratio_60', 'rsi_14', 'std_10', 'std_20', 'style_regime', 'style_regime_5', 'style_regime_change', 'style_regime_strength', 'tech_cci_14', 'tech_reversal', 'trend_rsquare_20', 'trend_slope_20', 'trend_slope_5', 'turnover_cv_20d', 'turnover_mean_20d', 'turnover_mean_5d', 'turnover_ratio_5_20', 'turnover_regime', 'turnover_std_20d', 'turnover_x_bull', 'vol_cv_20', 'vol_penalty', 'vol_price_div', 'vol_range_20d', 'vol_ratio_5_20', 'vol_regime', 'volatility_120d', 'volatility_20d', 'volatility_60d', 'vwap_dev_20']:
+    features.pop(_f, None)

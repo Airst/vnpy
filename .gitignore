@@ -15,6 +15,7 @@
 *.wpu
 .vs
 x64
+.qoder/repowiki/
 
 # Temp
 build

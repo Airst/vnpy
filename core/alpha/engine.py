@@ -26,6 +26,7 @@ from core.alpha.factor_calculator import FactorCalculator
 from core.alpha.mlp_signals import MLPSignals
 from core.selector import FundamentalSelector
 from core.alpha.data_loader import DataLoader
+from core.alpha.ssl_embedding import attach_ssl_embeddings
 
 ALPHA_DB_PATH = "core/alpha_db"
 
@@ -123,6 +124,9 @@ class AlphaEngine:
 
         factor_df = self.factor_calculator.calculate_features(data_df)
 
+        # SSL embedding 接入（分钟数据自监督预训练，Tier-3 REPRODUCIBLE 2026-07-24）
+        factor_df = attach_ssl_embeddings(factor_df)
+
         return factor_df
 
     def analyze_factor_performance(self, factors_df: pl.DataFrame, threshold: float = 0.02) -> pl.DataFrame:
@@ -134,13 +138,15 @@ class AlphaEngine:
             threshold: (仅用于展示高亮) IC绝对值阈值
             
         Returns:
-            pl.DataFrame: 返回包含所有因子的原始DataFrame（不进行剔除，防止Look-ahead Bias）
+            (pl.DataFrame, dict): 原始因子DataFrame（不剔除，防Look-ahead Bias）+
+            factor_metrics 字典 {factor: {ic, icir, t_stat, n_periods, direction_ratio, turnover, per_window}}，
+            供 auto-research Tier-0 因子门使用。
         """
         print("=== 因子绩效分析 (Rolling Window: 200 Days) ===")
         
         if factors_df.is_empty():
             print("无因子数据可分析")
-            return factors_df
+            return factors_df, {}
             
         # 1. Deep Copy for Analysis (防止污染原始数据)
         df_analysis = factors_df.clone()
@@ -156,14 +162,14 @@ class AlphaEngine:
             ])
         else:
             print("无法计算未来收益率：缺少 'close' 或 'label' 列")
-            return factors_df
+            return factors_df, {}
         
         # 去除无效数据用于统计
         df_calc = df_calc.filter(pl.col("next_ret").is_not_null())
         
         if df_calc.is_empty():
             print("有效数据不足进行IC分析")
-            return factors_df
+            return factors_df, {}
 
         # 排除非因子列
         exclude_cols = ["datetime", "vt_symbol", "close", "open", "high", "low", "volume", "next_ret", "label"]
@@ -303,13 +309,64 @@ class AlphaEngine:
         else:
             print("No results generated.")
 
+        # --- Auto-research: factor turnover (mean day-over-day abs shift of normalized daily rank) ---
+        # Two-stage + per-factor: materialize the normalized rank and its prev-day shift as
+        # COLUMNS first (window exprs are legal in with_columns), THEN aggregate (no window
+        # nesting inside .mean()). Keeps only ~2 transient columns per factor — memory-safe.
+        # Advisory metric for the Tier-0 gate (not a pass/fail threshold, unlike IC/ICIR).
+        turnover_map = {}
+        try:
+            df_t = df_calc.with_columns(
+                (pl.col("vt_symbol").count().over("datetime")).alias("__n_day")
+            )
+            for f in factor_cols:
+                tmp = df_t.select(["datetime", "vt_symbol", f, "__n_day"]).with_columns(
+                    (pl.col(f).rank().over("datetime") / pl.col("__n_day")).alias("__rk")
+                ).with_columns(
+                    pl.col("__rk").shift(1).over("vt_symbol").alias("__rkp")
+                )
+                m = tmp.select((pl.col("__rk") - pl.col("__rkp")).abs().mean()).row(0)[0]
+                turnover_map[f] = float(m) if m is not None else 0.0
+                del tmp
+            del df_t
+        except Exception as e:
+            print(f"[Engine] Turnover computation skipped (non-fatal): {e}")
+
+        # --- Auto-research: structured factor metrics (Tier-0 gate input) ---
+        # direction_ratio reuses the per-window (ic, icir) already accumulated in `results`.
+        factor_metrics = {}
+        for f in factor_cols:
+            per_window = results.get(f, {})
+            overall_ic, overall_icir = per_window.get("Overall", (0.0, 0.0))
+            window_items = [(p, v) for p, v in per_window.items() if p != "Overall"]
+            if window_items:
+                matching = sum(
+                    1 for _, (ic, _) in window_items
+                    if ic != 0.0 and (ic > 0) == (overall_ic > 0)
+                )
+                direction_ratio = matching / len(window_items)
+            else:
+                direction_ratio = 0.0
+            factor_metrics[f] = {
+                "ic": float(overall_ic or 0.0),
+                "icir": float(overall_icir or 0.0),
+                "t_stat": float(overall_icir or 0.0),  # icir = mean/std; explicit alias for gating
+                "n_periods": len(window_items),
+                "direction_ratio": float(direction_ratio),
+                "turnover": float(turnover_map.get(f, 0.0)),
+                "per_window": {
+                    p: {"ic": float(v[0] or 0.0), "icir": float(v[1] or 0.0)}
+                    for p, v in per_window.items()
+                },
+            }
+
         # Cleanup intermediate large objects
         del df_analysis
         del df_calc
         del table_data
         del display_data
-        
-        return factors_df
+
+        return factors_df, factor_metrics
 
     def calculate_signals(self, factor_df: pl.DataFrame) -> pl.DataFrame:
         """
@@ -348,7 +405,19 @@ class AlphaEngine:
         return ashare_symbols
 
     def _get_index_constituents(self, index_code: str) -> set:
-        """获取指数历史所有成分股（使用tushare index_weight）"""
+        """获取指数成分股。优先读取本地 JSON（虚拟指数），否则调用 tushare index_weight。"""
+        import json
+        local_path = self.project_root / ALPHA_DB_PATH / "index" / f"{index_code}_constituents.json"
+        if local_path.exists():
+            try:
+                with open(local_path, "r", encoding="utf-8") as f:
+                    data = json.load(f)
+                symbols = {item["vt_symbol"] for item in data.get("constituents", [])}
+                print(f"[AlphaEngine] Loaded {len(symbols)} constituents from local: {local_path.name}")
+                return symbols
+            except Exception as e:
+                print(f"[AlphaEngine] Warning: Failed to read local constituents {local_path}: {e}")
+
         import tushare as ts
         from vnpy.trader.setting import SETTINGS
         

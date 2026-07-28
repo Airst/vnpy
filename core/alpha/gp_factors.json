@@ -1,6 +1,6 @@
 {
   "version": 2,
-  "next_id": 94,
+  "next_id": 126,
   "factors": [
     {
       "id": "gp_001",
@@ -5135,6 +5135,1671 @@
       },
       "discovered_at": "2026-07-12",
       "note": "auto-rejected: rolling IC < 0.03"
+    },
+    {
+      "id": "gp_094",
+      "expr": "ts_cov(cs_rank(ts_delta(PE, 5)), neg(V), 10)",
+      "tree": {
+        "op": "ts_cov",
+        "value": null,
+        "window": 10,
+        "children": [
+          {
+            "op": "cs_rank",
+            "value": null,
+            "window": null,
+            "children": [
+              {
+                "op": "ts_delta",
+                "value": null,
+                "window": 5,
+                "children": [
+                  {
+                    "op": "terminal",
+                    "value": "PE",
+                    "window": null,
+                    "children": []
+                  }
+                ]
+              }
+            ]
+          },
+          {
+            "op": "neg",
+            "value": null,
+            "window": null,
+            "children": [
+              {
+                "op": "terminal",
+                "value": "V",
+                "window": null,
+                "children": []
+              }
+            ]
+          }
+        ]
+      },
+      "status": "rejected",
+      "mining_metrics": {
+        "ic": 0.04271029680967331,
+        "icir": 0.5983741485597539,
+        "turnover": 0.6630391903548801
+      },
+      "discovered_at": "2026-07-14",
+      "note": "auto-validated: rolling IC >= 0.03; V15.12 failed: 48 factors crashed Sharpe 1.31→0.49, attention dilution (principle #16)"
+    },
+    {
+      "id": "gp_095",
+      "expr": "ts_corr(mul(L, TR), cs_zscore(SSM), 5)",
+      "tree": {
+        "op": "ts_corr",
+        "value": null,
+        "window": 5,
+        "children": [
+          {
+            "op": "mul",
+            "value": null,
+            "window": null,
+            "children": [
+              {
+                "op": "terminal",
+                "value": "L",
+                "window": null,
+                "children": []
+              },
+              {
+                "op": "terminal",
+                "value": "TR",
+                "window": null,
+                "children": []
+              }
+            ]
+          },
+          {
+            "op": "cs_zscore",
+            "value": null,
+            "window": null,
+            "children": [
+              {
+                "op": "terminal",
+                "value": "SSM",
+                "window": null,
+                "children": []
+              }
+            ]
+          }
+        ]
+      },
+      "status": "rejected",
+      "mining_metrics": {
+        "ic": -0.04460412636399269,
+        "icir": -0.8149358501358859,
+        "turnover": 0.8534267857595828
+      },
+      "discovered_at": "2026-07-14",
+      "note": "auto-validated: rolling IC >= 0.03; V15.12 failed: 48 factors crashed Sharpe 1.31→0.49, attention dilution (principle #16)"
+    },
+    {
+      "id": "gp_096",
+      "expr": "ts_corr(mul(C, TR), cs_zscore(SE), 5)",
+      "tree": {
+        "op": "ts_corr",
+        "value": null,
+        "window": 5,
+        "children": [
+          {
+            "op": "mul",
+            "value": null,
+            "window": null,
+            "children": [
+              {
+                "op": "terminal",
+                "value": "C",
+                "window": null,
+                "children": []
+              },
+              {
+                "op": "terminal",
+                "value": "TR",
+                "window": null,
+                "children": []
+              }
+            ]
+          },
+          {
+            "op": "cs_zscore",
+            "value": null,
+            "window": null,
+            "children": [
+              {
+                "op": "terminal",
+                "value": "SE",
+                "window": null,
+                "children": []
+              }
+            ]
+          }
+        ]
+      },
+      "status": "rejected",
+      "mining_metrics": {
+        "ic": -0.04716106504201889,
+        "icir": -0.7257701430222776,
+        "turnover": 0.831512994875326
+      },
+      "discovered_at": "2026-07-14",
+      "note": "auto-rejected: rolling IC < 0.03"
+    },
+    {
+      "id": "gp_097",
+      "expr": "ts_cov(neg(TR), cs_rank(ts_delta(PB, 3)), 5)",
+      "tree": {
+        "op": "ts_cov",
+        "value": null,
+        "window": 5,
+        "children": [
+          {
+            "op": "neg",
+            "value": null,
+            "window": null,
+            "children": [
+              {
+                "op": "terminal",
+                "value": "TR",
+                "window": null,
+                "children": []
+              }
+            ]
+          },
+          {
+            "op": "cs_rank",
+            "value": null,
+            "window": null,
+            "children": [
+              {
+                "op": "ts_delta",
+                "value": null,
+                "window": 3,
+                "children": [
+                  {
+                    "op": "terminal",
+                    "value": "PB",
+                    "window": null,
+                    "children": []
+                  }
+                ]
+              }
+            ]
+          }
+        ]
+      },
+      "status": "rejected",
+      "mining_metrics": {
+        "ic": 0.05133333057165146,
+        "icir": 0.8143221282915758,
+        "turnover": 0.8414182325233767
+      },
+      "discovered_at": "2026-07-14",
+      "note": "auto-validated: rolling IC >= 0.03; V15.12 failed: 48 factors crashed Sharpe 1.31→0.49, attention dilution (principle #16)"
+    },
+    {
+      "id": "gp_098",
+      "expr": "ts_cov(mul(H, L), cs_rank(BMD), 5)",
+      "tree": {
+        "op": "ts_cov",
+        "value": null,
+        "window": 5,
+        "children": [
+          {
+            "op": "mul",
+            "value": null,
+            "window": null,
+            "children": [
+              {
+                "op": "terminal",
+                "value": "H",
+                "window": null,
+                "children": []
+              },
+              {
+                "op": "terminal",
+                "value": "L",
+                "window": null,
+                "children": []
+              }
+            ]
+          },
+          {
+            "op": "cs_rank",
+            "value": null,
+            "window": null,
+            "children": [
+              {
+                "op": "terminal",
+                "value": "BMD",
+                "window": null,
+                "children": []
+              }
+            ]
+          }
+        ]
+      },
+      "status": "rejected",
+      "mining_metrics": {
+        "ic": -0.039163436740636826,
+        "icir": -0.5892596097917154,
+        "turnover": 0.6612513957037316
+      },
+      "discovered_at": "2026-07-14",
+      "note": "auto-validated: rolling IC >= 0.03; V15.12 failed: 48 factors crashed Sharpe 1.31→0.49, attention dilution (principle #16)"
+    },
+    {
+      "id": "gp_099",
+      "expr": "ts_corr(mul(O, TR), cs_zscore(BE), 5)",
+      "tree": {
+        "op": "ts_corr",
+        "value": null,
+        "window": 5,
+        "children": [
+          {
+            "op": "mul",
+            "value": null,
+            "window": null,
+            "children": [
+              {
+                "op": "terminal",
+                "value": "O",
+                "window": null,
+                "children": []
+              },
+              {
+                "op": "terminal",
+                "value": "TR",
+                "window": null,
+                "children": []
+              }
+            ]
+          },
+          {
+            "op": "cs_zscore",
+            "value": null,
+            "window": null,
+            "children": [
+              {
+                "op": "terminal",
+                "value": "BE",
+                "window": null,
+                "children": []
+              }
+            ]
+          }
+        ]
+      },
+      "status": "rejected",
+      "mining_metrics": {
+        "ic": -0.043014541268348694,
+        "icir": -0.638667681030259,
+        "turnover": 0.8308273653262753
+      },
+      "discovered_at": "2026-07-14",
+      "note": "auto-validated: rolling IC >= 0.03; V15.12 failed: 48 factors crashed Sharpe 1.31→0.49, attention dilution (principle #16)"
+    },
+    {
+      "id": "gp_100",
+      "expr": "ts_cov(cs_rank(ts_delta(CMV, 5)), neg(TR), 10)",
+      "tree": {
+        "op": "ts_cov",
+        "value": null,
+        "window": 10,
+        "children": [
+          {
+            "op": "cs_rank",
+            "value": null,
+            "window": null,
+            "children": [
+              {
+                "op": "ts_delta",
+                "value": null,
+                "window": 5,
+                "children": [
+                  {
+                    "op": "terminal",
+                    "value": "CMV",
+                    "window": null,
+                    "children": []
+                  }
+                ]
+              }
+            ]
+          },
+          {
+            "op": "neg",
+            "value": null,
+            "window": null,
+            "children": [
+              {
+                "op": "terminal",
+                "value": "TR",
+                "window": null,
+                "children": []
+              }
+            ]
+          }
+        ]
+      },
+      "status": "rejected",
+      "mining_metrics": {
+        "ic": 0.0590277798473835,
+        "icir": 0.7253976672661522,
+        "turnover": 0.7211618113722257
+      },
+      "discovered_at": "2026-07-14",
+      "note": "auto-validated: rolling IC >= 0.03; V15.12 failed: 48 factors crashed Sharpe 1.31→0.49, attention dilution (principle #16)"
+    },
+    {
+      "id": "gp_101",
+      "expr": "ts_corr(mul(C, V), cs_zscore(SE), 10)",
+      "tree": {
+        "op": "ts_corr",
+        "value": null,
+        "window": 10,
+        "children": [
+          {
+            "op": "mul",
+            "value": null,
+            "window": null,
+            "children": [
+              {
+                "op": "terminal",
+                "value": "C",
+                "window": null,
+                "children": []
+              },
+              {
+                "op": "terminal",
+                "value": "V",
+                "window": null,
+                "children": []
+              }
+            ]
+          },
+          {
+            "op": "cs_zscore",
+            "value": null,
+            "window": null,
+            "children": [
+              {
+                "op": "terminal",
+                "value": "SE",
+                "window": null,
+                "children": []
+              }
+            ]
+          }
+        ]
+      },
+      "status": "rejected",
+      "mining_metrics": {
+        "ic": -0.05410417914390564,
+        "icir": -0.6821102032198959,
+        "turnover": 0.6462538912844114
+      },
+      "discovered_at": "2026-07-14",
+      "note": "auto-validated: rolling IC >= 0.03; V15.12 failed: 48 factors crashed Sharpe 1.31→0.49, attention dilution (principle #16)"
+    },
+    {
+      "id": "gp_102",
+      "expr": "ts_corr(mul(O, C), cs_zscore(BSM), 5)",
+      "tree": {
+        "op": "ts_corr",
+        "value": null,
+        "window": 5,
+        "children": [
+          {
+            "op": "mul",
+            "value": null,
+            "window": null,
+            "children": [
+              {
+                "op": "terminal",
+                "value": "O",
+                "window": null,
+                "children": []
+              },
+              {
+                "op": "terminal",
+                "value": "C",
+                "window": null,
+                "children": []
+              }
+            ]
+          },
+          {
+            "op": "cs_zscore",
+            "value": null,
+            "window": null,
+            "children": [
+              {
+                "op": "terminal",
+                "value": "BSM",
+                "window": null,
+                "children": []
+              }
+            ]
+          }
+        ]
+      },
+      "status": "rejected",
+      "mining_metrics": {
+        "ic": -0.037454403936862946,
+        "icir": -0.6726728222965495,
+        "turnover": 0.8661184748256266
+      },
+      "discovered_at": "2026-07-14",
+      "note": "auto-validated: rolling IC >= 0.03; V15.12 failed: 48 factors crashed Sharpe 1.31→0.49, attention dilution (principle #16)"
+    },
+    {
+      "id": "gp_103",
+      "expr": "ts_cov(neg(C), cs_rank(ts_delta(CMV, 3)), 5)",
+      "tree": {
+        "op": "ts_cov",
+        "value": null,
+        "window": 5,
+        "children": [
+          {
+            "op": "neg",
+            "value": null,
+            "window": null,
+            "children": [
+              {
+                "op": "terminal",
+                "value": "C",
+                "window": null,
+                "children": []
+              }
+            ]
+          },
+          {
+            "op": "cs_rank",
+            "value": null,
+            "window": null,
+            "children": [
+              {
+                "op": "ts_delta",
+                "value": null,
+                "window": 3,
+                "children": [
+                  {
+                    "op": "terminal",
+                    "value": "CMV",
+                    "window": null,
+                    "children": []
+                  }
+                ]
+              }
+            ]
+          }
+        ]
+      },
+      "status": "rejected",
+      "mining_metrics": {
+        "ic": 0.03620896488428116,
+        "icir": 0.40326721077037087,
+        "turnover": 0.8964714273525707
+      },
+      "discovered_at": "2026-07-14",
+      "note": "auto-rejected: rolling IC < 0.03"
+    },
+    {
+      "id": "gp_104",
+      "expr": "ts_corr(mul(H, V), cs_zscore(BE), 10)",
+      "tree": {
+        "op": "ts_corr",
+        "value": null,
+        "window": 10,
+        "children": [
+          {
+            "op": "mul",
+            "value": null,
+            "window": null,
+            "children": [
+              {
+                "op": "terminal",
+                "value": "H",
+                "window": null,
+                "children": []
+              },
+              {
+                "op": "terminal",
+                "value": "V",
+                "window": null,
+                "children": []
+              }
+            ]
+          },
+          {
+            "op": "cs_zscore",
+            "value": null,
+            "window": null,
+            "children": [
+              {
+                "op": "terminal",
+                "value": "BE",
+                "window": null,
+                "children": []
+              }
+            ]
+          }
+        ]
+      },
+      "status": "rejected",
+      "mining_metrics": {
+        "ic": -0.04942753165960312,
+        "icir": -0.6264229470407833,
+        "turnover": 0.6438180009961295
+      },
+      "discovered_at": "2026-07-14",
+      "note": "auto-rejected: rolling IC < 0.03"
+    },
+    {
+      "id": "gp_105",
+      "expr": "ts_corr(mul(L, TR), cs_zscore(SSM), 10)",
+      "tree": {
+        "op": "ts_corr",
+        "value": null,
+        "window": 10,
+        "children": [
+          {
+            "op": "mul",
+            "value": null,
+            "window": null,
+            "children": [
+              {
+                "op": "terminal",
+                "value": "L",
+                "window": null,
+                "children": []
+              },
+              {
+                "op": "terminal",
+                "value": "TR",
+                "window": null,
+                "children": []
+              }
+            ]
+          },
+          {
+            "op": "cs_zscore",
+            "value": null,
+            "window": null,
+            "children": [
+              {
+                "op": "terminal",
+                "value": "SSM",
+                "window": null,
+                "children": []
+              }
+            ]
+          }
+        ]
+      },
+      "status": "rejected",
+      "mining_metrics": {
+        "ic": -0.05079176276922226,
+        "icir": -0.8395976541196969,
+        "turnover": 0.687759679894498
+      },
+      "discovered_at": "2026-07-14",
+      "note": "auto-validated: rolling IC >= 0.03; V15.12 failed: 48 factors crashed Sharpe 1.31→0.49, attention dilution (principle #16)"
+    },
+    {
+      "id": "gp_106",
+      "expr": "ts_cov(cs_rank(ts_delta(MV, 3)), sub(BE, SE), 5)",
+      "tree": {
+        "op": "ts_cov",
+        "value": null,
+        "window": 5,
+        "children": [
+          {
+            "op": "cs_rank",
+            "value": null,
+            "window": null,
+            "children": [
+              {
+                "op": "ts_delta",
+                "value": null,
+                "window": 3,
+                "children": [
+                  {
+                    "op": "terminal",
+                    "value": "MV",
+                    "window": null,
+                    "children": []
+                  }
+                ]
+              }
+            ]
+          },
+          {
+            "op": "sub",
+            "value": null,
+            "window": null,
+            "children": [
+              {
+                "op": "terminal",
+                "value": "BE",
+                "window": null,
+                "children": []
+              },
+              {
+                "op": "terminal",
+                "value": "SE",
+                "window": null,
+                "children": []
+              }
+            ]
+          }
+        ]
+      },
+      "status": "rejected",
+      "mining_metrics": {
+        "ic": -0.023013878613710403,
+        "icir": -0.3972614131044112,
+        "turnover": 0.667523568320033
+      },
+      "discovered_at": "2026-07-14",
+      "note": "auto-rejected: rolling IC < 0.03"
+    },
+    {
+      "id": "gp_107",
+      "expr": "ts_corr(add(SL, SE), cs_rank(CMV), 5)",
+      "tree": {
+        "op": "ts_corr",
+        "value": null,
+        "window": 5,
+        "children": [
+          {
+            "op": "add",
+            "value": null,
+            "window": null,
+            "children": [
+              {
+                "op": "terminal",
+                "value": "SL",
+                "window": null,
+                "children": []
+              },
+              {
+                "op": "terminal",
+                "value": "SE",
+                "window": null,
+                "children": []
+              }
+            ]
+          },
+          {
+            "op": "cs_rank",
+            "value": null,
+            "window": null,
+            "children": [
+              {
+                "op": "terminal",
+                "value": "CMV",
+                "window": null,
+                "children": []
+              }
+            ]
+          }
+        ]
+      },
+      "status": "rejected",
+      "mining_metrics": {
+        "ic": -0.03378339856863022,
+        "icir": -0.6251537917225524,
+        "turnover": 0.8649409339955852
+      },
+      "discovered_at": "2026-07-14",
+      "note": "auto-validated: rolling IC >= 0.03; V15.12 failed: 48 factors crashed Sharpe 1.31→0.49, attention dilution (principle #16)"
+    },
+    {
+      "id": "gp_108",
+      "expr": "ts_corr(mul(O, H), cs_zscore(BMD), 5)",
+      "tree": {
+        "op": "ts_corr",
+        "value": null,
+        "window": 5,
+        "children": [
+          {
+            "op": "mul",
+            "value": null,
+            "window": null,
+            "children": [
+              {
+                "op": "terminal",
+                "value": "O",
+                "window": null,
+                "children": []
+              },
+              {
+                "op": "terminal",
+                "value": "H",
+                "window": null,
+                "children": []
+              }
+            ]
+          },
+          {
+            "op": "cs_zscore",
+            "value": null,
+            "window": null,
+            "children": [
+              {
+                "op": "terminal",
+                "value": "BMD",
+                "window": null,
+                "children": []
+              }
+            ]
+          }
+        ]
+      },
+      "status": "rejected",
+      "mining_metrics": {
+        "ic": -0.043102510273456573,
+        "icir": -0.7068159593077548,
+        "turnover": 0.8635152315321977
+      },
+      "discovered_at": "2026-07-14",
+      "note": "auto-validated: rolling IC >= 0.03; V15.12 failed: 48 factors crashed Sharpe 1.31→0.49, attention dilution (principle #16)"
+    },
+    {
+      "id": "gp_109",
+      "expr": "ts_corr(sub(H, L), cs_zscore(BSM), 10)",
+      "tree": {
+        "op": "ts_corr",
+        "value": null,
+        "window": 10,
+        "children": [
+          {
+            "op": "sub",
+            "value": null,
+            "window": null,
+            "children": [
+              {
+                "op": "terminal",
+                "value": "H",
+                "window": null,
+                "children": []
+              },
+              {
+                "op": "terminal",
+                "value": "L",
+                "window": null,
+                "children": []
+              }
+            ]
+          },
+          {
+            "op": "cs_zscore",
+            "value": null,
+            "window": null,
+            "children": [
+              {
+                "op": "terminal",
+                "value": "BSM",
+                "window": null,
+                "children": []
+              }
+            ]
+          }
+        ]
+      },
+      "status": "rejected",
+      "mining_metrics": {
+        "ic": -0.03017067164182663,
+        "icir": -0.4951554649712782,
+        "turnover": 0.7250783667854517
+      },
+      "discovered_at": "2026-07-14",
+      "note": "auto-rejected: rolling IC < 0.03"
+    },
+    {
+      "id": "gp_110",
+      "expr": "ts_corr(mul(C, TR), cs_rank(ts_delta(PS, 5)), 10)",
+      "tree": {
+        "op": "ts_corr",
+        "value": null,
+        "window": 10,
+        "children": [
+          {
+            "op": "mul",
+            "value": null,
+            "window": null,
+            "children": [
+              {
+                "op": "terminal",
+                "value": "C",
+                "window": null,
+                "children": []
+              },
+              {
+                "op": "terminal",
+                "value": "TR",
+                "window": null,
+                "children": []
+              }
+            ]
+          },
+          {
+            "op": "cs_rank",
+            "value": null,
+            "window": null,
+            "children": [
+              {
+                "op": "ts_delta",
+                "value": null,
+                "window": 5,
+                "children": [
+                  {
+                    "op": "terminal",
+                    "value": "PS",
+                    "window": null,
+                    "children": []
+                  }
+                ]
+              }
+            ]
+          }
+        ]
+      },
+      "status": "rejected",
+      "mining_metrics": {
+        "ic": -0.034820619970560074,
+        "icir": -0.5282078895392278,
+        "turnover": 0.7837833025627468
+      },
+      "discovered_at": "2026-07-14",
+      "note": "auto-validated: rolling IC >= 0.03; V15.12 failed: 48 factors crashed Sharpe 1.31→0.49, attention dilution (principle #16)"
+    },
+    {
+      "id": "gp_111",
+      "expr": "ts_corr(mul(L, V), cs_zscore(BE), 10)",
+      "tree": {
+        "op": "ts_corr",
+        "value": null,
+        "window": 10,
+        "children": [
+          {
+            "op": "mul",
+            "value": null,
+            "window": null,
+            "children": [
+              {
+                "op": "terminal",
+                "value": "L",
+                "window": null,
+                "children": []
+              },
+              {
+                "op": "terminal",
+                "value": "V",
+                "window": null,
+                "children": []
+              }
+            ]
+          },
+          {
+            "op": "cs_zscore",
+            "value": null,
+            "window": null,
+            "children": [
+              {
+                "op": "terminal",
+                "value": "BE",
+                "window": null,
+                "children": []
+              }
+            ]
+          }
+        ]
+      },
+      "status": "rejected",
+      "mining_metrics": {
+        "ic": -0.0489499531686306,
+        "icir": -0.6174413425177961,
+        "turnover": 0.6462453829562023
+      },
+      "discovered_at": "2026-07-14",
+      "note": "auto-rejected: rolling IC < 0.03"
+    },
+    {
+      "id": "gp_112",
+      "expr": "ts_corr(mul(O, V), cs_zscore(SMD), 5)",
+      "tree": {
+        "op": "ts_corr",
+        "value": null,
+        "window": 5,
+        "children": [
+          {
+            "op": "mul",
+            "value": null,
+            "window": null,
+            "children": [
+              {
+                "op": "terminal",
+                "value": "O",
+                "window": null,
+                "children": []
+              },
+              {
+                "op": "terminal",
+                "value": "V",
+                "window": null,
+                "children": []
+              }
+            ]
+          },
+          {
+            "op": "cs_zscore",
+            "value": null,
+            "window": null,
+            "children": [
+              {
+                "op": "terminal",
+                "value": "SMD",
+                "window": null,
+                "children": []
+              }
+            ]
+          }
+        ]
+      },
+      "status": "rejected",
+      "mining_metrics": {
+        "ic": -0.052470553666353226,
+        "icir": -0.7847999226463254,
+        "turnover": 0.838639339236636
+      },
+      "discovered_at": "2026-07-14",
+      "note": "auto-validated: rolling IC >= 0.03; V15.12 failed: 48 factors crashed Sharpe 1.31→0.49, attention dilution (principle #16)"
+    },
+    {
+      "id": "gp_113",
+      "expr": "ts_cov(sub(PE, PB), neg(V), 10)",
+      "tree": {
+        "op": "ts_cov",
+        "value": null,
+        "window": 10,
+        "children": [
+          {
+            "op": "sub",
+            "value": null,
+            "window": null,
+            "children": [
+              {
+                "op": "terminal",
+                "value": "PE",
+                "window": null,
+                "children": []
+              },
+              {
+                "op": "terminal",
+                "value": "PB",
+                "window": null,
+                "children": []
+              }
+            ]
+          },
+          {
+            "op": "neg",
+            "value": null,
+            "window": null,
+            "children": [
+              {
+                "op": "terminal",
+                "value": "V",
+                "window": null,
+                "children": []
+              }
+            ]
+          }
+        ]
+      },
+      "status": "rejected",
+      "mining_metrics": {
+        "ic": 0.04413218796253204,
+        "icir": 0.5392943117297505,
+        "turnover": 0.5759732130019868
+      },
+      "discovered_at": "2026-07-14",
+      "note": "auto-validated: rolling IC >= 0.03; V15.12 failed: 48 factors crashed Sharpe 1.31→0.49, attention dilution (principle #16)"
+    },
+    {
+      "id": "gp_114",
+      "expr": "ts_corr(mul(O, C), cs_zscore(BSM), 10)",
+      "tree": {
+        "op": "ts_corr",
+        "value": null,
+        "window": 10,
+        "children": [
+          {
+            "op": "mul",
+            "value": null,
+            "window": null,
+            "children": [
+              {
+                "op": "terminal",
+                "value": "O",
+                "window": null,
+                "children": []
+              },
+              {
+                "op": "terminal",
+                "value": "C",
+                "window": null,
+                "children": []
+              }
+            ]
+          },
+          {
+            "op": "cs_zscore",
+            "value": null,
+            "window": null,
+            "children": [
+              {
+                "op": "terminal",
+                "value": "BSM",
+                "window": null,
+                "children": []
+              }
+            ]
+          }
+        ]
+      },
+      "status": "rejected",
+      "mining_metrics": {
+        "ic": -0.0455314926803112,
+        "icir": -0.618389797914203,
+        "turnover": 0.7546831285076906
+      },
+      "discovered_at": "2026-07-14",
+      "note": "auto-validated: rolling IC >= 0.03; V15.12 failed: 48 factors crashed Sharpe 1.31→0.49, attention dilution (principle #16)"
+    },
+    {
+      "id": "gp_115",
+      "expr": "ts_corr(sub(H, CMX), cs_zscore(SSM), 10)",
+      "tree": {
+        "op": "ts_corr",
+        "value": null,
+        "window": 10,
+        "children": [
+          {
+            "op": "sub",
+            "value": null,
+            "window": null,
+            "children": [
+              {
+                "op": "terminal",
+                "value": "H",
+                "window": null,
+                "children": []
+              },
+              {
+                "op": "terminal",
+                "value": "CMX",
+                "window": null,
+                "children": []
+              }
+            ]
+          },
+          {
+            "op": "cs_zscore",
+            "value": null,
+            "window": null,
+            "children": [
+              {
+                "op": "terminal",
+                "value": "SSM",
+                "window": null,
+                "children": []
+              }
+            ]
+          }
+        ]
+      },
+      "status": "rejected",
+      "mining_metrics": {
+        "ic": -0.03001784160733223,
+        "icir": -0.46113711030218574,
+        "turnover": 0.7209497395379
+      },
+      "discovered_at": "2026-07-14",
+      "note": "auto-validated: rolling IC >= 0.03; V15.12 failed: 48 factors crashed Sharpe 1.31→0.49, attention dilution (principle #16)"
+    },
+    {
+      "id": "gp_116",
+      "expr": "ts_cov(cs_rank(ts_delta(PS, 5)), sub(BE, SE), 10)",
+      "tree": {
+        "op": "ts_cov",
+        "value": null,
+        "window": 10,
+        "children": [
+          {
+            "op": "cs_rank",
+            "value": null,
+            "window": null,
+            "children": [
+              {
+                "op": "ts_delta",
+                "value": null,
+                "window": 5,
+                "children": [
+                  {
+                    "op": "terminal",
+                    "value": "PS",
+                    "window": null,
+                    "children": []
+                  }
+                ]
+              }
+            ]
+          },
+          {
+            "op": "sub",
+            "value": null,
+            "window": null,
+            "children": [
+              {
+                "op": "terminal",
+                "value": "BE",
+                "window": null,
+                "children": []
+              },
+              {
+                "op": "terminal",
+                "value": "SE",
+                "window": null,
+                "children": []
+              }
+            ]
+          }
+        ]
+      },
+      "status": "rejected",
+      "mining_metrics": {
+        "ic": -0.030077502131462097,
+        "icir": -0.5369995091170654,
+        "turnover": 0.48761422748664146
+      },
+      "discovered_at": "2026-07-14",
+      "note": "auto-rejected: rolling IC < 0.03"
+    },
+    {
+      "id": "gp_117",
+      "expr": "ts_corr(mul(H, L), cs_zscore(SMD), 5)",
+      "tree": {
+        "op": "ts_corr",
+        "value": null,
+        "window": 5,
+        "children": [
+          {
+            "op": "mul",
+            "value": null,
+            "window": null,
+            "children": [
+              {
+                "op": "terminal",
+                "value": "H",
+                "window": null,
+                "children": []
+              },
+              {
+                "op": "terminal",
+                "value": "L",
+                "window": null,
+                "children": []
+              }
+            ]
+          },
+          {
+            "op": "cs_zscore",
+            "value": null,
+            "window": null,
+            "children": [
+              {
+                "op": "terminal",
+                "value": "SMD",
+                "window": null,
+                "children": []
+              }
+            ]
+          }
+        ]
+      },
+      "status": "rejected",
+      "mining_metrics": {
+        "ic": -0.039536986500024796,
+        "icir": -0.6254902593695036,
+        "turnover": 0.8617717617961396
+      },
+      "discovered_at": "2026-07-14",
+      "note": "auto-validated: rolling IC >= 0.03; V15.12 failed: 48 factors crashed Sharpe 1.31→0.49, attention dilution (principle #16)"
+    },
+    {
+      "id": "gp_118",
+      "expr": "ts_corr(mul(O, V), cs_zscore(BL), 10)",
+      "tree": {
+        "op": "ts_corr",
+        "value": null,
+        "window": 10,
+        "children": [
+          {
+            "op": "mul",
+            "value": null,
+            "window": null,
+            "children": [
+              {
+                "op": "terminal",
+                "value": "O",
+                "window": null,
+                "children": []
+              },
+              {
+                "op": "terminal",
+                "value": "V",
+                "window": null,
+                "children": []
+              }
+            ]
+          },
+          {
+            "op": "cs_zscore",
+            "value": null,
+            "window": null,
+            "children": [
+              {
+                "op": "terminal",
+                "value": "BL",
+                "window": null,
+                "children": []
+              }
+            ]
+          }
+        ]
+      },
+      "status": "rejected",
+      "mining_metrics": {
+        "ic": -0.061818283051252365,
+        "icir": -0.7685814876481937,
+        "turnover": 0.6735114560442944
+      },
+      "discovered_at": "2026-07-14",
+      "note": "auto-validated: rolling IC >= 0.03; V15.12 failed: 48 factors crashed Sharpe 1.31→0.49, attention dilution (principle #16)"
+    },
+    {
+      "id": "gp_119",
+      "expr": "ts_corr(sub(C, CM20), cs_zscore(BE), 10)",
+      "tree": {
+        "op": "ts_corr",
+        "value": null,
+        "window": 10,
+        "children": [
+          {
+            "op": "sub",
+            "value": null,
+            "window": null,
+            "children": [
+              {
+                "op": "terminal",
+                "value": "C",
+                "window": null,
+                "children": []
+              },
+              {
+                "op": "terminal",
+                "value": "CM20",
+                "window": null,
+                "children": []
+              }
+            ]
+          },
+          {
+            "op": "cs_zscore",
+            "value": null,
+            "window": null,
+            "children": [
+              {
+                "op": "terminal",
+                "value": "BE",
+                "window": null,
+                "children": []
+              }
+            ]
+          }
+        ]
+      },
+      "status": "rejected",
+      "mining_metrics": {
+        "ic": -0.03598356619477272,
+        "icir": -0.4265944899254258,
+        "turnover": 0.7252286736004495
+      },
+      "discovered_at": "2026-07-14",
+      "note": "auto-validated: rolling IC >= 0.03; V15.12 failed: 48 factors crashed Sharpe 1.31→0.49, attention dilution (principle #16)"
+    },
+    {
+      "id": "gp_120",
+      "expr": "ts_corr(mul(C, TR), cs_rank(ts_delta(PE, 5)), 5)",
+      "tree": {
+        "op": "ts_corr",
+        "value": null,
+        "window": 5,
+        "children": [
+          {
+            "op": "mul",
+            "value": null,
+            "window": null,
+            "children": [
+              {
+                "op": "terminal",
+                "value": "C",
+                "window": null,
+                "children": []
+              },
+              {
+                "op": "terminal",
+                "value": "TR",
+                "window": null,
+                "children": []
+              }
+            ]
+          },
+          {
+            "op": "cs_rank",
+            "value": null,
+            "window": null,
+            "children": [
+              {
+                "op": "ts_delta",
+                "value": null,
+                "window": 5,
+                "children": [
+                  {
+                    "op": "terminal",
+                    "value": "PE",
+                    "window": null,
+                    "children": []
+                  }
+                ]
+              }
+            ]
+          }
+        ]
+      },
+      "status": "rejected",
+      "mining_metrics": {
+        "ic": -0.024566667154431343,
+        "icir": -0.4968758914848317,
+        "turnover": 0.8985803119302493
+      },
+      "discovered_at": "2026-07-14",
+      "note": "auto-rejected: rolling IC < 0.03"
+    },
+    {
+      "id": "gp_121",
+      "expr": "ts_corr(mul(L, C), cs_zscore(SE), 10)",
+      "tree": {
+        "op": "ts_corr",
+        "value": null,
+        "window": 10,
+        "children": [
+          {
+            "op": "mul",
+            "value": null,
+            "window": null,
+            "children": [
+              {
+                "op": "terminal",
+                "value": "L",
+                "window": null,
+                "children": []
+              },
+              {
+                "op": "terminal",
+                "value": "C",
+                "window": null,
+                "children": []
+              }
+            ]
+          },
+          {
+            "op": "cs_zscore",
+            "value": null,
+            "window": null,
+            "children": [
+              {
+                "op": "terminal",
+                "value": "SE",
+                "window": null,
+                "children": []
+              }
+            ]
+          }
+        ]
+      },
+      "status": "rejected",
+      "mining_metrics": {
+        "ic": -0.04773454740643501,
+        "icir": -0.5528535403865733,
+        "turnover": 0.7390510412159836
+      },
+      "discovered_at": "2026-07-14",
+      "note": "auto-validated: rolling IC >= 0.03; V15.12 failed: 48 factors crashed Sharpe 1.31→0.49, attention dilution (principle #16)"
+    },
+    {
+      "id": "gp_122",
+      "expr": "ts_cov(cs_rank(ts_delta(CMV, 5)), neg(H), 10)",
+      "tree": {
+        "op": "ts_cov",
+        "value": null,
+        "window": 10,
+        "children": [
+          {
+            "op": "cs_rank",
+            "value": null,
+            "window": null,
+            "children": [
+              {
+                "op": "ts_delta",
+                "value": null,
+                "window": 5,
+                "children": [
+                  {
+                    "op": "terminal",
+                    "value": "CMV",
+                    "window": null,
+                    "children": []
+                  }
+                ]
+              }
+            ]
+          },
+          {
+            "op": "neg",
+            "value": null,
+            "window": null,
+            "children": [
+              {
+                "op": "terminal",
+                "value": "H",
+                "window": null,
+                "children": []
+              }
+            ]
+          }
+        ]
+      },
+      "status": "rejected",
+      "mining_metrics": {
+        "ic": 0.044828999787569046,
+        "icir": 0.5126608677148748,
+        "turnover": 0.8759711597257687
+      },
+      "discovered_at": "2026-07-14",
+      "note": "auto-rejected: rolling IC < 0.03"
+    },
+    {
+      "id": "gp_123",
+      "expr": "ts_cov(sub(H, L), cs_zscore(SSM), 5)",
+      "tree": {
+        "op": "ts_cov",
+        "value": null,
+        "window": 5,
+        "children": [
+          {
+            "op": "sub",
+            "value": null,
+            "window": null,
+            "children": [
+              {
+                "op": "terminal",
+                "value": "H",
+                "window": null,
+                "children": []
+              },
+              {
+                "op": "terminal",
+                "value": "L",
+                "window": null,
+                "children": []
+              }
+            ]
+          },
+          {
+            "op": "cs_zscore",
+            "value": null,
+            "window": null,
+            "children": [
+              {
+                "op": "terminal",
+                "value": "SSM",
+                "window": null,
+                "children": []
+              }
+            ]
+          }
+        ]
+      },
+      "status": "rejected",
+      "mining_metrics": {
+        "ic": -0.05898188054561615,
+        "icir": -0.7426562858337924,
+        "turnover": 0.6057057545971464
+      },
+      "discovered_at": "2026-07-14",
+      "note": "auto-validated: rolling IC >= 0.03; V15.12 failed: 48 factors crashed Sharpe 1.31→0.49, attention dilution (principle #16)"
+    },
+    {
+      "id": "gp_124",
+      "expr": "ts_corr(mul(TR, V), cs_zscore(BSM), 10)",
+      "tree": {
+        "op": "ts_corr",
+        "value": null,
+        "window": 10,
+        "children": [
+          {
+            "op": "mul",
+            "value": null,
+            "window": null,
+            "children": [
+              {
+                "op": "terminal",
+                "value": "TR",
+                "window": null,
+                "children": []
+              },
+              {
+                "op": "terminal",
+                "value": "V",
+                "window": null,
+                "children": []
+              }
+            ]
+          },
+          {
+            "op": "cs_zscore",
+            "value": null,
+            "window": null,
+            "children": [
+              {
+                "op": "terminal",
+                "value": "BSM",
+                "window": null,
+                "children": []
+              }
+            ]
+          }
+        ]
+      },
+      "status": "rejected",
+      "mining_metrics": {
+        "ic": -0.041247278451919556,
+        "icir": -0.6649025306405096,
+        "turnover": 0.7190295564902254
+      },
+      "discovered_at": "2026-07-14",
+      "note": "auto-validated: rolling IC >= 0.03; V15.12 failed: 48 factors crashed Sharpe 1.31→0.49, attention dilution (principle #16)"
+    },
+    {
+      "id": "gp_125",
+      "expr": "ts_corr(mul(O, L), cs_zscore(SMD), 10)",
+      "tree": {
+        "op": "ts_corr",
+        "value": null,
+        "window": 10,
+        "children": [
+          {
+            "op": "mul",
+            "value": null,
+            "window": null,
+            "children": [
+              {
+                "op": "terminal",
+                "value": "O",
+                "window": null,
+                "children": []
+              },
+              {
+                "op": "terminal",
+                "value": "L",
+                "window": null,
+                "children": []
+              }
+            ]
+          },
+          {
+            "op": "cs_zscore",
+            "value": null,
+            "window": null,
+            "children": [
+              {
+                "op": "terminal",
+                "value": "SMD",
+                "window": null,
+                "children": []
+              }
+            ]
+          }
+        ]
+      },
+      "status": "rejected",
+      "mining_metrics": {
+        "ic": -0.039752062410116196,
+        "icir": -0.5071392327759097,
+        "turnover": 0.752629365367331
+      },
+      "discovered_at": "2026-07-14",
+      "note": "auto-validated: rolling IC >= 0.03; V15.12 failed: 48 factors crashed Sharpe 1.31→0.49, attention dilution (principle #16)"
     }
   ]
 }

@@ -6,7 +6,7 @@
   1. 组合回撤（trailing peak drawdown）→ 阶梯式减仓
   2. 短期波动率飙升（20d vs 60d std）→ 额外减仓
 恢复机制: 非对称（减仓即时，恢复+1/cooldown周期）
-默认配置: base_max_holdings=5, 回撤阶梯[-15%,-20%,-25%,-30%,-35%], vol_threshold=2.0
+默认配置: base_max_holdings=5（SWA 信号下 N=5 最优，#28 修正 2026-07-18）, 回撤阶梯[-15%,-20%,-25%,-30%,-35%], vol_threshold=2.0
 
 == 设计决策 ==
 - 阶梯式减仓而非一刀切: 避免单次回撤即清仓导致错过反弹
@@ -47,9 +47,14 @@ class RiskController:
         vol_long_window: int = 60,
         recovery_cooldown_days: int = 3,
         enabled: bool = True,
+        reduction_per_level: int = 1,
     ):
         self.base_max_holdings = base_max_holdings
         self.enabled = enabled
+        # Positions cut per drawdown level breached. With base_max_holdings=10,
+        # reduction_per_level=2 restores the "full exit at -35%" capability of the
+        # default N=5 configuration (5 levels × 2 = 10).
+        self.reduction_per_level = reduction_per_level
 
         # Drawdown thresholds (must be sorted descending, i.e. least severe first)
         if drawdown_levels is None:
@@ -157,7 +162,7 @@ class RiskController:
         for level in self.drawdown_levels:
             if drawdown < level:
                 reduction += 1
-        return reduction
+        return reduction * self.reduction_per_level
 
     def _volatility_reduction(self) -> int:
         """Check if recent volatility is spiking relative to longer-term."""

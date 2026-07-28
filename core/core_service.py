@@ -3,7 +3,7 @@ import json
 import importlib
 import inspect
 from datetime import datetime, date, timedelta
-from typing import List, Dict, Type
+from typing import List, Dict, Type, Optional
 import numpy as np
 import pandas as pd
 import polars as pl
@@ -16,6 +16,7 @@ from vnpy.trader.object import OrderData, TradeData, BarData
 from vnpy.trader.utility import extract_vt_symbol
 from vnpy.alpha.lab import AlphaLab
 from core.selector import FundamentalSelector
+from core.alpha.run_manager import RunManager
 
 # Resolve project root
 PROJECT_ROOT = Path(__file__).parent.parent
@@ -148,6 +149,7 @@ class CoreService:
         self.strategies: Dict[str, Type[StrategyTemplate]] = {}
         self.selector = FundamentalSelector()
         self.lab = AlphaLab(str(ALPHA_DB_PATH))
+        self.run_manager = RunManager(str(ALPHA_DB_PATH))
         self.load_strategies()
         os.makedirs(BACKTEST_DB_PATH, exist_ok=True)
 
@@ -446,11 +448,15 @@ class CoreService:
         try:
             with open(filepath, "w", encoding="utf-8") as f:
                 json.dump(result, f, ensure_ascii=False, indent=4)
+            # 返回给调用方的结果携带文件名 (不写入 JSON 文件本身), 供 run manifest 登记回测引用
+            result["filename"] = filename
         except Exception as e:
             print(f"Failed to save backtest result: {e}")
 
         # Clean up old backtest files, keep only the latest 4 per signal_name
+        # (run manifest 引用的回测文件豁免, 不参与轮转删除)
         try:
+            protected = self.run_manager.list_referenced_backtests()
             backtest_files = [
                 f for f in os.listdir(BACKTEST_DB_PATH)
                 if f.endswith(".json") and f.startswith(signal_name + "_")
@@ -460,6 +466,8 @@ class CoreService:
                 reverse=True,
             )
             for old_file in backtest_files[4:]:
+                if old_file in protected:
+                    continue
                 os.remove(os.path.join(BACKTEST_DB_PATH, old_file))
                 print(f"Deleted old backtest: {old_file}")
         except Exception as e:
@@ -574,20 +582,118 @@ class CoreService:
         with open(filepath, "r", encoding="utf-8") as f:
             return json.load(f)
 
+    # ------------------------------------------------------------------
+    # 训练轮次 (Run) 管理
+    # ------------------------------------------------------------------
+    def list_runs(self) -> Dict:
+        """列出所有训练轮次摘要 + 当前 active run"""
+        return {
+            "runs": self.run_manager.list_runs(),
+            "active": self.run_manager.get_active(),
+        }
+
+    def get_run_detail(self, run_id: str) -> Dict:
+        """run 详情: manifest + 窗口模型清单 + 回测引用有效性"""
+        detail = self.run_manager.get_run_detail(run_id)
+        if detail is None:
+            raise FileNotFoundError(f"Run {run_id} not found")
+        # 标记回测引用文件是否仍存在
+        detail["backtests"] = [
+            {"filename": f, "exists": os.path.exists(os.path.join(BACKTEST_DB_PATH, f))}
+            for f in detail.get("backtests", [])
+        ]
+        return detail
+
+    def activate_run(self, run_id: str) -> Dict:
+        """设为生产 run (信号同步到 signal/{signal_name}.parquet)"""
+        self.run_manager.set_active(run_id)
+        return {"active": run_id}
+
+    def delete_run(self, run_id: str) -> Dict:
+        """删除 run (禁止删除 active run)"""
+        ok = self.run_manager.delete_run(run_id)
+        if not ok:
+            raise FileNotFoundError(f"Run {run_id} not found")
+        return {"deleted": run_id}
+
+    def _load_run_signal_scored(self, run_id: str) -> Optional[pl.DataFrame]:
+        """加载 run 信号并归一化出 score 列"""
+        df = self.run_manager.load_signal(run_id)
+        if df is None or df.is_empty():
+            return None
+        if "score" not in df.columns:
+            for col in ("final_signal", "total_score"):
+                if col in df.columns:
+                    df = df.with_columns(pl.col(col).alias("score"))
+                    break
+            else:
+                return None
+        return df
+
+    def get_run_signal_top(self, run_id: str, date_str: str = None, n: int = 20) -> Dict:
+        """某日 run 信号 Top-N 排名 (date 缺省/非交易日时取不晚于该日的最近信号日)"""
+        df = self._load_run_signal_scored(run_id)
+        if df is None:
+            raise FileNotFoundError(f"Run {run_id} has no signal")
+
+        dates = df["datetime"].unique().sort()
+        if date_str:
+            target = datetime.strptime(date_str, "%Y-%m-%d")
+            valid = dates.filter(dates <= target)
+            actual = valid[-1] if len(valid) else dates[0]
+        else:
+            actual = dates[-1]
+
+        day_df = df.filter(pl.col("datetime") == actual).sort("score", descending=True).head(n)
+        symbols = day_df["vt_symbol"].to_list()
+
+        # 批量补股票名称 (DB 不可用时留空)
+        names = {}
+        try:
+            from data_manager.ts_downloader.stock_info_manager import StockInfoManager
+            info_df = StockInfoManager().load_data(symbols)
+            if not info_df.empty:
+                names = dict(zip(info_df["vt_symbol"], info_df["name"]))
+        except Exception:
+            pass
+
+        return {
+            "run_id": run_id,
+            "date": actual.strftime("%Y-%m-%d"),
+            "date_range": {
+                "start": dates[0].strftime("%Y-%m-%d"),
+                "end": dates[-1].strftime("%Y-%m-%d"),
+            },
+            "items": [
+                {
+                    "rank": i + 1,
+                    "vt_symbol": row["vt_symbol"],
+                    "name": names.get(row["vt_symbol"], ""),
+                    "score": row["score"],
+                }
+                for i, row in enumerate(day_df.iter_rows(named=True))
+            ],
+        }
+
     def get_signals_data(self, 
                          signal_name: str, 
                          start_date: datetime, 
                          end_date: datetime, 
-                         vt_symbols: List[str] = None) -> Dict:
+                         vt_symbols: List[str] = None,
+                         run_id: str = None) -> Dict:
         """
         Get signal data for plotting.
         If vt_symbols is not provided, returns top 5 stocks by signal strength on the last day.
+        run_id 提供时从该 run 的 signal.parquet 读取 (否则读生产信号目录)。
         """
         try:
-            df = self.lab.load_signal(signal_name)
+            if run_id:
+                df = self.run_manager.load_signal(run_id)
+            else:
+                df = self.lab.load_signal(signal_name)
             
             if df is None or df.is_empty():
-                return {"error": f"No signal data found for {signal_name}"}
+                return {"error": f"No signal data found for {run_id or signal_name}"}
 
             # Filter by date range using Polars
             df = df.filter(

@@ -5,6 +5,9 @@ def __getattr__(name):
     if name == "OpenClawClient":
         from core.llm.openclaw_client import OpenClawClient
         return OpenClawClient
+    if name == "parse_json_response":
+        from core.llm.openclaw_client import parse_json_response
+        return parse_json_response
     if name in ("StockRatingScreener", "StockRating", "save_ratings"):
         from core.llm.risk_screener import (
             StockRatingScreener,
@@ -32,6 +35,7 @@ def __getattr__(name):
 
 __all__ = [
     "OpenClawClient",
+    "parse_json_response",
     "StockRatingScreener",
     "StockRating",
     "save_ratings",

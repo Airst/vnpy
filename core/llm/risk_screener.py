@@ -15,7 +15,7 @@ from pathlib import Path
 from typing import Any, Dict, List, Optional
 from concurrent.futures import ThreadPoolExecutor, as_completed
 
-from core.llm.openclaw_client import OpenClawClient, _extract_json
+from core.llm.openclaw_client import OpenClawClient, parse_json_response
 from core.llm.prompts import build_stock_rating_messages
 
 
@@ -173,10 +173,9 @@ class StockRatingScreener:
 
     def _parse_response(self, vt_symbol: str, raw: str, system: str = "", user: str = "") -> StockRating:
         """Parse and validate LLM JSON response. Retries once on JSON errors using original session."""
-        extracted = _extract_json(raw)
         try:
-            data = json.loads(extracted)
-        except json.JSONDecodeError as e:
+            data = parse_json_response(raw)
+        except ValueError as e:
             # Retry: continue original conversation asking LLM to fix its JSON
             data = self._retry_json_fix(raw, system, user)
             if data is None:
@@ -201,8 +200,7 @@ class StockRatingScreener:
                 temperature=0.0,
                 max_tokens=2048,
             )
-            extracted = _extract_json(retry_raw)
-            return json.loads(extracted)
+            return parse_json_response(retry_raw)
         except Exception:
             return None
 

@@ -140,6 +140,7 @@ class SignalDataRequest(BaseModel):
     start_date: str
     end_date: str
     vt_symbols: List[str] = []
+    run_id: Optional[str] = None
 
 # API Routes
 @app.get("/strategies")
@@ -196,6 +197,112 @@ def get_backtest_result(filename: str):
     except Exception as e:
         raise HTTPException(status_code=500, detail=str(e))
 
+# --- 训练轮次 (Run) 管理 API ---
+# 补全任务: 后台子进程跑 training.py --run {run_id} (避免在 web 进程内占用 GPU/内存)
+_run_task_status: Dict = {"running": False, "run_id": None, "started_at": None, "returncode": None, "message": ""}
+_run_task_lock = threading.Lock()
+
+
+def _run_completion_worker(run_id: str):
+    import subprocess
+    import sys as _sys
+    try:
+        proc = subprocess.Popen(
+            [_sys.executable, "training.py", "--run", run_id],
+            cwd=str(PROJECT_ROOT),
+        )
+        rc = proc.wait()
+        with _run_task_lock:
+            _run_task_status["running"] = False
+            _run_task_status["returncode"] = rc
+            _run_task_status["message"] = "补全完成" if rc == 0 else f"补全失败 (exit={rc}), 详见 log/run_*.log"
+    except Exception as e:
+        with _run_task_lock:
+            _run_task_status["running"] = False
+            _run_task_status["returncode"] = -1
+            _run_task_status["message"] = f"补全异常: {e}"
+
+
+@app.get("/api/runs")
+def list_runs():
+    """列出所有训练轮次摘要 + active run"""
+    try:
+        return core_service.list_runs()
+    except Exception as e:
+        raise HTTPException(status_code=500, detail=str(e))
+
+
+@app.get("/api/runs/complete/status")
+def get_run_completion_status():
+    """查询后台补全任务状态 (需注册在 /api/runs/{run_id} 之前)"""
+    with _run_task_lock:
+        return dict(_run_task_status)
+
+
+@app.get("/api/runs/{run_id}")
+def get_run_detail(run_id: str):
+    """run 详情: manifest + 窗口模型清单 + 回测引用"""
+    try:
+        return core_service.get_run_detail(run_id)
+    except FileNotFoundError:
+        raise HTTPException(status_code=404, detail=f"Run {run_id} not found")
+    except Exception as e:
+        raise HTTPException(status_code=500, detail=str(e))
+
+
+@app.get("/api/runs/{run_id}/signal/top")
+def get_run_signal_top(run_id: str, date: Optional[str] = None, n: int = 20):
+    """某日 run 信号 Top-N 排名 (date 格式 YYYY-MM-DD, 缺省取最后信号日)"""
+    try:
+        return core_service.get_run_signal_top(run_id, date, n)
+    except FileNotFoundError as e:
+        raise HTTPException(status_code=404, detail=str(e))
+    except Exception as e:
+        raise HTTPException(status_code=500, detail=str(e))
+
+
+@app.post("/api/runs/{run_id}/activate")
+def activate_run(run_id: str):
+    """设为生产 run (信号同步到生产读取路径)"""
+    try:
+        return core_service.activate_run(run_id)
+    except FileNotFoundError:
+        raise HTTPException(status_code=404, detail=f"Run {run_id} not found")
+    except Exception as e:
+        raise HTTPException(status_code=500, detail=str(e))
+
+
+@app.post("/api/runs/{run_id}/complete")
+def trigger_run_completion(run_id: str):
+    """触发该 run 的增量信号补全 (后台子进程, 同一时刻只允许一个)"""
+    if core_service.run_manager.load_manifest(run_id) is None:
+        raise HTTPException(status_code=404, detail=f"Run {run_id} not found")
+    with _run_task_lock:
+        if _run_task_status["running"]:
+            raise HTTPException(status_code=409, detail=f"已有补全任务在运行: {_run_task_status['run_id']}")
+        _run_task_status.update({
+            "running": True,
+            "run_id": run_id,
+            "started_at": datetime.now().strftime("%Y-%m-%d %H:%M:%S"),
+            "returncode": None,
+            "message": "补全中...",
+        })
+    threading.Thread(target=_run_completion_worker, args=(run_id,), daemon=True).start()
+    return {"started": run_id}
+
+
+@app.delete("/api/runs/{run_id}")
+def delete_run(run_id: str):
+    """删除 run (禁止删除 active run)"""
+    try:
+        return core_service.delete_run(run_id)
+    except FileNotFoundError:
+        raise HTTPException(status_code=404, detail=f"Run {run_id} not found")
+    except ValueError as e:
+        raise HTTPException(status_code=400, detail=str(e))
+    except Exception as e:
+        raise HTTPException(status_code=500, detail=str(e))
+
 @app.post("/api/signal_data")
 def get_signal_data(req: SignalDataRequest):
     try:
@@ -205,7 +312,8 @@ def get_signal_data(req: SignalDataRequest):
             signal_name=req.signal_name,
             start_date=start,
             end_date=end,
-            vt_symbols=req.vt_symbols
+            vt_symbols=req.vt_symbols,
+            run_id=req.run_id
         )
         return result
     except Exception as e:

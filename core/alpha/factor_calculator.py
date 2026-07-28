@@ -225,6 +225,27 @@ def ts_mean(x, d):
     
     return out.squeeze(1)
 
+def ts_ema(x, d):
+    # Exponential Moving Average along Time dim.
+    # x: (Batch, Time). alpha = 2 / (d + 1).
+    # NaN inputs do not update state; initial EMA is the first non-NaN value per series.
+    alpha = 2.0 / (d + 1.0)
+    B, T = x.shape
+    out = torch.full_like(x, float('nan'))
+    ema = torch.full((B,), float('nan'), device=x.device, dtype=x.dtype)
+    for t in range(T):
+        xt = x[:, t]
+        valid = ~torch.isnan(xt)
+        init_mask = valid & torch.isnan(ema)
+        update_mask = valid & ~torch.isnan(ema)
+        if init_mask.any():
+            ema = torch.where(init_mask, xt, ema)
+        if update_mask.any():
+            new_val = alpha * xt + (1.0 - alpha) * ema
+            ema = torch.where(update_mask, new_val, ema)
+        out[:, t] = ema
+    return out
+
 def ts_sum(x, d):
     # Robust Rolling Sum
     x_u = x.unsqueeze(1)
