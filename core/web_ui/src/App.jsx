@@ -3,7 +3,7 @@ import {
     Layout, Menu, Button, Card, DatePicker, message, Select,
     Typography, Space, Spin, InputNumber
 } from 'antd';
-import { BarChartOutlined, LineChartOutlined, TransactionOutlined, FileSearchOutlined, NotificationOutlined, ExperimentOutlined } from '@ant-design/icons';
+import { BarChartOutlined, LineChartOutlined, TransactionOutlined, FileSearchOutlined, NotificationOutlined, ExperimentOutlined, BulbOutlined } from '@ant-design/icons';
 import { Routes, Route, useNavigate, useLocation, Navigate } from 'react-router-dom';
 import dayjs from 'dayjs';
 import BacktestResults from './components/BacktestResults';
@@ -11,6 +11,7 @@ import SignalAnalysis from './components/SignalAnalysis';
 import TradeDashboard from './components/TradeDashboard';
 import LlmEvaluation from './components/LlmEvaluation';
 import NewsDashboard from './components/NewsDashboard';
+import AdvisorDashboard from './components/AdvisorDashboard';
 import RunsManagement from './components/RunsManagement';
 
 const { Header, Sider, Content } = Layout;
@@ -172,6 +173,11 @@ const App = () => {
             icon: <NotificationOutlined />
         },
         {
+            key: '/advisor',
+            label: '投资建议',
+            icon: <BulbOutlined />
+        },
+        {
             key: '/runs',
             label: '训练轮次',
             icon: <ExperimentOutlined />
@@ -313,6 +319,7 @@ const App = () => {
                         } />
                         <Route path="/llm" element={<LlmEvaluation />} />
                         <Route path="/news" element={<NewsDashboard />} />
+                        <Route path="/advisor" element={<AdvisorDashboard />} />
                         <Route path="/runs" element={<RunsManagement />} />
                     </Routes>
                 </Content>

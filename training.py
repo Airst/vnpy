@@ -176,7 +176,10 @@ def run_training(args, version: str, CalcClass, description: str) -> dict:
         gp_filter = ["validated", "testing"]
     else:
         gp_filter = None
-    calculator = CalcClass(gp_status_filter=gp_filter)
+    calc_kwargs = {}
+    if getattr(args, 'label_mode', None):
+        calc_kwargs['label_mode'] = args.label_mode
+    calculator = CalcClass(gp_status_filter=gp_filter, **calc_kwargs)
     signal_name = f"ashare_mlp_signal_{version}"
 
     print(f"Mode: {description}")
@@ -414,6 +417,7 @@ if __name__ == "__main__":
     parser.add_argument("--backend", choices=["attention", "lgb", "tabnet"], default="attention", help="ML model backend")
     parser.add_argument("--retrain-days", type=int, default=45, help="Retrain cycle in trading days (default 45)")
     parser.add_argument("--ensemble", type=int, default=1, help="Ensemble size (number of models to average, default 1)")
+    parser.add_argument("--label-mode", default=None, help="Override label mode (e.g. 3d_raw, 3d_excess, 5d)")
 
     parser.add_argument("-vt", help="vt_symbol mode")
 

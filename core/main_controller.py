@@ -16,6 +16,7 @@ from pydantic import BaseModel
 from core.core_service import CoreService
 from core.trade_service import TradeService
 from core.news_service import get_news, get_sectors, get_history, list_dates
+from core.advice_service import get_advice, list_advice_dates
 from core.logger_writer import LoggerWriter
 from vnpy.trader.logger import logger as ts_logger
 from vnpy.alpha.logger import logger
@@ -35,9 +36,58 @@ _llm_task_lock = threading.Lock()
 _news_task_status: Dict = {"running": False, "last_date": None, "last_count": 0, "last_run": None, "message": "", "error": None}
 _news_task_lock = threading.Lock()
 
+# --- Investment Advice Task State ---
+_advice_task_status: Dict = {"running": False, "last_date": None, "last_run": None, "message": "", "error": None}
+_advice_task_lock = threading.Lock()
 
-def _run_news_collection(collect_date: Optional[str] = None):
-    """后台线程：采集板块资讯。"""
+
+def _run_advice_generation(date: Optional[str] = None):
+    """后台线程：生成每日投资建议（资讯蒸馏 + 持仓扫描）。"""
+    from core.llm.advisor import run_advice
+    with _advice_task_lock:
+        _advice_task_status["running"] = True
+        _advice_task_status["message"] = "生成中..."
+        _advice_task_status["error"] = None
+    try:
+        result = run_advice(date=date)
+        with _advice_task_lock:
+            _advice_task_status["running"] = False
+            _advice_task_status["last_run"] = datetime.now().strftime("%Y-%m-%d %H:%M:%S")
+            if result.get("status") == "ok":
+                _advice_task_status["last_date"] = result.get("date")
+                _advice_task_status["message"] = f"建议已生成: {result.get('date')}"
+            else:
+                _advice_task_status["message"] = result.get("message") or result.get("status")
+                _advice_task_status["error"] = result.get("message")
+        logger.info(f"[AdviceScheduler] result: {result.get('status')}")
+    except Exception as e:
+        import traceback
+        traceback.print_exc()
+        with _advice_task_lock:
+            _advice_task_status["running"] = False
+            _advice_task_status["last_run"] = datetime.now().strftime("%Y-%m-%d %H:%M:%S")
+            _advice_task_status["message"] = f"生成失败: {e}"
+            _advice_task_status["error"] = str(e)
+        logger.error(f"[AdviceScheduler] failed: {e}")
+
+
+def _trigger_advice_generation(date: Optional[str] = None) -> bool:
+    """触发建议生成（去重：已在跑则跳过）。"""
+    with _advice_task_lock:
+        if _advice_task_status.get("running"):
+            return False
+    thread = threading.Thread(target=_run_advice_generation, args=(date,), daemon=True)
+    thread.start()
+    return True
+
+
+def _run_news_collection(collect_date: Optional[str] = None, retry_left: int = 1):
+    """后台线程：采集板块资讯。
+
+    采集失败或 0 条（如 OpenClaw 网关故障窗口，2026-07-30 09:00 档实测）时，
+    30 分钟后自动重试一次，避免当日定时采集直接落空。
+    """
+    import time as _time
     from core.llm.news_collector import run_collection
     with _news_task_lock:
         _news_task_status["running"] = True
@@ -55,6 +105,13 @@ def _run_news_collection(collect_date: Optional[str] = None):
             else:
                 _news_task_status["error"] = result.get("message")
         logger.info(f"[NewsScheduler] collection result: {result.get('status')} count={result.get('count')}")
+        # 采集成功后自动生成当日投资建议（资讯蒸馏 + 持仓动向扫描）
+        if result.get("status") == "ok":
+            _trigger_advice_generation(result.get("collect_date"))
+        elif result.get("status") == "empty" and retry_left > 0:
+            logger.warning(f"[NewsScheduler] empty result, retry in 30min (left={retry_left})")
+            _time.sleep(1800)
+            _run_news_collection(collect_date, retry_left - 1)
     except Exception as e:
         import traceback
         traceback.print_exc()
@@ -64,6 +121,10 @@ def _run_news_collection(collect_date: Optional[str] = None):
             _news_task_status["message"] = f"采集失败: {e}"
             _news_task_status["error"] = str(e)
         logger.error(f"[NewsScheduler] collection failed: {e}")
+        if retry_left > 0:
+            logger.warning(f"[NewsScheduler] failure, retry in 30min (left={retry_left})")
+            _time.sleep(1800)
+            _run_news_collection(collect_date, retry_left - 1)
 
 
 def _trigger_news_collection(collect_date: Optional[str] = None):
@@ -76,11 +137,10 @@ def _trigger_news_collection(collect_date: Optional[str] = None):
     return True
 
 
-# News scheduler: 盘前 09:00、盘后 15:30 各采集一次
+# News scheduler: 每日 09:00 采集一次（采集成功后自动触发投资建议生成）
 async def news_scheduler():
-    print("[NewsScheduler] Started. Schedules: 09:00, 15:30")
+    print("[NewsScheduler] Started. Schedules: 09:00")
     schedule.every().day.at("09:00").do(lambda: _trigger_news_collection())
-    schedule.every().day.at("15:30").do(lambda: _trigger_news_collection())
     while True:
         schedule.run_pending()
         await asyncio.sleep(5)
@@ -1060,6 +1120,119 @@ def api_collect_news(date: Optional[str] = None):
     if not triggered:
         raise HTTPException(status_code=409, detail="采集任务正在执行中")
     return {"message": "采集任务已提交", "date": date}
+
+
+# --- Investment Advice API ---
+class WatchStockRequest(BaseModel):
+    query: str          # 股票代码（6位）或名称，后端自动解析
+    note: str = ""      # 备注（如持仓成本/仓位）
+
+
+@app.get("/api/advice")
+def api_get_advice(date: Optional[str] = None):
+    """获取每日投资建议（潜力股/风险板块/持仓动向）。date 为空取最新。"""
+    return get_advice(date=date)
+
+
+@app.get("/api/advice/dates")
+def api_get_advice_dates():
+    """已生成建议的日期列表。"""
+    return {"dates": list_advice_dates()}
+
+
+@app.get("/api/advice/status")
+def api_get_advice_status():
+    """建议生成任务状态。"""
+    with _advice_task_lock:
+        return dict(_advice_task_status)
+
+
+@app.post("/api/advice/generate")
+def api_generate_advice(date: Optional[str] = None):
+    """手动触发建议生成（后台执行，立即返回）。date 为空用最新资讯日。"""
+    with _advice_task_lock:
+        if _advice_task_status.get("running"):
+            raise HTTPException(status_code=409, detail="建议生成任务正在执行中")
+    if not _trigger_advice_generation(date):
+        raise HTTPException(status_code=409, detail="建议生成任务正在执行中")
+    return {"message": "建议生成任务已提交", "date": date}
+
+
+@app.get("/api/watchlist")
+def api_get_watchlist():
+    """持仓股票池列表。"""
+    from core.llm.advisor import load_watchlist
+    return {"items": load_watchlist()}
+
+
+@app.post("/api/watchlist")
+def api_add_watch_stock(req: WatchStockRequest):
+    """添加跟单股票（代码/名称自动解析）。"""
+    from core.llm.advisor import add_watch_stock
+    result = add_watch_stock(req.query, req.note)
+    if result.get("status") == "error":
+        raise HTTPException(status_code=400, detail=result.get("message"))
+    return result
+
+
+@app.delete("/api/watchlist/{vt_symbol}")
+def api_remove_watch_stock(vt_symbol: str):
+    """移除跟单股票。"""
+    from core.llm.advisor import remove_watch_stock
+    result = remove_watch_stock(vt_symbol)
+    if result.get("status") == "not_found":
+        raise HTTPException(status_code=404, detail=result.get("message"))
+    return result
+
+
+# --- 持仓深度跟踪（行情快照 + LLM 情绪/走势研判，不依赖当日资讯）---
+_holdings_task_status: Dict = {"running": False, "last_run": None, "message": "", "error": None}
+_holdings_task_lock = threading.Lock()
+
+
+def _run_holdings_analysis(date: Optional[str] = None):
+    from core.llm.advisor import run_holdings_analysis
+    with _holdings_task_lock:
+        _holdings_task_status["running"] = True
+        _holdings_task_status["message"] = "分析中..."
+        _holdings_task_status["error"] = None
+    try:
+        result = run_holdings_analysis(date)
+        with _holdings_task_lock:
+            _holdings_task_status["running"] = False
+            _holdings_task_status["last_run"] = datetime.now().strftime("%Y-%m-%d %H:%M:%S")
+            _holdings_task_status["message"] = (
+                f"持仓分析完成: {result.get('count', 0)} 只" if result.get("status") == "ok"
+                else result.get("message", result.get("status"))
+            )
+            if result.get("status") not in ("ok", "skipped"):
+                _holdings_task_status["error"] = result.get("message")
+    except Exception as e:
+        import traceback
+        traceback.print_exc()
+        with _holdings_task_lock:
+            _holdings_task_status["running"] = False
+            _holdings_task_status["last_run"] = datetime.now().strftime("%Y-%m-%d %H:%M:%S")
+            _holdings_task_status["message"] = f"分析失败: {e}"
+            _holdings_task_status["error"] = str(e)
+        logger.error(f"[HoldingsAnalysis] failed: {e}")
+
+
+@app.post("/api/watchlist/analyze")
+def api_analyze_watchlist(date: Optional[str] = None):
+    """单独刷新持仓深度跟踪（后台执行，不重跑全量资讯蒸馏）。"""
+    with _holdings_task_lock:
+        if _holdings_task_status.get("running"):
+            raise HTTPException(status_code=409, detail="持仓分析正在执行中")
+    threading.Thread(target=_run_holdings_analysis, args=(date,), daemon=True).start()
+    return {"message": "持仓分析任务已提交", "date": date}
+
+
+@app.get("/api/watchlist/analyze/status")
+def api_analyze_watchlist_status():
+    """持仓分析任务状态。"""
+    with _holdings_task_lock:
+        return dict(_holdings_task_status)
 
 
 # Static Files Logic (Moved from controller)

@@ -437,17 +437,35 @@ const NewsCard = ({ item, onStockClick }) => {
                 </div>
             )}
 
+            {(item.stock_implications && item.stock_implications.length > 0) && (
+                <div style={{ marginBottom: 6 }}>
+                    <Text type="secondary" style={{ fontSize: 12 }}>影响标的（LLM 推导）：</Text>
+                    {item.stock_implications.map((s, i) => (
+                        <Tooltip key={i} title={s.logic || null}>
+                            <Tag
+                                color={s.direction === 'bullish' ? 'red' : 'green'}
+                                icon={s.direction === 'bullish' ? <ArrowUpOutlined /> : <ArrowDownOutlined />}
+                                style={{ marginBottom: 2 }}
+                            >
+                                {s.name}
+                            </Tag>
+                        </Tooltip>
+                    ))}
+                </div>
+            )}
+
             {(item.mapped_stocks && item.mapped_stocks.length > 0) && (
                 <div>
                     <Text type="secondary" style={{ fontSize: 12 }}>代表性个股：</Text>
                     {item.mapped_stocks.map((s, i) => (
                         <Tooltip key={i} title="点击查看 LLM 评估详情">
                             <Tag
-                                color="geekblue"
+                                color={s.direction === 'bullish' ? 'red' : s.direction === 'bearish' ? 'green' : 'geekblue'}
                                 style={{ marginBottom: 2, cursor: 'pointer' }}
                                 onClick={() => onStockClick && onStockClick(s.vt_symbol)}
                             >
                                 {s.vt_symbol} {s.name}
+                                {s.pct_chg !== null && s.pct_chg !== undefined && ` ${s.pct_chg > 0 ? '+' : ''}${s.pct_chg.toFixed(1)}%`}
                             </Tag>
                         </Tooltip>
                     ))}
